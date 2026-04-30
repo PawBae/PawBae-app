@@ -328,6 +328,13 @@ const mockupI18n = mockupI18nMap[lang] || mockupI18nMap.en;
 }
 .oc-notch.oc-notch-details #oc-content {
   overflow-y: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.oc-notch.oc-notch-details #oc-content::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
 }
 
 .oc-topbar { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; background: #000; color: #fff; }
@@ -1081,11 +1088,37 @@ function setupMockup() {
     ccTerminal.classList.remove('cc-visible');
     notch.classList.remove('oc-notch-open');
 
-    content.innerHTML = `
-      <div class="oc-step oc-details-list" data-s="1">
+    // Mirror the Details list filtering on Windows: keep only the agents
+    // that are actually wired up there (Feishu OpenClaw + Claude Code), so
+    // the rename animation runs on the Claude row and the delete animation
+    // runs on the Feishu row.
+    const isWindowsMonitor = typeof navigator !== 'undefined' && navigator.userAgent.includes('Windows');
+    const initialRenameTitle = isWindowsMonitor ? 'auth-fix' : 'codex-agent-01';
+    const renamedTitle = isWindowsMonitor ? 'claude-prod-monitor' : 'codex-prod-monitor';
+    const monitorRows = isWindowsMonitor
+      ? `
         <div class="oc-item oc-monitor-rename-row">
           <div class="oc-avatar"><img src="/images/pets/furina_working.gif" alt="" class="oc-pet-img"/><div class="oc-dot" style="background:#2ecc71;"></div></div>
-          <div class="oc-item-main"><span class="oc-title text-white oc-monitor-rename-title">codex-agent-01</span><input class="oc-monitor-rename-input" value="codex-agent-01" readonly /><span class="oc-subtitle oc-monitor-rename-subtitle">${T.subtitleMonitorWatch}</span></div>
+          <div class="oc-item-main"><span class="oc-title text-white oc-monitor-rename-title">${initialRenameTitle}</span><input class="oc-monitor-rename-input" value="${initialRenameTitle}" readonly /><span class="oc-subtitle oc-monitor-rename-subtitle">${T.subtitleMonitorWatch}</span></div>
+          <div class="oc-item-right"><span class="oc-badge" style="background:#3f211d;color:#e87a65;">Claude</span><span class="oc-time"><1m</span></div>
+        </div>
+        <div class="oc-item oc-monitor-delete-row">
+          <div class="oc-avatar"><img src="/images/pets/paimon_sleeping.gif" alt="" class="oc-pet-img"/><div class="oc-dot" style="background:#94a3b8;"></div></div>
+          <div class="oc-item-main"><span class="oc-title text-white">api-retry</span><span class="oc-subtitle">${T.subtitleIdle}</span></div>
+          <div class="oc-item-right">
+            <span class="oc-badge" style="background:#334155;color:#e2e8f0;">Feishu</span>
+            <div class="oc-monitor-time-wrap">
+              <span class="oc-time oc-monitor-delete-time">18h</span>
+              <button class="oc-monitor-delete-btn oc-monitor-delete-target" aria-label="${T.deleteSessionAria}">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
+              </button>
+            </div>
+          </div>
+        </div>`
+      : `
+        <div class="oc-item oc-monitor-rename-row">
+          <div class="oc-avatar"><img src="/images/pets/furina_working.gif" alt="" class="oc-pet-img"/><div class="oc-dot" style="background:#2ecc71;"></div></div>
+          <div class="oc-item-main"><span class="oc-title text-white oc-monitor-rename-title">${initialRenameTitle}</span><input class="oc-monitor-rename-input" value="${initialRenameTitle}" readonly /><span class="oc-subtitle oc-monitor-rename-subtitle">${T.subtitleMonitorWatch}</span></div>
           <div class="oc-item-right"><span class="oc-badge" style="background:#2a1f45;color:#c4b5fd;">Codex</span><span class="oc-time"><1m</span></div>
         </div>
         <div class="oc-item oc-monitor-delete-row">
@@ -1110,7 +1143,9 @@ function setupMockup() {
           <div class="oc-avatar"><img src="/images/pets/qiqi_sleeping.gif" alt="" class="oc-pet-img"/><div class="oc-dot" style="background:#94a3b8;"></div></div>
           <div class="oc-item-main"><span class="oc-title text-white">api-retry</span><span class="oc-subtitle">${T.subtitleIdle}</span></div>
           <div class="oc-item-right"><span class="oc-badge" style="background:#334155;color:#e2e8f0;">Feishu</span><span class="oc-time">18h</span></div>
-        </div>
+        </div>`;
+    content.innerHTML = `
+      <div class="oc-step oc-details-list" data-s="1">${monitorRows}
       </div>`;
 
     await wait(600);
@@ -1123,7 +1158,6 @@ function setupMockup() {
     const renameSubtitle = content.querySelector('.oc-monitor-rename-subtitle');
     const deleteBtn = content.querySelector('.oc-monitor-delete-target');
     const deleteRow = content.querySelector('.oc-monitor-delete-row');
-    const renamedTitle = 'codex-prod-monitor';
 
     await wait(200);
     if (listStep) showStep(listStep);
@@ -1136,7 +1170,7 @@ function setupMockup() {
 
     await wait(260);
     renameRow?.classList.add('oc-monitor-editing');
-    if (renameInput) renameInput.value = 'codex-agent-01';
+    if (renameInput) renameInput.value = initialRenameTitle;
     for (let i = 1; i <= renamedTitle.length; i++) {
       await wait(28);
       if (renameInput) renameInput.value = renamedTitle.slice(0, i);
