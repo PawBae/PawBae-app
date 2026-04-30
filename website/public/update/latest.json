@@ -13,15 +13,15 @@
       }
     },
     "windows": {
-      "version": "1.8.1",
-      "url": "https://github.com/rainnoon/oc-claw/releases/download/v1.8.1/oc-claw_1.8.1_x64-setup.exe",
+      "version": "1.8.2",
+      "url": "https://github.com/rainnoon/oc-claw/releases/download/v1.8.2/oc-claw_1.8.2_x64-setup.exe",
       "notes_i18n": {
-        "zh": "- 全新支持宠物模式",
-        "en": "- New pet mode support",
-        "ja": "- 新しくペットモードに対応",
-        "ko": "- 펫 모드 지원 추가",
-        "es": "- Nuevo soporte para el modo mascota",
-        "fr": "- Nouveau support du mode animal de compagnie"
+        "zh": "- Code 模式下解锁大看板娘",
+        "en": "- Unlock large mascot in Code mode",
+        "ja": "- コードモードで大マスコットを解放",
+        "ko": "- 코드 모드에서 대형 마스코트 해금",
+        "es": "- Mascota grande disponible en modo Code",
+        "fr": "- Grande mascotte débloquée en mode Code"
       }
     }
   }
