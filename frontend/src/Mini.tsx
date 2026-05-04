@@ -25,7 +25,15 @@ import {
   POMODORO_COINS_PER_MIN, AFFECTION_ACTIVITY_PER_10MIN, AFFECTION_MAX,
   HUNGER_ACTIVITY_PER_HOUR, HUNGER_OFFLINE_FLOOR,
   applyHeadpat,
+  loadMiniPetId,
 } from './lib/petStore'
+import {
+  loadCodexPetById, loadDefaultCodexPet,
+  petStateToCodexState,
+  type CodexPet, type CodexPetState,
+} from './lib/codexPet'
+import { MiniPetMascot } from './components/MiniPetMascot'
+import { SpritePet } from './components/SpritePet'
 
 interface CharacterMeta {
   name: string
@@ -95,6 +103,12 @@ const MAX_SLOTS = 10
 const MASCOT_SCALE_MIN = 1
 const MASCOT_SCALE_MAX = 3
 const MASCOT_BASE_SIZE = 43
+// Codex sprite-pets render very small at the legacy mascot size (192x208
+// cells scaled down to ~43px). These multipliers blow them up only at the
+// rendering layer, leaving the underlying window/hitbox math untouched so
+// large-mode video sizing keeps working.
+const MINI_SPRITE_DISPLAY_MULTIPLIER = 2
+const SESSION_SPRITE_DISPLAY_MULTIPLIER = 1.32
 
 type PetState = 'idle' | 'working' | 'compacting' | 'waiting'
 type ClaudeStatsSource = 'cc' | 'codex' | 'cursor'
@@ -244,51 +258,6 @@ function ChatList({ messages, accentColor }: { messages: { role: string; text: s
       </div>
     </div>
   )
-}
-
-/** Plays a GIF once, then freezes for `pause` ms, then repeats. */
-function IntervalGif({ src, playMs = 1300, pauseMs = 4000, style, ...props }: React.ImgHTMLAttributes<HTMLImageElement> & { playMs?: number; pauseMs?: number }) {
-  const [playing, setPlaying] = useState(true)
-  const [gifSrc, setGifSrc] = useState(src)
-  useEffect(() => {
-    setPlaying(true)
-    setGifSrc(src)
-  }, [src])
-  useEffect(() => {
-    if (playing) {
-      const t = setTimeout(() => setPlaying(false), playMs)
-      return () => clearTimeout(t)
-    } else {
-      const t = setTimeout(() => {
-        // Force GIF restart by briefly clearing src
-        setGifSrc('')
-        requestAnimationFrame(() => {
-          setGifSrc(src!)
-          setPlaying(true)
-        })
-      }, pauseMs)
-      return () => clearTimeout(t)
-    }
-  }, [playing, src, playMs, pauseMs])
-  if (!playing) return <FrozenImg src={src} style={style} {...props} />
-  return <img src={gifSrc || undefined} alt="mini" style={style} draggable={false} {...props} />
-}
-
-function FrozenImg({ src, style, ...props }: React.ImgHTMLAttributes<HTMLImageElement>) {
-  const canvasRef = useRef<HTMLCanvasElement>(null)
-  useEffect(() => {
-    if (!src) return
-    const img = new Image()
-    img.onload = () => {
-      const c = canvasRef.current
-      if (!c) return
-      c.width = img.naturalWidth
-      c.height = img.naturalHeight
-      c.getContext('2d')?.drawImage(img, 0, 0)
-    }
-    img.src = src
-  }, [src])
-  return <canvas ref={canvasRef} style={style} {...(props as any)} />
 }
 
 function getMiniGif(char: CharacterMeta | undefined, petState: PetState | boolean, useTop = false): string | undefined {
@@ -597,6 +566,20 @@ export default function Mini() {
   const [characters, setCharacters] = useState<CharacterMeta[]>([])
   const [agentCharMap, setAgentCharMap] = useState<Record<string, string>>({})
   const [miniChar, setMiniChar] = useState<CharacterMeta | null>(null)
+  // ─── Codex sprite pet (mini mode) ───
+  // miniPet is the user-selected codex pet rendered in every mini slot.
+  // walkDir captures locomotion direction (-1 left, 1 right, 0 stationary)
+  // for the main mascot's sprite state override while the native window
+  // is being moved by the walk timer.
+  const [miniPet, setMiniPet] = useState<CodexPet | null>(null)
+  const [walkDir, setWalkDir] = useState<-1 | 0 | 1>(0)
+  const walkDirRef = useRef<-1 | 0 | 1>(0)
+  const updateWalkDir = useCallback((dir: -1 | 0 | 1) => {
+    if (walkDirRef.current !== dir) {
+      walkDirRef.current = dir
+      setWalkDir(dir)
+    }
+  }, [])
 
   const [allSessions, setAllSessions] = useState<MiniSessionInfo[]>([])
   const [anySessionActive, setAnySessionActive] = useState(false)
@@ -689,7 +672,6 @@ export default function Mini() {
   const petIdleIntervalMinRef = useRef(2)
   useEffect(() => { petIdleIntervalMinRef.current = petIdleIntervalMin }, [petIdleIntervalMin])
   const [autoExpandOnTask, setAutoExpandOnTask] = useState(true)
-  const [disableSleepAnim, setDisableSleepAnim] = useState(true)
   const [largeMascot, setLargeMascot] = useState(false)
   const largeMascotRef = useRef(false)
   largeMascotRef.current = largeMascot
@@ -844,8 +826,22 @@ export default function Mini() {
     }
   }, [])
 
+  // Load the user-selected mini pet. Falls back to the builtin default
+  // pet when nothing is saved. The full pet list is loaded on demand by
+  // the settings selector (a separate fetch that hits the cached manifest).
+  const loadMiniPet = useCallback(async () => {
+    try {
+      const savedId = await loadMiniPetId()
+      const picked = (savedId ? await loadCodexPetById(savedId) : null) ?? (await loadDefaultCodexPet())
+      if (picked) setMiniPet(picked)
+    } catch (e) {
+      console.warn('[mini-pet] load failed:', e)
+    }
+  }, [])
+
   useEffect(() => {
     loadMiniChar()
+    loadMiniPet()
     load('settings.json', { defaults: {}, autoSave: true }).then(async (store) => {
       const nicks = (await store.get('session_nicknames')) as Record<string, string> | null
       if (nicks) setSessionNicknames(nicks)
@@ -1160,6 +1156,7 @@ export default function Mini() {
     }
     if (currentPetAction !== 'walk') {
       setWalkFlipped(false)
+      updateWalkDir(0)
       return
     }
     // Walk physically moves the native window via `move_mini_by`. Anything
@@ -1178,6 +1175,7 @@ export default function Mini() {
       isCreateModalOpen
     ) {
       setWalkFlipped(false)
+      updateWalkDir(0)
       return
     }
     const WALK_SPEED = 2
@@ -1224,13 +1222,15 @@ export default function Mini() {
 
       if (isToEdge) {
         // Walk straight toward the edge without flipping
-        const dir = edgeDirection || -1
+        const dir = (edgeDirection || -1) as -1 | 1
+        updateWalkDir(dir)
         invoke('move_mini_by', { dx: dir * WALK_SPEED, dy: 0 }).catch(() => {})
       } else {
         // Normal oscillating walk
         if (isAuto && totalElapsed >= AUTO_WALK_DURATION) {
           if (walkTimerRef.current) clearInterval(walkTimerRef.current)
           walkTimerRef.current = null
+          updateWalkDir(0)
           const d = petDataRef.current
           const next: PetAction = d.hunger < 30 ? 'hungry' : 'idle'
           setCurrentPetAction(next)
@@ -1242,6 +1242,7 @@ export default function Mini() {
           direction *= -1
           setWalkFlipped(prev => !prev)
         }
+        updateWalkDir(direction as -1 | 1)
         invoke('move_mini_by', { dx: direction * WALK_SPEED, dy: 0 }).catch(() => {})
       }
 
@@ -1266,6 +1267,7 @@ export default function Mini() {
           if (mascotLeft <= monitorLeft + EDGE_THRESHOLD) {
             if (walkTimerRef.current) clearInterval(walkTimerRef.current)
             walkTimerRef.current = null
+            updateWalkDir(0)
             peekEdgeRef.current = 'left'
             setCurrentPetAction('peek')
             currentPetActionRef.current = 'peek'
@@ -1273,6 +1275,7 @@ export default function Mini() {
           } else if (mascotRight >= monitorRight - EDGE_THRESHOLD) {
             if (walkTimerRef.current) clearInterval(walkTimerRef.current)
             walkTimerRef.current = null
+            updateWalkDir(0)
             peekEdgeRef.current = 'right'
             setCurrentPetAction('peek')
             currentPetActionRef.current = 'peek'
@@ -1283,6 +1286,7 @@ export default function Mini() {
     }, WALK_INTERVAL)
     return () => {
       if (walkTimerRef.current) clearInterval(walkTimerRef.current)
+      updateWalkDir(0)
     }
   }, [
     currentPetAction,
@@ -1294,6 +1298,7 @@ export default function Mini() {
     updateModalOpen,
     showOnboarding,
     isCreateModalOpen,
+    updateWalkDir,
   ])
 
   // Pet mode: auto-detect music/video from frontmost app
@@ -2117,8 +2122,6 @@ export default function Mini() {
         setAutoExpandOnTask(aet)
         autoExpandOnTaskRef.current = aet
       }
-      const dsa = await store.get('disable_sleep_anim')
-      if (typeof dsa === 'boolean') setDisableSleepAnim(dsa)
       const lm = await store.get('large_mascot')
       if (typeof lm === 'boolean' && appModeRef.current !== 'pet') {
         setLargeMascot(lm)
@@ -2672,12 +2675,74 @@ export default function Mini() {
         }
         return
       }
-      // Coding mode: always expand immediately on click, independent of mascot size.
-      // This avoids pointerup/drag timing races on Windows.
+      // Coding mode collapsed mascot: drag to reposition, click (no movement)
+      // to expand the panel. Drag direction is mirrored into the codex
+      // sprite via updateWalkDir so the pet visibly runs while moving.
       if (!moveModeRef.current && appModeRef.current !== 'pet') {
-        hoverExpandedRef.current = false
-        setCompletionSessionId(null)
-        expand()
+        if (e.button !== 0 || e.ctrlKey || collapsingRef.current) return
+        e.preventDefault()
+        mascotDragActiveRef.current = true
+        const startX = e.screenX
+        const startY = e.screenY
+        let lastX = e.screenX
+        let lastY = e.screenY
+        let dragging = false
+        const pid = e.pointerId
+        const DRAG_THRESHOLD = 3
+
+        const onMove = (ev: PointerEvent) => {
+          if (ev.pointerId !== pid) return
+          if (!dragging) {
+            if (Math.abs(ev.screenX - startX) + Math.abs(ev.screenY - startY) >= DRAG_THRESHOLD) {
+              dragging = true
+            } else {
+              return
+            }
+          }
+          const dx = ev.screenX - lastX
+          const dy = ev.screenY - lastY
+          lastX = ev.screenX
+          lastY = ev.screenY
+          if (dx !== 0 || dy !== 0) {
+            invoke('move_mini_by', { dx, dy }).catch(() => {})
+            if (dx !== 0) updateWalkDir(dx > 0 ? 1 : -1)
+          }
+        }
+
+        const cleanup = () => {
+          mascotDragActiveRef.current = false
+          updateWalkDir(0)
+          window.removeEventListener('pointermove', onMove)
+          window.removeEventListener('pointerup', onUp)
+          window.removeEventListener('pointercancel', onCancel)
+        }
+
+        const onCancel = (ev: PointerEvent) => {
+          if (ev.pointerId !== pid) return
+          cleanup()
+        }
+
+        const onUp = (ev: PointerEvent) => {
+          if (ev.pointerId !== pid) return
+          cleanup()
+          if (!dragging) {
+            hoverExpandedRef.current = false
+            setCompletionSessionId(null)
+            expand()
+          } else {
+            invoke('get_mini_origin').then(async (pos) => {
+              const [x, y] = pos as [number, number]
+              customPosRef.current = { x, y }
+              const store = await load('settings.json', { defaults: {}, autoSave: true })
+              await store.set('mini_custom_pos', { x, y })
+              await store.save()
+            }).catch(() => {})
+          }
+        }
+
+        window.addEventListener('pointermove', onMove)
+        window.addEventListener('pointerup', onUp, { once: true })
+        window.addEventListener('pointercancel', onCancel, { once: true })
         return
       }
       if (e.button !== 0 || e.ctrlKey || collapsingRef.current) return
@@ -2859,11 +2924,15 @@ export default function Mini() {
         const dy = ev.screenY - lastY
         lastX = ev.screenX
         lastY = ev.screenY
-        if (dx !== 0 || dy !== 0) invoke('move_mini_by', { dx, dy })
+        if (dx !== 0 || dy !== 0) {
+          invoke('move_mini_by', { dx, dy })
+          if (dx !== 0) updateWalkDir(dx > 0 ? 1 : -1)
+        }
       }
 
       const cleanup = () => {
         mascotDragActiveRef.current = false
+        updateWalkDir(0)
         if (largeMascotRef.current && largePetActionRef.current === 'grasp') {
           setLargePetAction(null)
           largePetActionRef.current = null
@@ -2907,7 +2976,7 @@ export default function Mini() {
       window.addEventListener('pointerup', onUp)
       window.addEventListener('pointercancel', onCancel)
     },
-    [expand],
+    [expand, updateWalkDir],
   )
 
   const enterMoveMode = useCallback(async () => {
@@ -3296,7 +3365,14 @@ export default function Mini() {
   const hasWorking = anySessionActive || Object.values(healthMap).some(Boolean) || claudeWorking || claudeCompacting || claudeWaiting
   // Priority: waiting > compacting > working > idle
   const mainPetState: PetState = claudeWaiting ? 'waiting' : claudeCompacting ? 'compacting' : hasWorking ? 'working' : 'idle'
-  const miniGif = getMiniGif(miniChar ?? undefined, mainPetState, true)
+  // Sprite resting state for the main mascot. Walking direction (set by
+  // the walk timer) overrides the working/waiting/idle mapping so the pet
+  // visibly runs left/right while the native window is moving.
+  const mainSpriteState: CodexPetState = walkDir === 1
+    ? 'run-right'
+    : walkDir === -1
+      ? 'run-left'
+      : petStateToCodexState(mainPetState)
   const fallbackLargeActions = useMemo(() => {
     const c = characters.find((ch) => ch.largeActions && Object.keys(ch.largeActions).length > 0)
     return c?.largeActions
@@ -3546,8 +3622,8 @@ export default function Mini() {
   const collapsedMascotSize = Math.round(MASCOT_BASE_SIZE * mascotScale)
   const collapsedPlaceholderRadius = Math.round(10 * mascotScale)
   const collapsedPlaceholderFontSize = Math.max(16, Math.round(16 * mascotScale))
-  const collapsedStatusSize = largeMascot ? 6 : 8
-  const collapsedStatusBorder = largeMascot ? 1.1 : 1.5
+  const collapsedStatusSize = largeMascot ? 5 : 6
+  const collapsedStatusBorder = largeMascot ? 1.1 : 1.2
   const largeMascotVisualSize = collapsedMascotSize * largeMascotScale
 
   useEffect(() => {
@@ -3626,7 +3702,7 @@ export default function Mini() {
             height: '100%',
             position: 'relative',
             display: (appMode === 'pet' && largeMascot) ? 'block' : 'flex',
-            alignItems: (appMode === 'pet' && largeMascot) ? undefined : 'flex-start',
+            alignItems: (appMode === 'pet' && largeMascot) ? undefined : 'center',
             justifyContent: (appMode === 'pet' && largeMascot) ? undefined : 'center',
             background: (viewMode === 'efficiency' && appMode !== 'pet') ? 'rgba(0,0,0,0.01)' : undefined,
             pointerEvents: 'auto',
@@ -3777,14 +3853,22 @@ export default function Mini() {
                   />
                 )
               })}
-            </div>) : miniGif ? (
-              disableSleepAnim && mainPetState === 'idle' ? (
-                <FrozenImg src={miniGif} style={{ width: collapsedMascotSize, height: collapsedMascotSize, objectFit: 'contain', pointerEvents: 'none' }} draggable={false} />
-              ) : mainPetState === 'compacting' ? (
-                <IntervalGif src={miniGif} style={{ width: collapsedMascotSize, height: collapsedMascotSize, objectFit: 'contain', pointerEvents: 'none' }} />
-              ) : (
-                <img src={miniGif} alt="mini" style={{ width: collapsedMascotSize, height: collapsedMascotSize, objectFit: 'contain', pointerEvents: 'none' }} draggable={false} />
-              )
+            </div>) : miniPet ? (
+              <div
+                style={{
+                  position: 'relative',
+                  width: collapsedMascotSize * MINI_SPRITE_DISPLAY_MULTIPLIER,
+                  height: Math.round(collapsedMascotSize * MINI_SPRITE_DISPLAY_MULTIPLIER * (208 / 192)),
+                  pointerEvents: 'none',
+                }}
+              >
+                <MiniPetMascot
+                  pet={miniPet}
+                  baseState={mainSpriteState}
+                  size={collapsedMascotSize * MINI_SPRITE_DISPLAY_MULTIPLIER}
+                  enableHoverJump
+                />
+              </div>
             ) : (
               <div
                 style={{
@@ -3806,8 +3890,8 @@ export default function Mini() {
               <div
                 style={{
                   position: 'absolute',
-                  bottom: 0,
-                  right: 0,
+                  bottom: 8,
+                  right: 10,
                   width: collapsedStatusSize,
                   height: collapsedStatusSize,
                   borderRadius: '50%',
@@ -4203,12 +4287,10 @@ export default function Mini() {
                                 const agent = agents.find((a) => a.id === s.agentId)
                                 const seq = (agentSeqCount[s.agentId] = (agentSeqCount[s.agentId] || 0) + 1)
                                 const agentName = `${agent?.identityEmoji || ''} ${agent?.identityName || s.agentId}`.trim()
-                                const charName = agentCharMap[s.agentId]
-                                const charMeta = characters.find((c) => c.name === charName)
                                 const recentlyDone = !s.active && s.updatedAt && Date.now() - s.updatedAt < 5 * 60 * 1000
                                 const showCharGif = s.active || recentlyDone
                                 const petState: PetState = s.active ? 'working' : 'idle'
-                                const gif = charMeta ? getMiniGif(charMeta, petState) : undefined
+                                const ocSpriteState: CodexPetState = petStateToCodexState(petState)
                                 const title = `${agentName} #${seq}`
                                 const subtitle = s.lastUserMsg || ''
                                 const timeAgo = formatTimeAgo(s.updatedAt)
@@ -4259,21 +4341,21 @@ export default function Mini() {
                                         className="relative shrink-0 w-10 h-10 flex items-center justify-center cursor-pointer"
                                       >
                                         <div className="absolute inset-0" style={{ left: -16 }} />
-                                        {gif ? (
-                                          <img src={gif} alt="" className="w-10 h-10 object-contain" style={{ imageRendering: 'pixelated' }} draggable={false} />
+                                        {miniPet ? (
+                                          <SpritePet pet={miniPet} state={ocSpriteState} size={Math.round(40 * SESSION_SPRITE_DISPLAY_MULTIPLIER)} />
                                         ) : (
                                           <span className="text-white/40 text-lg">{agent?.identityEmoji || '?'}</span>
                                         )}
                                         <div
                                           style={{
                                             position: 'absolute',
-                                            bottom: 0,
-                                            right: 0,
-                                            width: 8,
-                                            height: 8,
+                                            bottom: -2,
+                                            right: -2,
+                                            width: 6,
+                                            height: 6,
                                             borderRadius: '50%',
                                             background: recentlyDone ? '#94a3b8' : '#2ecc71',
-                                            border: '1.5px solid rgba(0,0,0,0.3)',
+                                            border: '1.2px solid rgba(0,0,0,0.3)',
                                           }}
                                         />
                                       </div>
@@ -4371,10 +4453,8 @@ export default function Mini() {
                                 const isWorking = isActive || isWaiting || isCompacting
                                 const recentlyDone = !isWorking && cs.status === 'stopped' && cs.updatedAt && Date.now() - cs.updatedAt < 5 * 60 * 1000
                                 const showCharGif = isWorking || recentlyDone
-                                const ci = 'claudeIdx' in item ? (item as { claudeIdx: number }).claudeIdx : 0
-                                const charMeta = characters.find((c) => c.name === charQueue[ci % charQueue.length])
-                                const petState = isWaiting ? 'waiting' : isCompacting ? 'compacting' : isActive ? 'working' : 'idle'
-                                const gif = charMeta ? getMiniGif(charMeta, petState) : undefined
+                                const petState: PetState = isWaiting ? 'waiting' : isCompacting ? 'compacting' : isActive ? 'working' : 'idle'
+                                const claudeSpriteState: CodexPetState = petStateToCodexState(petState)
                                 const subtitle = cs.userPrompt || ''
                                 const timeAgo = formatTimeAgo(cs.updatedAt || 0)
                                 const isCursorSource = cs.source === 'cursor'
@@ -4420,21 +4500,21 @@ export default function Mini() {
                                           className="relative shrink-0 w-10 h-10 flex items-center justify-center cursor-pointer"
                                         >
                                           <div className="absolute inset-0" style={{ left: -16 }} />
-                                          {gif ? (
-                                            <img src={gif} alt="" className="w-10 h-10 object-contain" style={{ imageRendering: 'pixelated' }} draggable={false} />
+                                          {miniPet ? (
+                                            <SpritePet pet={miniPet} state={claudeSpriteState} size={Math.round(40 * SESSION_SPRITE_DISPLAY_MULTIPLIER)} />
                                           ) : (
                                             <span className="text-white/40 text-lg">🤖</span>
                                           )}
                                           <div
                                             style={{
                                               position: 'absolute',
-                                              bottom: 0,
-                                              right: 0,
-                                              width: 8,
-                                              height: 8,
+                                              bottom: -2,
+                                              right: -2,
+                                              width: 6,
+                                              height: 6,
                                               borderRadius: '50%',
                                               background: isWaiting ? '#f59e0b' : recentlyDone ? '#94a3b8' : '#2ecc71',
-                                              border: '1.5px solid rgba(0,0,0,0.3)',
+                                              border: '1.2px solid rgba(0,0,0,0.3)',
                                             }}
                                           />
                                         </div>
@@ -4856,38 +4936,29 @@ export default function Mini() {
                         </>
                       )}
 
-                      {sessionSlots.length === 0 &&
-                        (() => {
-                          const emptyGif = getMiniGif(miniChar ?? undefined, 'idle', true)
-                          return (
-                            <div
-                              style={{
-                                position: 'absolute',
-                                inset: 0,
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                zIndex: 2,
-                              }}
-                            >
-                              {emptyGif ? (
-                                <img
-                                  src={emptyGif}
-                                  style={{
-                                    width: 68,
-                                    height: 68,
-                                    objectFit: 'contain',
-                                    animation: 'bob 2s ease-in-out infinite',
-                                    opacity: 0.8,
-                                  }}
-                                  draggable={false}
-                                />
-                              ) : (
-                                <span style={{ color: 'rgba(255,255,255,0.3)', fontSize: 11 }}>{t('mini.waitingForAgents')}</span>
-                              )}
-                            </div>
-                          )
-                        })()}
+                      {sessionSlots.length === 0 && (
+                        <div
+                          style={{
+                            position: 'absolute',
+                            inset: 0,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            zIndex: 2,
+                          }}
+                        >
+                          {miniPet ? (
+                            <SpritePet
+                              pet={miniPet}
+                              state="idle"
+                              size={Math.round(68 * SESSION_SPRITE_DISPLAY_MULTIPLIER)}
+                              style={{ animation: 'bob 2s ease-in-out infinite', opacity: 0.8 }}
+                            />
+                          ) : (
+                            <span style={{ color: 'rgba(255,255,255,0.3)', fontSize: 11 }}>{t('mini.waitingForAgents')}</span>
+                          )}
+                        </div>
+                      )}
 
                       {(() => {
                         const shuffled = sessionSlots
@@ -4898,7 +4969,8 @@ export default function Mini() {
                           .sort((a, b) => ((a.seed * 7 + 13) % 97) - ((b.seed * 7 + 13) % 97))
 
                         return shuffled.map(({ slot, seed }, sortedIdx) => {
-                          const gif = getMiniGif(slot.char, slot.petState ?? (slot.isWorking ? 'working' : 'idle'), true)
+                          const slotPetState: PetState = slot.petState ?? (slot.isWorking ? 'working' : 'idle')
+                          const slotSpriteState: CodexPetState = petStateToCodexState(slotPetState)
                           const singleRow = sessionSlots.length <= 6
                           const row = sortedIdx < 6 ? 0 : 1
                           const col = row === 0 ? sortedIdx : sortedIdx - 6
@@ -4942,8 +5014,8 @@ export default function Mini() {
                               }}
                             >
                               <div style={{ position: 'relative' }}>
-                                {gif ? (
-                                  <img src={gif} alt={slot.char?.name} style={{ width: 56, height: 56, objectFit: 'contain' }} draggable={false} />
+                                {miniPet ? (
+                                  <SpritePet pet={miniPet} state={slotSpriteState} size={Math.round(56 * SESSION_SPRITE_DISPLAY_MULTIPLIER)} />
                                 ) : (
                                   <div
                                     style={{

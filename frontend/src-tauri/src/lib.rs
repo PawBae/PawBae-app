@@ -1475,6 +1475,12 @@ async fn scan_characters(app: tauri::AppHandle) -> Result<serde_json::Value, Str
         };
         for entry in entries.filter_map(|e| e.ok()) {
             if !entry.path().is_dir() { continue; }
+            // Skip codex sprite-pet directories. Those carry `pet.json` +
+            // `spritesheet.{webp,png}` and are consumed by the frontend's
+            // mini-mode pet loader directly, not by this anime-character
+            // scan. Without this guard the 9 builtin codex pets would
+            // pollute the IP/character lists with empty entries.
+            if entry.path().join("pet.json").is_file() { continue; }
             let name = entry.file_name().to_string_lossy().to_string();
 
             let mut work_gifs = vec![];
@@ -3142,8 +3148,12 @@ fn collapsed_x(sx: f64, sw: f64, win_w: f64, position: &str, notch_offset: f64) 
     }
 }
 
-const COLLAPSED_MASCOT_BASE_W: f64 = 60.0;
-const COLLAPSED_MASCOT_BASE_H: f64 = 45.0;
+// Bumped from 60x45 so the codex sprite-pet (rendered at ~86x93 CSS px due
+// to the MINI_SPRITE_DISPLAY_MULTIPLIER=2 used in Mini.tsx) fits entirely
+// inside the native window. Without the extra room the sprite gets clipped
+// at the bottom/right edges of the OS-level mascot window.
+const COLLAPSED_MASCOT_BASE_W: f64 = 96.0;
+const COLLAPSED_MASCOT_BASE_H: f64 = 96.0;
 const MASCOT_SCALE_MIN: f64 = 1.0;
 const MASCOT_SCALE_MAX: f64 = 3.0;
 const LARGE_MASCOT_SIZE_MULTIPLIER: f64 = 3.0;

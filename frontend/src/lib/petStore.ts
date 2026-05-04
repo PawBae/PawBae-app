@@ -150,6 +150,23 @@ export async function saveAppMode(mode: AppMode): Promise<void> {
   await store.save()
 }
 
+// ─── Mini pet selection (codex-style sprite pet) ───
+//
+// Stores the user-selected codex pet id used for the mini mascot. This is
+// independent of `mini_character` (which still drives the large/IP-based
+// character selection UI).
+export async function loadMiniPetId(): Promise<string | null> {
+  const store = await getPetStore()
+  const v = await store.get('mini_pet_id')
+  return typeof v === 'string' && v ? v : null
+}
+
+export async function saveMiniPetId(id: string): Promise<void> {
+  const store = await getPetStore()
+  await store.set('mini_pet_id', id)
+  await store.save()
+}
+
 // ─── App-mode onboarding version gate ───
 //
 // Bump this whenever we want to force existing users through the mode-pick
