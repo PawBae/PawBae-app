@@ -411,7 +411,6 @@ export function PetPicker({
                 <CreateStepBadge n={1} />
                 <div className="flex flex-col items-start gap-0.5 flex-1 min-w-0">
                   <span className="text-sm text-white/85 font-medium">前往 Codex Pets 下载</span>
-                  <span className="text-[11px] text-white/40 truncate">{validPetdexUrl}</span>
                 </div>
                 <ExternalLink className="w-4 h-4 text-white/40 shrink-0" strokeWidth={2.5} />
               </button>
