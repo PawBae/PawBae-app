@@ -7847,68 +7847,42 @@ fn reassert_mini_floating(app: &tauri::AppHandle) {
 }
 
 #[tauri::command]
+async fn reassert_floating(app: tauri::AppHandle) -> Result<(), String> {
+    reassert_mini_floating(&app);
+    Ok(())
+}
+
+#[tauri::command]
 async fn pick_codex_pet_folder(app: tauri::AppHandle) -> Result<Option<String>, String> {
-    #[cfg(target_os = "macos")]
-    {
-        let script = "POSIX path of (choose folder with prompt \"选择 codex 宠物文件夹\")";
-        let out = std::process::Command::new("osascript")
-            .args(["-e", script])
-            .output()
-            .map_err(|e| e.to_string())?;
-        // Whether the user picked or cancelled, osascript briefly steals
-        // focus and the system can demote our floating mini window back to
-        // the normal NSWindow level. Re-apply level 27 (status) and
-        // reassert always-on-top so the settings panel doesn't visually
-        // sink under other apps.
-        reassert_mini_floating(&app);
-        if !out.status.success() {
-            // User cancelled — osascript exits non-zero. Treat as None.
-            return Ok(None);
-        }
-        let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
-        if path.is_empty() {
-            return Ok(None);
-        }
-        Ok(Some(path))
+    use tauri::Manager;
+    use tauri_plugin_dialog::DialogExt;
+
+    // Use the official tauri-plugin-dialog so we get a real native folder
+    // picker on every platform: NSOpenPanel on macOS, IFileOpenDialog
+    // (modern explorer-style) on Windows, GTK on Linux.
+    //
+    // Bind the dialog to the mini window as its parent. Without an explicit
+    // owner the dialog renders as a peer top-level window that sits below
+    // our always-on-top mini frame on Windows (the user sees the picker
+    // visually behind the settings panel on the second open). With a parent
+    // window, the OS layers the dialog above its owner.
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let mut builder = app.dialog().file().set_title("选择 codex 宠物文件夹");
+    if let Some(win) = app.get_webview_window("mini") {
+        builder = builder.set_parent(&win);
     }
-    #[cfg(target_os = "windows")]
-    {
-        // Use the legacy WinForms FolderBrowserDialog (the only thing
-        // available without extra deps on PowerShell 5.1 / .NET Framework).
-        // Defaults are bad: RootFolder is Desktop, so the picker only shows
-        // a single "桌面" node — users can't see other drives. We override
-        // RootFolder to MyComputer so all drives appear at the root, and
-        // pre-select the user's profile dir so the dialog opens at a sane
-        // location instead of an empty tree.
-        let script = r#"
-            Add-Type -AssemblyName System.Windows.Forms
-            $d = New-Object System.Windows.Forms.FolderBrowserDialog
-            $d.Description = "Select codex pet folder"
-            $d.UseDescriptionForTitle = $true
-            $d.RootFolder = [System.Environment+SpecialFolder]::MyComputer
-            $d.SelectedPath = [System.Environment]::GetFolderPath('UserProfile')
-            $d.ShowNewFolderButton = $true
-            if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
-                Write-Output $d.SelectedPath
-            }
-        "#;
-        let out = std::process::Command::new("powershell")
-            .args(["-NoProfile", "-STA", "-Command", script])
-            .output()
-            .map_err(|e| e.to_string())?;
-        reassert_mini_floating(&app);
-        let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
-        if path.is_empty() {
-            Ok(None)
-        } else {
-            Ok(Some(path))
-        }
-    }
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-    {
-        let _ = app;
-        Err("folder picker not implemented on this platform".into())
-    }
+    builder.pick_folder(move |path| {
+        let _ = tx.send(path);
+    });
+    let picked = rx.await.map_err(|e| e.to_string())?;
+    let result = picked.and_then(|p| p.into_path().ok())
+        .map(|p| p.to_string_lossy().into_owned());
+
+    // The dialog briefly steals focus and the OS can demote our floating
+    // mini window back to the normal level. Re-apply always-on-top so the
+    // settings panel doesn't visually sink under other apps.
+    reassert_mini_floating(&app);
+    Ok(result)
 }
 
 /// Open `~/.codex/pets` in the platform's file manager. Creates the
@@ -11494,6 +11468,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_store::Builder::default().build())
+        .plugin(tauri_plugin_dialog::init())
         .register_uri_scheme_protocol("localasset", |ctx, req| {
             let raw_path = req.uri().path();
             let path = percent_decode_str(raw_path).decode_utf8_lossy();
@@ -11805,7 +11780,7 @@ pub fn run() {
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![get_status, send_chat, open_detail_panel, save_character_gif, delete_character_assets, delete_character_gif, get_agents, get_health, get_agent_metrics, interrupt_agent, scan_characters, get_agent_extra_info, open_mini, close_mini, set_mini_expanded, set_mini_size, set_efficiency_hover_tracking, resize_mini_height, move_mini_by, get_mini_origin, get_mini_monitor_rect, set_mini_origin, set_ime_mode, get_agent_sessions, get_session_preview, get_session_messages, get_active_sessions, proxy_post, play_sound, get_claude_sessions, get_claude_conversation, install_claude_hooks, install_cursor_hooks, remove_claude_session, resolve_claude_permission, get_claude_stats, open_url, activate_app, focus_cursor_terminal, check_ax_permission, request_ax_permission, jump_to_claude_terminal, check_for_update, run_update, close_ssh, read_local_file, list_backgrounds, save_background, get_background_data, exit_app, get_ssh_key_info, reset_ssh, get_ui_scale, list_custom_codex_pets, open_codex_pets_dir, import_codex_pet, pick_codex_pet_folder, spawn_demo_mascot, close_demo_mascot, close_demo_mascots, debug_log, update_tray_language, set_pet_mode_window, set_pet_context_menu, set_pet_pomodoro_active, get_now_playing, get_system_idle_time])
+        .invoke_handler(tauri::generate_handler![get_status, send_chat, open_detail_panel, save_character_gif, delete_character_assets, delete_character_gif, get_agents, get_health, get_agent_metrics, interrupt_agent, scan_characters, get_agent_extra_info, open_mini, close_mini, set_mini_expanded, set_mini_size, set_efficiency_hover_tracking, resize_mini_height, move_mini_by, get_mini_origin, get_mini_monitor_rect, set_mini_origin, set_ime_mode, get_agent_sessions, get_session_preview, get_session_messages, get_active_sessions, proxy_post, play_sound, get_claude_sessions, get_claude_conversation, install_claude_hooks, install_cursor_hooks, remove_claude_session, resolve_claude_permission, get_claude_stats, open_url, activate_app, focus_cursor_terminal, check_ax_permission, request_ax_permission, jump_to_claude_terminal, check_for_update, run_update, close_ssh, read_local_file, list_backgrounds, save_background, get_background_data, exit_app, get_ssh_key_info, reset_ssh, get_ui_scale, list_custom_codex_pets, open_codex_pets_dir, import_codex_pet, pick_codex_pet_folder, reassert_floating, spawn_demo_mascot, close_demo_mascot, close_demo_mascots, debug_log, update_tray_language, set_pet_mode_window, set_pet_context_menu, set_pet_pomodoro_active, get_now_playing, get_system_idle_time])
         .manage(ActiveAgentPid { pid: Mutex::new(None) })
         .manage(ClaudeState { sessions: Arc::new(Mutex::new(HashMap::new())), pending_permissions: Arc::new(Mutex::new(HashMap::new())) })
         .run(tauri::generate_context!())

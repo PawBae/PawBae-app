@@ -84,6 +84,9 @@ export function PetPicker({
   const createSectionRef = useRef<HTMLDivElement | null>(null)
   const [importing, setImporting] = useState(false)
   const [importError, setImportError] = useState<string | null>(null)
+  const debugToTerminal = useCallback((scope: string, msg: string) => {
+    invoke('debug_log', { scope, msg }).catch(() => {})
+  }, [])
 
   const loadAll = useCallback(async () => {
     clearCodexPetCache()
@@ -115,14 +118,17 @@ export function PetPicker({
   const handlePickFolder = useCallback(async () => {
     if (importing) return
     setImportError(null)
+    debugToTerminal('picker', 'handlePickFolder start')
     onNativeDialogStart?.()
     try {
       const picked = (await invoke('pick_codex_pet_folder')) as string | null
+      debugToTerminal('picker', picked ? `picked path: ${picked}` : 'picked path: <cancel>')
       if (!picked) return
       setImporting(true)
       try {
         await invoke('import_codex_pet', { srcPath: picked })
         await loadAll()
+        debugToTerminal('picker', 'import_codex_pet success')
       } catch (e: unknown) {
         console.warn('[PetPicker] import failed:', e)
         const msg =
@@ -132,18 +138,22 @@ export function PetPicker({
               ? e.message
               : 'import failed'
         setImportError(msg)
+        debugToTerminal('picker', `import_codex_pet failed: ${msg}`)
       } finally {
         setImporting(false)
       }
     } catch (e) {
       console.warn('[PetPicker] picker failed:', e)
+      const msg = e instanceof Error ? e.message : String(e)
+      debugToTerminal('picker', `pick_codex_pet_folder failed: ${msg}`)
     } finally {
       // Hold the suppression flag for ~1.5s after the dialog returns to
       // cover macOS-synthesised clicks/blur events that arrive shortly
       // after the OS hands focus back.
+      debugToTerminal('picker', 'schedule onNativeDialogEnd after 1500ms')
       setTimeout(() => onNativeDialogEnd?.(), 1500)
     }
-  }, [importing, loadAll, onNativeDialogStart, onNativeDialogEnd])
+  }, [importing, loadAll, onNativeDialogStart, onNativeDialogEnd, debugToTerminal])
 
   const selectedPet =
     builtins.find((p) => p.id === selectedId) ||

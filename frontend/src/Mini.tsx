@@ -534,6 +534,59 @@ export default function Mini() {
   // they don't share the auto-reset-on-focus logic used by HTML
   // <input type="file"> clicks. Owned end-to-end by PetPicker.
   const nativeDialogActiveRef = useRef(false)
+  // Tracks only the picker opened from settings page import flow.
+  // While true, any outside-click/blur close path must be blocked.
+  const settingsPickerOpenRef = useRef(false)
+  // Windows may deliver delayed blur/click events right after the native
+  // picker closes. Keep close handlers blocked for a short grace window.
+  const settingsPickerCloseGraceUntilRef = useRef(0)
+  // React-driven mirror of the ref. Used to render the click-outside
+  // overlay as `pointer-events: none` while a native folder picker is in
+  // flight, so even if the OS routes a click through to our webview
+  // (e.g. the dialog has only an "owner" relationship instead of true
+  // modal blocking), it cannot reach the overlay's onClick and tear down
+  // the settings panel.
+  const [nativeDialogActive, _setNativeDialogActive] = useState(false)
+  const setNativeDialogActive = useCallback((v: boolean) => {
+    nativeDialogActiveRef.current = v
+    _setNativeDialogActive(v)
+  }, [])
+  const debugToTerminal = useCallback((scope: string, msg: string) => {
+    invoke('debug_log', { scope, msg }).catch(() => {})
+  }, [])
+  const isSettingsPickerBlockingClose = useCallback(
+    () =>
+      settingsPickerOpenRef.current ||
+      nativeDialogActiveRef.current ||
+      Date.now() < settingsPickerCloseGraceUntilRef.current,
+    [],
+  )
+  useEffect(() => {
+    debugToTerminal('state', `settingsMode=${settingsMode}`)
+  }, [settingsMode, debugToTerminal])
+  useEffect(() => {
+    debugToTerminal('state', `showSettingsOverlay=${showSettingsOverlay}`)
+  }, [showSettingsOverlay, debugToTerminal])
+  useEffect(() => {
+    debugToTerminal('state', `settingsTransitioning=${settingsTransitioning}`)
+  }, [settingsTransitioning, debugToTerminal])
+  useEffect(() => {
+    debugToTerminal('state', `hiding=${hiding}`)
+  }, [hiding, debugToTerminal])
+  useEffect(() => {
+    debugToTerminal(
+      'dialog',
+      `nativeDialogActive=${nativeDialogActive} settingsMode=${settingsModeRef.current} transitioning=${settingsTransitioningRef.current}`,
+    )
+  }, [nativeDialogActive, debugToTerminal])
+  useEffect(() => {
+    // Safety net: if any close path leaves `hiding` stuck true while settings
+    // is already fully closed, force the mascot tree visible again.
+    if (hiding && !settingsMode && !showSettingsOverlay && !settingsTransitioning) {
+      debugToTerminal('state', 'recover hiding=false (settings fully closed)')
+      setHiding(false)
+    }
+  }, [hiding, settingsMode, showSettingsOverlay, settingsTransitioning, debugToTerminal])
   const [settingsNav, setSettingsNav] = useState<'pairing' | 'settings'>('pairing')
   const [isCreateModalOpen, _setIsCreateModalOpen] = useState(false)
   const isCreateModalOpenRef = useRef(false)
@@ -2885,12 +2938,16 @@ export default function Mini() {
     // Defense in depth: while a native folder picker is in flight (or its
     // post-close grace window is still active), don't tear down the
     // expanded/settings UI underneath it.
-    if (nativeDialogActiveRef.current) return
+    if (isSettingsPickerBlockingClose()) {
+      debugToTerminal('close', 'collapse blocked: settings picker active')
+      return
+    }
     // The enter/exit-settings transition resizes the native window which
     // can momentarily steal focus → onBlur → collapse. Skip collapse
     // while we're mid-transition so the UI we're building isn't torn
     // down before it appears.
     if (settingsTransitioningRef.current) return
+    debugToTerminal('close', 'collapse proceed')
     collapsingRef.current = true
     hoverExpandedRef.current = false
     setCompletionSessionId(null)
@@ -2911,6 +2968,8 @@ export default function Mini() {
     }
     const delay = isWindowsPlatform ? 150 : wasSettings ? 280 : 480
     setTimeout(async () => {
+      debugToTerminal('close', `collapse timeout fired (wasSettings=${wasSettings})`)
+      settingsPickerOpenRef.current = false
       settingsModeRef.current = false
       setSettingsMode(false)
       setShowSettingsOverlay(false)
@@ -2974,7 +3033,7 @@ export default function Mini() {
         settingsTransitioningRef.current = false
       }, 300)
     }, delay)
-  }, [fetchAgents, restoreCollapsedMascotPosition])
+  }, [fetchAgents, restoreCollapsedMascotPosition, debugToTerminal, isSettingsPickerBlockingClose])
 
   // ── Efficiency-mode notch hover tracking (native cursor polling) ──
   // On macOS the mini window sits in the menu-bar / notch area where the
@@ -3106,6 +3165,7 @@ export default function Mini() {
 
   const enterSettings = useCallback(async () => {
     if (settingsModeRef.current || settingsTransitioningRef.current) return
+    settingsPickerOpenRef.current = false
     hoverExpandedRef.current = false
     settingsTransitioningRef.current = true
     setSelectedAgentId(null)
@@ -3142,7 +3202,12 @@ export default function Mini() {
     // Defense in depth: while a native folder picker is in flight (or its
     // post-close grace window is still active), suppress any path that
     // would close settings — synthesized clicks, blur events, etc.
-    if (nativeDialogActiveRef.current) return
+    if (isSettingsPickerBlockingClose()) {
+      debugToTerminal('close', 'exitSettings blocked: settings picker active')
+      return
+    }
+    debugToTerminal('close', 'exitSettings proceed')
+    setIsCreateModalOpen(false)
     settingsTransitioningRef.current = true
     setShowSettingsOverlay(false)
     try {
@@ -3201,22 +3266,31 @@ export default function Mini() {
       }
     } finally {
       // Always clear transition/hiding guards so mascot can't get stuck invisible.
+      settingsPickerOpenRef.current = false
       setSettingsTransitioning(false)
       settingsTransitioningRef.current = false
       setHiding(false)
+      debugToTerminal('close', 'exitSettings finished')
     }
-  }, [fetchAgents, restoreCollapsedMascotPosition])
+  }, [fetchAgents, restoreCollapsedMascotPosition, debugToTerminal, isSettingsPickerBlockingClose])
 
   // Click outside to collapse (only when not pinned)
   useEffect(() => {
     if (!expanded || pinned || settingsMode || settingsTransitioning || updateModalOpen) return
     const onClick = (e: MouseEvent) => {
       if (isCreateModalOpenRef.current) return
-      if (!(e.target as HTMLElement).closest('#mini-panel')) collapse()
+      if (isSettingsPickerBlockingClose()) {
+        debugToTerminal('outside', 'window mousedown ignored: settings picker active')
+        return
+      }
+      if (!(e.target as HTMLElement).closest('#mini-panel')) {
+        debugToTerminal('outside', 'window mousedown outside mini-panel -> collapse')
+        collapse()
+      }
     }
     window.addEventListener('mousedown', onClick)
     return () => window.removeEventListener('mousedown', onClick)
-  }, [expanded, pinned, settingsMode, settingsTransitioning, updateModalOpen, collapse])
+  }, [expanded, pinned, settingsMode, settingsTransitioning, updateModalOpen, collapse, debugToTerminal, isSettingsPickerBlockingClose])
 
   // Window blur: collapse when user clicks outside the app (when not pinned, or in settings mode)
   // Skip blur when a file picker dialog is open
@@ -3230,30 +3304,47 @@ export default function Mini() {
       const el = e.target as HTMLElement
       if (el instanceof HTMLInputElement && el.type === 'file') {
         filePickerOpenRef.current = true
+        debugToTerminal('blur', 'clickCapture mark filePickerOpen=true (input[type=file])')
       }
       if (el.closest('a[target="_blank"]')) {
         filePickerOpenRef.current = true
+        debugToTerminal('blur', 'clickCapture mark filePickerOpen=true (target=_blank)')
       }
     }
     const onFocus = () => {
       filePickerOpenRef.current = false
+      debugToTerminal('blur', 'window focus -> filePickerOpen=false')
     }
     const onBlur = () => {
-      if (filePickerOpenRef.current) return
-      if (nativeDialogActiveRef.current) return
+      if (filePickerOpenRef.current) {
+        debugToTerminal('blur', 'ignore blur: filePickerOpen=true')
+        return
+      }
+      if (isSettingsPickerBlockingClose()) {
+        debugToTerminal('blur', 'ignore blur: settings picker active')
+        // Re-assert always-on-top: on Windows, when a native dialog is open
+        // and the user clicks outside, the OS can demote our window level.
+        if (isWindowsPlatform) invoke('reassert_floating').catch(() => {})
+        return
+      }
       // Resizing the native window via `set_mini_size` during the
       // enter/exit-settings transition can momentarily steal focus from
       // the webview. Without this guard, the resulting blur tears the
       // half-built settings UI back down via `collapse()`, leaving the
       // user staring at an empty mascot ("设置页出不来"). Skip blur while
       // either transition is in flight.
-      if (settingsTransitioningRef.current) return
+      if (settingsTransitioningRef.current) {
+        debugToTerminal('blur', 'ignore blur: settingsTransitioning=true')
+        return
+      }
       // When settings is open, use the dedicated close path so pet mode
       // restores window geometry/state consistently.
       if (settingsModeRef.current) {
+        debugToTerminal('blur', 'blur -> exitSettings')
         exitSettings()
         return
       }
+      debugToTerminal('blur', 'blur -> collapse')
       collapse()
     }
     window.addEventListener('click', onClickCapture, true)
@@ -3264,7 +3355,7 @@ export default function Mini() {
       window.removeEventListener('blur', onBlur)
       window.removeEventListener('focus', onFocus)
     }
-  }, [expanded, pinned, settingsMode, updateModalOpen, collapse, exitSettings])
+  }, [expanded, pinned, settingsMode, updateModalOpen, collapse, exitSettings, debugToTerminal, isSettingsPickerBlockingClose])
 
   useEffect(() => {
     if (expanded || moveMode || updateModalOpen) return
@@ -5225,19 +5316,33 @@ export default function Mini() {
             <div
               data-no-drag
               onMouseDown={(e) => {
+                // While a native picker is active, also swallow mousedown
+                // so the underlying mini panel cannot receive a stray
+                // click that would tear down the settings layout (and
+                // leave the mascot stuck in the `hiding` state).
+                if (isSettingsPickerBlockingClose()) {
+                  debugToTerminal('overlay', 'overlay mousedown swallowed: settings picker active')
+                  e.preventDefault()
+                  e.stopPropagation()
+                  return
+                }
                 if (e.target === e.currentTarget) {
+                  debugToTerminal('overlay', 'overlay mousedown on backdrop (swallow)')
                   e.preventDefault()
                   e.stopPropagation()
                 }
               }}
               onClick={(e) => {
+                if (isSettingsPickerBlockingClose()) {
+                  // Always swallow clicks while a picker is in flight,
+                  // regardless of which descendant they hit.
+                  debugToTerminal('overlay', 'overlay click swallowed: settings picker active')
+                  e.preventDefault()
+                  e.stopPropagation()
+                  return
+                }
                 if (e.target !== e.currentTarget) return
-                // Suppress click-outside-to-close while a native folder
-                // picker is active. macOS synthesises a click on the
-                // webview when the dialog closes; without this guard
-                // that click lands on this transparent overlay and
-                // closes the settings panel right after import.
-                if (nativeDialogActiveRef.current) return
+                debugToTerminal('overlay', 'overlay click backdrop -> exitSettings')
                 e.preventDefault()
                 e.stopPropagation()
                 exitSettings()
@@ -5381,10 +5486,20 @@ export default function Mini() {
                           queueIds={petQueue}
                           onChangeQueue={savePetQueue}
                           onNativeDialogStart={() => {
-                            nativeDialogActiveRef.current = true
+                            debugToTerminal('dialog', `native picker start (before=${nativeDialogActiveRef.current})`)
+                            if (settingsModeRef.current) {
+                              settingsPickerOpenRef.current = true
+                              debugToTerminal('dialog', 'settingsPickerOpen=true')
+                            }
+                            settingsPickerCloseGraceUntilRef.current = Date.now() + 600
+                            setNativeDialogActive(true)
                           }}
                           onNativeDialogEnd={() => {
-                            nativeDialogActiveRef.current = false
+                            debugToTerminal('dialog', `native picker end (before=${nativeDialogActiveRef.current})`)
+                            settingsPickerOpenRef.current = false
+                            settingsPickerCloseGraceUntilRef.current = Date.now() + 2000
+                            debugToTerminal('dialog', 'settingsPickerOpen=false')
+                            setNativeDialogActive(false)
                           }}
                         />
                       </div>
