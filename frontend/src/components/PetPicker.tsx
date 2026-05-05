@@ -354,7 +354,7 @@ export function PetPicker({
         </div>
       )}
 
-      {showQueue && (
+      {showQueue && import.meta.env.DEV && (
         <DemoMascotControls
           allPets={allPets}
           onNativeDialogStart={onNativeDialogStart}
