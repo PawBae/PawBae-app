@@ -52,6 +52,13 @@ interface PetPickerProps {
 const PETDEX_URL = 'https://codex-pets.net/'
 const CODEX_PETS_PATH_HINT = '~/.codex/pets'
 
+// Detect Windows once at module load. We surface an extra hint on the
+// import step so Windows users know the folder they pick must already
+// contain pet.json + spritesheet.webp — the download from
+// codex-pets.net is less self-explanatory there than on macOS.
+const isWindowsPlatform =
+  typeof navigator !== 'undefined' && navigator.userAgent.includes('Windows')
+
 // Top-level pet management UI. Replaces the legacy
 // "Mascot + AGENT CHARACTER QUEUE" sections in the pairing tab. Built-in
 // pets ship with the app under `assets/builtin/`. Custom pets live in the
@@ -392,6 +399,11 @@ export function PetPicker({
                 <span className="text-sm text-white/85 font-medium">
                   {importing ? '正在导入…' : '选择本地文件夹导入'}
                 </span>
+                {isWindowsPlatform && (
+                  <span className="text-[11px] text-white/50 text-left">
+                    需新建一个文件夹，并放入 <code className="text-white/70">pet.json</code> 和 <code className="text-white/70">spritesheet.webp</code>
+                  </span>
+                )}
                 <span className="text-[11px] text-white/40">
                   会复制到 {CODEX_PETS_PATH_HINT}/&lt;id&gt;
                 </span>
