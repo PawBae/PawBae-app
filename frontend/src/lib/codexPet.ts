@@ -67,12 +67,13 @@ export function fpsFor(state: CodexPetState): number {
   return STATE_FPS[state] ?? SPRITE_FPS
 }
 
-export const DEFAULT_PET_ID = 'linnea'
+export const DEFAULT_PET_ID = 'phoebe'
 
 // Default agent rotation queue used when the user hasn't customised one.
-// Ordered to match the picker layout (manifest order, alphabetical by
-// folder), capped at 10 entries.
+// Phoebe leads (matches the onboarding hero) and the rest follow the
+// manifest order, capped at 10 entries.
 export const DEFAULT_PET_QUEUE_IDS: string[] = [
+  'phoebe',
   'doro',
   'elaina',
   'homie',
@@ -80,7 +81,6 @@ export const DEFAULT_PET_QUEUE_IDS: string[] = [
   'mambo',
   'naruto',
   'nezuko',
-  'phoebe',
   'skirk',
   'taffy',
 ]

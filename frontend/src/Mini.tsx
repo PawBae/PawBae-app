@@ -1488,6 +1488,13 @@ export default function Mini() {
             mascotScale: initialMascotScale,
           })
         } catch {}
+        // `set_mini_size` schedules its NSWindow resize on the main thread
+        // and returns immediately, so the modal would otherwise render
+        // inside the still-collapsed 96x96 frame and clip its own
+        // contents (clicks effectively land outside the visible area).
+        // A short delay lets the resize land before React mounts the
+        // modal at a sane size.
+        await new Promise<void>((r) => setTimeout(r, 120))
         setShowOnboarding(true)
       }
 

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { invoke } from '@tauri-apps/api/core'
 import {
   ChevronDown,
@@ -459,6 +460,12 @@ interface PetRowProps {
 }
 
 function PetRow({ pet, selected, onSelect }: PetRowProps) {
+  const { t } = useTranslation()
+  // Look up a localised description; fall back to whatever pet.json
+  // shipped (typically English) when no translation key exists.
+  const description = t(`petDescriptions.${pet.id}`, {
+    defaultValue: pet.description || '',
+  })
   return (
     <div className="flex items-center gap-3 px-5 py-3 border-b border-white/5 last:border-b-0 hover:bg-white/[0.02] transition-colors">
       <div
@@ -469,8 +476,8 @@ function PetRow({ pet, selected, onSelect }: PetRowProps) {
       </div>
       <div className="min-w-0 flex-1">
         <div className="text-sm text-white/85 font-medium truncate">{pet.displayName}</div>
-        {pet.description && (
-          <div className="text-[11px] text-white/40 truncate">{pet.description}</div>
+        {description && (
+          <div className="text-[11px] text-white/40 truncate">{description}</div>
         )}
       </div>
       <button
@@ -697,6 +704,10 @@ interface SpecialPetRowProps {
 }
 
 function SpecialPetRow({ pet, selected, onSelect }: SpecialPetRowProps) {
+  const { t } = useTranslation()
+  const description = t(`petDescriptions.${pet.id}`, {
+    defaultValue: pet.description || '',
+  })
   return (
     <div className="flex items-center gap-3 px-5 py-3 border-b border-white/5 last:border-b-0 hover:bg-white/[0.02] transition-colors">
       <div
@@ -707,8 +718,8 @@ function SpecialPetRow({ pet, selected, onSelect }: SpecialPetRowProps) {
       </div>
       <div className="min-w-0 flex-1">
         <div className="text-sm text-white/85 font-medium truncate">{pet.displayName}</div>
-        {pet.description && (
-          <div className="text-[11px] text-white/40 truncate">{pet.description}</div>
+        {description && (
+          <div className="text-[11px] text-white/40 truncate">{description}</div>
         )}
       </div>
       <button
