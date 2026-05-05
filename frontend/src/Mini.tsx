@@ -2319,13 +2319,26 @@ export default function Mini() {
     if (collapsingRef.current || expandingRef.current) return
     expandingRef.current = true
     setHiding(true)
+    // Windows DWM composites the previous frame while the window is being
+    // resized + repositioned, so the collapsed mascot ghost briefly appears
+    // at the new (notch-area) window location before WebView2 supplies a
+    // fresh frame. Hide the entire document during the transition and
+    // reveal it once the expanded panel has rendered.
+    if (isWindowsPlatform) {
+      document.documentElement.style.opacity = '0'
+    }
     try {
       await new Promise<void>((r) => setTimeout(r, 50))
       await syncExpandedWindowLayout(viewModeRef.current)
       setExpanded(true)
       expandedRef.current = true
       requestAnimationFrame(() => {
-        requestAnimationFrame(() => setShowPanel(true))
+        requestAnimationFrame(() => {
+          setShowPanel(true)
+          if (isWindowsPlatform) {
+            document.documentElement.style.opacity = '1'
+          }
+        })
       })
     } catch (e) {
       console.warn('[mini] expand failed:', e)
@@ -2333,11 +2346,14 @@ export default function Mini() {
       setExpanded(false)
       expandedRef.current = false
       expandedWindowModeRef.current = null
+      if (isWindowsPlatform) {
+        document.documentElement.style.opacity = '1'
+      }
     } finally {
       setHiding(false)
       expandingRef.current = false
     }
-  }, [syncExpandedWindowLayout])
+  }, [syncExpandedWindowLayout, isWindowsPlatform])
   expandFnRef.current = expand
   const updateModalWindowAdjustedRef = useRef(false)
   const updateModalPrevExpandedRef = useRef(false)
