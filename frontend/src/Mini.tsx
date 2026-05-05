@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { load } from '@tauri-apps/plugin-store'
 import { listen } from '@tauri-apps/api/event'
-import { ChevronDown, ChevronUp, Check, Loader2, Pen, Plus, X, Pin, Bell, BellOff, Move, Settings, Asterisk, Trash2, Cloud, Maximize, Minimize } from 'lucide-react'
+import { ChevronDown, Loader2, X, Pin, Bell, BellOff, Move, Settings, Asterisk, Trash2, Cloud } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import ReactMarkdown from 'react-markdown'
 import { useTranslation } from 'react-i18next'
@@ -12,7 +12,6 @@ import { AgentDetailView } from './components/AgentDetailView'
 import { CreateCharacterModal } from './components/CreateCharacterModal'
 import { ClaudeStatsView } from './components/ClaudeStatsView'
 import { getStore, DEFAULT_CHAR, DEFAULT_CHAR_NAME, loadCharacters, loadOcConnections, saveOcConnections } from './lib/store'
-import { saveAgentCharMap } from './lib/agents'
 import type { AgentMetrics, OcConnection } from './lib/types'
 import { OnboardingModal } from './components/OnboardingModal'
 import { PetContextMenu, PomodoroOverlay } from './components/PetContextMenu'
@@ -25,7 +24,18 @@ import {
   POMODORO_COINS_PER_MIN, AFFECTION_ACTIVITY_PER_10MIN, AFFECTION_MAX,
   HUNGER_ACTIVITY_PER_HOUR, HUNGER_OFFLINE_FLOOR,
   applyHeadpat,
+  loadMiniPetId,
+  saveMiniPetId,
 } from './lib/petStore'
+import {
+  DEFAULT_PET_QUEUE_IDS,
+  loadCodexPetById, loadDefaultCodexPet,
+  petStateToCodexState,
+  type CodexPet, type CodexPetState,
+} from './lib/codexPet'
+import { MiniPetMascot } from './components/MiniPetMascot'
+import { SpritePet } from './components/SpritePet'
+import { PetPicker } from './components/PetPicker'
 
 interface CharacterMeta {
   name: string
@@ -95,6 +105,12 @@ const MAX_SLOTS = 10
 const MASCOT_SCALE_MIN = 1
 const MASCOT_SCALE_MAX = 3
 const MASCOT_BASE_SIZE = 43
+// Codex sprite-pets render very small at the legacy mascot size (192x208
+// cells scaled down to ~43px). These multipliers blow them up only at the
+// rendering layer, leaving the underlying window/hitbox math untouched so
+// large-mode video sizing keeps working.
+const MINI_SPRITE_DISPLAY_MULTIPLIER = 2
+const SESSION_SPRITE_DISPLAY_MULTIPLIER = 0.88
 
 type PetState = 'idle' | 'working' | 'compacting' | 'waiting'
 type ClaudeStatsSource = 'cc' | 'codex' | 'cursor'
@@ -246,94 +262,6 @@ function ChatList({ messages, accentColor }: { messages: { role: string; text: s
   )
 }
 
-/** Plays a GIF once, then freezes for `pause` ms, then repeats. */
-function IntervalGif({ src, playMs = 1300, pauseMs = 4000, style, ...props }: React.ImgHTMLAttributes<HTMLImageElement> & { playMs?: number; pauseMs?: number }) {
-  const [playing, setPlaying] = useState(true)
-  const [gifSrc, setGifSrc] = useState(src)
-  useEffect(() => {
-    setPlaying(true)
-    setGifSrc(src)
-  }, [src])
-  useEffect(() => {
-    if (playing) {
-      const t = setTimeout(() => setPlaying(false), playMs)
-      return () => clearTimeout(t)
-    } else {
-      const t = setTimeout(() => {
-        // Force GIF restart by briefly clearing src
-        setGifSrc('')
-        requestAnimationFrame(() => {
-          setGifSrc(src!)
-          setPlaying(true)
-        })
-      }, pauseMs)
-      return () => clearTimeout(t)
-    }
-  }, [playing, src, playMs, pauseMs])
-  if (!playing) return <FrozenImg src={src} style={style} {...props} />
-  return <img src={gifSrc || undefined} alt="mini" style={style} draggable={false} {...props} />
-}
-
-function FrozenImg({ src, style, ...props }: React.ImgHTMLAttributes<HTMLImageElement>) {
-  const canvasRef = useRef<HTMLCanvasElement>(null)
-  useEffect(() => {
-    if (!src) return
-    const img = new Image()
-    img.onload = () => {
-      const c = canvasRef.current
-      if (!c) return
-      c.width = img.naturalWidth
-      c.height = img.naturalHeight
-      c.getContext('2d')?.drawImage(img, 0, 0)
-    }
-    img.src = src
-  }, [src])
-  return <canvas ref={canvasRef} style={style} {...(props as any)} />
-}
-
-function getMiniGif(char: CharacterMeta | undefined, petState: PetState | boolean, useTop = false): string | undefined {
-  // backward compat: boolean → PetState
-  const state: PetState = typeof petState === 'boolean' ? (petState ? 'working' : 'idle') : petState
-  const c = char?.miniActions && Object.values(char.miniActions).flat().length > 0 ? char : DEFAULT_CHAR
-  if (!c?.miniActions) return undefined
-  if (useTop && c.miniActions['top']?.length) {
-    const topGifs = c.miniActions['top']
-    // Priority: waiting(look) > compacting(eat) > working > idle(sleep)
-    // Each state falls through to the next if no matching GIF is found
-    if (state === 'waiting') {
-      const look = topGifs.find((g) => g.includes('look') || g.includes('wait'))
-      if (look) return look
-    }
-    if (state === 'compacting') {
-      const eat = topGifs.find((g) => g.includes('eat') || g.includes('compact') || g.includes('power'))
-      if (eat) return eat
-    }
-    if (state === 'working' || state === 'compacting' || state === 'waiting') {
-      const work = topGifs.find((g) => g.includes('work'))
-      if (work) return work
-    }
-    const sleep = topGifs.find((g) => g.includes('sleep') || g.includes('idle') || g.includes('rest'))
-    if (sleep) return sleep
-    return topGifs[0]
-  }
-  const allGifs = Object.values(c.miniActions).flat()
-  if (allGifs.length === 0) return undefined
-  if (state === 'waiting') {
-    const lookGifs = allGifs.filter((g) => g.includes('look') || g.includes('wait'))
-    if (lookGifs.length > 0) return lookGifs[0]
-  }
-  if (state === 'compacting') {
-    const eatGifs = allGifs.filter((g) => g.includes('eat') || g.includes('compact') || g.includes('power'))
-    if (eatGifs.length > 0) return eatGifs[0]
-  }
-  const idleGifs = allGifs.filter((g) => /idle|sleep|rest/.test(g))
-  const workGifs = allGifs.filter((g) => g.includes('work'))
-  const actionGifs = allGifs.filter((g) => !/idle|sleep|rest/.test(g))
-  if ((state === 'working' || state === 'compacting' || state === 'waiting') && actionGifs.length > 0) {
-    return workGifs[0] || actionGifs[0]
-  }
-  return idleGifs[0] || allGifs[0]
-}
 
 type LargePetAction = 'work' | 'rest' | 'question' | 'grasp' | 'spin' | 'angry'
 
@@ -390,191 +318,6 @@ function getAlternateLargeVideoUrl(url: string): string | undefined {
   return undefined
 }
 
-function AgentAccordionItem({
-  agent,
-  characters,
-  currentChar,
-  onSelect,
-  isOpen,
-  onToggle,
-  onOpenCreate,
-  onDeleteChar,
-  sourceLabel,
-}: {
-  agent: AgentInfo
-  characters: CharacterMeta[]
-  currentChar: string
-  onSelect: (charName: string) => void
-  isOpen: boolean
-  onToggle: () => void
-  onOpenCreate?: () => void
-  onDeleteChar?: (name: string) => void
-  sourceLabel?: string
-}) {
-  const { t } = useTranslation()
-  const [isEditing, setIsEditing] = useState(false)
-  const charsWithMini = characters.filter((c) => c.miniActions && Object.keys(c.miniActions).length > 0)
-  const charMeta = characters.find((c) => c.name === currentChar)
-  const gif = charMeta ? getMiniGif(charMeta, false) : undefined
-
-  useEffect(() => {
-    if (!isOpen) setIsEditing(false)
-  }, [isOpen])
-
-  return (
-    <div className="flex flex-col border-b border-white/5 last:border-b-0 group">
-      {/* Main Row */}
-      <div className="relative flex items-center justify-between p-4 hover:bg-white/[0.02] transition-colors cursor-pointer" onClick={onToggle}>
-        <div className="flex items-center gap-4">
-          <div className="relative">
-            <div className="w-12 h-12 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center overflow-hidden">
-              {gif ? (
-                <img key={gif} src={gif} alt="" className="w-full h-full object-contain" style={{ imageRendering: 'pixelated' }} draggable={false} />
-              ) : (
-                <span className="text-white/40 text-xl">{agent.identityEmoji || '?'}</span>
-              )}
-            </div>
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="text-base font-medium text-white/90">{agent.identityName || agent.id}</span>
-              {agent.identityEmoji && <span className="text-sm">{agent.identityEmoji}</span>}
-              {sourceLabel && <span className="text-[10px] text-white/30 bg-white/5 px-1.5 py-0.5 rounded">{sourceLabel}</span>}
-            </div>
-          </div>
-        </div>
-        <div className="flex items-center gap-2 text-sm text-white/50 group-hover:text-white/80 transition-colors pr-2">
-          <span>{currentChar ? (characters.find((c) => c.name === currentChar)?.builtin ? t(`charNames.${currentChar}`, currentChar) : currentChar) : t('mini.unassigned')}</span>
-          <ChevronDown className={`w-4 h-4 transition-transform duration-300 ${isOpen ? 'rotate-180' : ''}`} />
-        </div>
-      </div>
-
-      {/* Expanded Selection Area */}
-      <AnimatePresence>
-        {isOpen && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
-            className="overflow-hidden bg-[#0a0a0a]"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="p-4 border-t border-white/5">
-              {/* Action Buttons row */}
-              <div className="flex items-center justify-end gap-2 mb-3">
-                {onOpenCreate && (
-                  <button
-                    onClick={() => onOpenCreate()}
-                    className="flex items-center justify-center w-7 h-7 rounded-md transition-colors bg-white/5 text-white/60 hover:text-white hover:bg-white/10 border border-transparent"
-                    title={t('mini.createChar')}
-                  >
-                    <Plus className="w-4 h-4" />
-                  </button>
-                )}
-                <button
-                  onClick={() => setIsEditing(!isEditing)}
-                  className={`flex items-center justify-center w-7 h-7 rounded-md transition-colors ${
-                    isEditing ? 'bg-red-500/20 text-red-400 border border-red-500/20' : 'bg-white/5 text-white/60 hover:text-white hover:bg-white/10 border border-transparent'
-                  }`}
-                  title={isEditing ? t('common.done') : t('common.edit')}
-                >
-                  {isEditing ? <Check className="w-4 h-4" /> : <Pen className="w-3.5 h-3.5" />}
-                </button>
-              </div>
-
-              {/* Character Grid grouped by IP */}
-              <div className="max-h-[260px] overflow-y-auto pr-2 pt-2 scrollbar-white">
-                {(() => {
-                  const groups: { ip: string; chars: typeof charsWithMini }[] = []
-                  const ipOrder: string[] = []
-                  for (const c of charsWithMini) {
-                    const ip = c.ip || '自定义'
-                    if (!ipOrder.includes(ip)) ipOrder.push(ip)
-                  }
-                  // 自定义 always first, 其他 always last
-                  const customIdx = ipOrder.indexOf('自定义')
-                  if (customIdx > 0) {
-                    ipOrder.splice(customIdx, 1)
-                    ipOrder.unshift('自定义')
-                  }
-                  const otherIdx = ipOrder.indexOf('其他')
-                  if (otherIdx >= 0 && otherIdx < ipOrder.length - 1) {
-                    ipOrder.splice(otherIdx, 1)
-                    ipOrder.push('其他')
-                  }
-                  for (const ip of ipOrder) {
-                    groups.push({ ip, chars: charsWithMini.filter((c) => (c.ip || '自定义') === ip) })
-                  }
-                  return groups.map(({ ip, chars }) => (
-                    <div key={ip} className="mb-3 last:mb-0">
-                      <div className="text-[10px] font-medium text-white/25 uppercase tracking-wider mb-2 px-1">
-                        {ip === '自定义' ? t('mini.custom') : ip === '其他' ? t('mini.other') : ip === '原神' ? t('mini.ipGenshin') : ip === '赛马娘' ? t('mini.ipUmaMusume') : ip}
-                      </div>
-                      <div className="grid grid-cols-3 gap-3">
-                        {chars.map((c) => {
-                          const isSelected = c.name === currentChar
-                          const preview = getMiniGif(c, false)
-                          const isDefault = !!c.builtin
-                          return (
-                            <div
-                              key={c.name}
-                              onClick={() => {
-                                if (isEditing && !isDefault) {
-                                  onDeleteChar?.(c.name)
-                                } else if (!isEditing) {
-                                  onSelect(c.name)
-                                }
-                              }}
-                              className={`relative flex items-center gap-3 p-2.5 rounded-xl border transition-all ${
-                                isEditing && !isDefault
-                                  ? 'cursor-pointer hover:bg-red-500/10 border-red-500/30'
-                                  : isEditing && isDefault
-                                    ? 'opacity-40 cursor-not-allowed border-transparent'
-                                    : isSelected
-                                      ? 'bg-white/10 border-white/20 cursor-default'
-                                      : 'bg-white/5 border-transparent hover:bg-white/10 cursor-pointer'
-                              }`}
-                            >
-                              <div className="relative w-9 h-9 shrink-0 rounded-lg overflow-hidden bg-black/50 border border-white/10">
-                                {preview ? (
-                                  <img
-                                    src={preview}
-                                    alt={c.name}
-                                    className={`w-full h-full object-contain transition-opacity ${isEditing && !isDefault ? 'opacity-50' : 'opacity-90'}`}
-                                    style={{ imageRendering: 'pixelated' }}
-                                    draggable={false}
-                                  />
-                                ) : (
-                                  <div className="w-full h-full flex items-center justify-center text-white/30 text-xs">?</div>
-                                )}
-                              </div>
-                              <span className="text-sm text-white/80 truncate flex-1">{c.builtin ? t(`charNames.${c.name}`, c.name) : c.name}</span>
-                              {isEditing && !isDefault && (
-                                <div className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-500 rounded-full flex items-center justify-center shadow-md z-10 hover:bg-red-600 transition-colors">
-                                  <X className="w-3 h-3 text-white" />
-                                </div>
-                              )}
-                              {!isEditing && isSelected && (
-                                <div className="absolute top-1/2 -translate-y-1/2 right-3">
-                                  <div className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)]" />
-                                </div>
-                              )}
-                            </div>
-                          )
-                        })}
-                      </div>
-                    </div>
-                  ))
-                })()}
-              </div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
-  )
-}
 
 type OcParams = { mode?: string; url?: string; token?: string; sshHost?: string; sshUser?: string }
 
@@ -591,12 +334,32 @@ function connToOcParams(conn: OcConnection): OcParams | null {
 export default function Mini() {
   const [expanded, setExpanded] = useState(false)
   const [showPanel, setShowPanel] = useState(false)
+  // External hover signal for the codex sprite, driven by a Rust cursor
+  // poll. macOS does not deliver mouseenter to non-key floating windows,
+  // so the webview-level hover would otherwise stay false until the user
+  // first clicks. The Rust side emits `mini-mascot-hover` whenever the
+  // cursor enters/leaves the collapsed mascot's window rect.
+  const [mascotHover, setMascotHover] = useState(false)
   const [agents, setAgents] = useState<AgentInfo[]>([])
   const [hasConfiguredOpenClaw, setHasConfiguredOpenClaw] = useState(false)
   const [healthMap, setHealthMap] = useState<Record<string, boolean>>({})
   const [characters, setCharacters] = useState<CharacterMeta[]>([])
   const [agentCharMap, setAgentCharMap] = useState<Record<string, string>>({})
   const [miniChar, setMiniChar] = useState<CharacterMeta | null>(null)
+  // ─── Codex sprite pet (mini mode) ───
+  // miniPet is the user-selected codex pet rendered in every mini slot.
+  // walkDir captures locomotion direction (-1 left, 1 right, 0 stationary)
+  // for the main mascot's sprite state override while the native window
+  // is being moved by the walk timer.
+  const [miniPet, setMiniPet] = useState<CodexPet | null>(null)
+  const [walkDir, setWalkDir] = useState<-1 | 0 | 1>(0)
+  const walkDirRef = useRef<-1 | 0 | 1>(0)
+  const updateWalkDir = useCallback((dir: -1 | 0 | 1) => {
+    if (walkDirRef.current !== dir) {
+      walkDirRef.current = dir
+      setWalkDir(dir)
+    }
+  }, [])
 
   const [allSessions, setAllSessions] = useState<MiniSessionInfo[]>([])
   const [anySessionActive, setAnySessionActive] = useState(false)
@@ -620,6 +383,48 @@ export default function Mini() {
   const claudeSessionsRef = useRef<any[]>([])
   claudeSessionsRef.current = claudeSessions
   const [charQueue, setCharQueue] = useState<string[]>([DEFAULT_CHAR_NAME])
+  // ─── Codex pet rotation queue (mini mode) ───
+  // Each session slot maps to petQueue[i % petQueue.length] so multiple
+  // running agents show different pets. Persisted in settings.json under
+  // `mini_pet_queue`. Defaults to a single-item queue containing the
+  // currently selected mini pet (or DEFAULT_PET_ID).
+  const [petQueue, setPetQueue] = useState<string[]>([])
+  // Resolved CodexPet objects in queue order; populated by an effect that
+  // looks each id up via loadCodexPetById. The session-list / slot
+  // renderers index into this array by row position so multiple sessions
+  // visibly rotate through the configured pets.
+  const [petQueueResolved, setPetQueueResolved] = useState<CodexPet[]>([])
+  const savePetQueue = useCallback(async (next: string[]) => {
+    setPetQueue(next)
+    const store = await load('settings.json', { defaults: {}, autoSave: true })
+    await store.set('mini_pet_queue', next)
+    await store.save()
+  }, [])
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      if (petQueue.length === 0) {
+        if (!cancelled) setPetQueueResolved([])
+        return
+      }
+      const resolved = await Promise.all(petQueue.map((id) => loadCodexPetById(id)))
+      if (cancelled) return
+      setPetQueueResolved(resolved.filter((p): p is CodexPet => p !== null))
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [petQueue])
+  // Returns the queue pet for a given session row index. Falls back to
+  // the user's main mini pet when the queue is empty or hasn't resolved
+  // yet so rows never render with `null`.
+  const getQueuePet = useCallback(
+    (index: number): CodexPet | null => {
+      if (petQueueResolved.length === 0) return miniPet
+      return petQueueResolved[((index % petQueueResolved.length) + petQueueResolved.length) % petQueueResolved.length]
+    },
+    [petQueueResolved, miniPet],
+  )
   const [selectedClaudeSession, setSelectedClaudeSession] = useState<string | null>(null)
   const [claudeConversation, setClaudeConversation] = useState<any[]>([])
   const [showClaudeStats, setShowClaudeStats] = useState(false)
@@ -655,7 +460,10 @@ export default function Mini() {
   // OC multi-connection: qualifiedId → connection params, qualifiedId → real agent ID, qualifiedId → source label
   const agentConnMapRef = useRef<Map<string, OcParams>>(new Map())
   const agentRealIdMapRef = useRef<Map<string, string>>(new Map())
-  const [agentSourceLabels, setAgentSourceLabels] = useState<Record<string, string>>({})
+  // Source label dictionary is still populated by `fetchAgents` for future
+  // multi-source UI work; the getter is unused after the pairing refactor.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [_agentSourceLabels, setAgentSourceLabels] = useState<Record<string, string>>({})
 
   const resolveClaudeStatsSource = useCallback((source?: string): ClaudeStatsSource => {
     if (source === 'cursor') return 'cursor'
@@ -689,7 +497,6 @@ export default function Mini() {
   const petIdleIntervalMinRef = useRef(2)
   useEffect(() => { petIdleIntervalMinRef.current = petIdleIntervalMin }, [petIdleIntervalMin])
   const [autoExpandOnTask, setAutoExpandOnTask] = useState(true)
-  const [disableSleepAnim, setDisableSleepAnim] = useState(true)
   const [largeMascot, setLargeMascot] = useState(false)
   const largeMascotRef = useRef(false)
   largeMascotRef.current = largeMascot
@@ -719,11 +526,68 @@ export default function Mini() {
   const [settingsMode, setSettingsMode] = useState(false)
   const settingsModeRef = useRef(false)
   const [showSettingsOverlay, setShowSettingsOverlay] = useState(false)
+  const [hiding, setHiding] = useState(false)
   const [settingsTransitioning, setSettingsTransitioning] = useState(false)
   const settingsTransitioningRef = useRef(false)
   const filePickerOpenRef = useRef(false)
+  // Independent flag for native (Tauri-invoked) folder/dialog flows so
+  // they don't share the auto-reset-on-focus logic used by HTML
+  // <input type="file"> clicks. Owned end-to-end by PetPicker.
+  const nativeDialogActiveRef = useRef(false)
+  // Tracks only the picker opened from settings page import flow.
+  // While true, any outside-click/blur close path must be blocked.
+  const settingsPickerOpenRef = useRef(false)
+  // Windows may deliver delayed blur/click events right after the native
+  // picker closes. Keep close handlers blocked for a short grace window.
+  const settingsPickerCloseGraceUntilRef = useRef(0)
+  // React-driven mirror of the ref. Used to render the click-outside
+  // overlay as `pointer-events: none` while a native folder picker is in
+  // flight, so even if the OS routes a click through to our webview
+  // (e.g. the dialog has only an "owner" relationship instead of true
+  // modal blocking), it cannot reach the overlay's onClick and tear down
+  // the settings panel.
+  const [nativeDialogActive, _setNativeDialogActive] = useState(false)
+  const setNativeDialogActive = useCallback((v: boolean) => {
+    nativeDialogActiveRef.current = v
+    _setNativeDialogActive(v)
+  }, [])
+  const debugToTerminal = useCallback((scope: string, msg: string) => {
+    invoke('debug_log', { scope, msg }).catch(() => {})
+  }, [])
+  const isSettingsPickerBlockingClose = useCallback(
+    () =>
+      settingsPickerOpenRef.current ||
+      nativeDialogActiveRef.current ||
+      Date.now() < settingsPickerCloseGraceUntilRef.current,
+    [],
+  )
+  useEffect(() => {
+    debugToTerminal('state', `settingsMode=${settingsMode}`)
+  }, [settingsMode, debugToTerminal])
+  useEffect(() => {
+    debugToTerminal('state', `showSettingsOverlay=${showSettingsOverlay}`)
+  }, [showSettingsOverlay, debugToTerminal])
+  useEffect(() => {
+    debugToTerminal('state', `settingsTransitioning=${settingsTransitioning}`)
+  }, [settingsTransitioning, debugToTerminal])
+  useEffect(() => {
+    debugToTerminal('state', `hiding=${hiding}`)
+  }, [hiding, debugToTerminal])
+  useEffect(() => {
+    debugToTerminal(
+      'dialog',
+      `nativeDialogActive=${nativeDialogActive} settingsMode=${settingsModeRef.current} transitioning=${settingsTransitioningRef.current}`,
+    )
+  }, [nativeDialogActive, debugToTerminal])
+  useEffect(() => {
+    // Safety net: if any close path leaves `hiding` stuck true while settings
+    // is already fully closed, force the mascot tree visible again.
+    if (hiding && !settingsMode && !showSettingsOverlay && !settingsTransitioning) {
+      debugToTerminal('state', 'recover hiding=false (settings fully closed)')
+      setHiding(false)
+    }
+  }, [hiding, settingsMode, showSettingsOverlay, settingsTransitioning, debugToTerminal])
   const [settingsNav, setSettingsNav] = useState<'pairing' | 'settings'>('pairing')
-  const [openAccordionId, setOpenAccordionId] = useState<string | null>(null)
   const [isCreateModalOpen, _setIsCreateModalOpen] = useState(false)
   const isCreateModalOpenRef = useRef(false)
   const setIsCreateModalOpen = (v: boolean) => {
@@ -795,7 +659,6 @@ export default function Mini() {
   }, [appMode, largeMascot])
 
 
-  const [hiding, setHiding] = useState(false)
   const [pinned, setPinned] = useState(false)
   const pinnedRef = useRef(false)
   const [viewMode, _setViewMode] = useState<'island' | 'efficiency'>('efficiency')
@@ -809,6 +672,25 @@ export default function Mini() {
   const moveModeRef = useRef(false)
   const moveModeActivatedAtRef = useRef(0)
   const mascotDragActiveRef = useRef(false)
+  // Mirror of mascotDragActiveRef for React-driven UI (e.g. suppressing the
+  // sprite's hover-jump while dragging so walkDir → run-left/run-right
+  // actually shows). Keep both in sync via setMascotDragActive below.
+  const [mascotDragActive, _setMascotDragActive] = useState(false)
+  const setMascotDragActive = useCallback((v: boolean) => {
+    mascotDragActiveRef.current = v
+    _setMascotDragActive(v)
+  }, [])
+  // Pending focus-driven auto-expand timer. The Windows window-focus
+  // listener defers expand() into this timer so a click landing on the
+  // mascot can cancel it and let handleMascotPointerDown decide between
+  // drag and expand instead.
+  const focusExpandTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const cancelFocusExpand = useCallback(() => {
+    if (focusExpandTimerRef.current) {
+      clearTimeout(focusExpandTimerRef.current)
+      focusExpandTimerRef.current = null
+    }
+  }, [])
   const setMoveMode = (v: boolean) => {
     moveModeRef.current = v
     if (v) moveModeActivatedAtRef.current = Date.now()
@@ -824,6 +706,14 @@ export default function Mini() {
   const [updateModalInfo, setUpdateModalInfo] = useState<UpdateModalInfo | null>(null)
   const [updateModalProgress, setUpdateModalProgress] = useState<number | null>(null)
   const [updateModalProgressStage, setUpdateModalProgressStage] = useState('preparing')
+  // Server-driven UI config (latest.json `ui` block). The codex pet hub
+  // URL is sourced from `ui.petdex.url`. We deliberately do NOT fall
+  // back to a hardcoded value — when the fetch fails or the field is
+  // missing, PetPicker shows a "network error" message so users
+  // understand why the link is unavailable rather than us silently
+  // routing them to a possibly-stale URL.
+  const [petdexUrl, setPetdexUrl] = useState<string | null>(null)
+  const [petdexFailed, setPetdexFailed] = useState(false)
 
   // Load mini character from store
   const loadMiniChar = useCallback(async () => {
@@ -844,8 +734,34 @@ export default function Mini() {
     }
   }, [])
 
+  // Load the user-selected mini pet. Falls back to the builtin default
+  // pet when nothing is saved. The full pet list is loaded on demand by
+  // the settings selector (a separate fetch that hits the cached manifest).
+  const loadMiniPet = useCallback(async () => {
+    try {
+      const savedId = await loadMiniPetId()
+      const picked = (savedId ? await loadCodexPetById(savedId) : null) ?? (await loadDefaultCodexPet())
+      if (picked) setMiniPet(picked)
+      // Load (or seed) the rotation queue alongside the main pet so the
+      // settings UI has something to show on first open. First-time
+      // users get the curated DEFAULT_PET_QUEUE_IDS list (10 builtins
+      // in manifest order) so different sessions immediately rotate
+      // through different mascots.
+      const store = await load('settings.json', { defaults: {}, autoSave: true })
+      const savedQueue = (await store.get('mini_pet_queue')) as string[] | null
+      if (savedQueue && savedQueue.length > 0) {
+        setPetQueue(savedQueue)
+      } else {
+        setPetQueue(DEFAULT_PET_QUEUE_IDS)
+      }
+    } catch (e) {
+      console.warn('[mini-pet] load failed:', e)
+    }
+  }, [])
+
   useEffect(() => {
     loadMiniChar()
+    loadMiniPet()
     load('settings.json', { defaults: {}, autoSave: true }).then(async (store) => {
       const nicks = (await store.get('session_nicknames')) as Record<string, string> | null
       if (nicks) setSessionNicknames(nicks)
@@ -1160,6 +1076,7 @@ export default function Mini() {
     }
     if (currentPetAction !== 'walk') {
       setWalkFlipped(false)
+      updateWalkDir(0)
       return
     }
     // Walk physically moves the native window via `move_mini_by`. Anything
@@ -1178,6 +1095,7 @@ export default function Mini() {
       isCreateModalOpen
     ) {
       setWalkFlipped(false)
+      updateWalkDir(0)
       return
     }
     const WALK_SPEED = 2
@@ -1224,13 +1142,15 @@ export default function Mini() {
 
       if (isToEdge) {
         // Walk straight toward the edge without flipping
-        const dir = edgeDirection || -1
+        const dir = (edgeDirection || -1) as -1 | 1
+        updateWalkDir(dir)
         invoke('move_mini_by', { dx: dir * WALK_SPEED, dy: 0 }).catch(() => {})
       } else {
         // Normal oscillating walk
         if (isAuto && totalElapsed >= AUTO_WALK_DURATION) {
           if (walkTimerRef.current) clearInterval(walkTimerRef.current)
           walkTimerRef.current = null
+          updateWalkDir(0)
           const d = petDataRef.current
           const next: PetAction = d.hunger < 30 ? 'hungry' : 'idle'
           setCurrentPetAction(next)
@@ -1242,6 +1162,7 @@ export default function Mini() {
           direction *= -1
           setWalkFlipped(prev => !prev)
         }
+        updateWalkDir(direction as -1 | 1)
         invoke('move_mini_by', { dx: direction * WALK_SPEED, dy: 0 }).catch(() => {})
       }
 
@@ -1266,6 +1187,7 @@ export default function Mini() {
           if (mascotLeft <= monitorLeft + EDGE_THRESHOLD) {
             if (walkTimerRef.current) clearInterval(walkTimerRef.current)
             walkTimerRef.current = null
+            updateWalkDir(0)
             peekEdgeRef.current = 'left'
             setCurrentPetAction('peek')
             currentPetActionRef.current = 'peek'
@@ -1273,6 +1195,7 @@ export default function Mini() {
           } else if (mascotRight >= monitorRight - EDGE_THRESHOLD) {
             if (walkTimerRef.current) clearInterval(walkTimerRef.current)
             walkTimerRef.current = null
+            updateWalkDir(0)
             peekEdgeRef.current = 'right'
             setCurrentPetAction('peek')
             currentPetActionRef.current = 'peek'
@@ -1283,6 +1206,7 @@ export default function Mini() {
     }, WALK_INTERVAL)
     return () => {
       if (walkTimerRef.current) clearInterval(walkTimerRef.current)
+      updateWalkDir(0)
     }
   }, [
     currentPetAction,
@@ -1294,6 +1218,7 @@ export default function Mini() {
     updateModalOpen,
     showOnboarding,
     isCreateModalOpen,
+    updateWalkDir,
   ])
 
   // Pet mode: auto-detect music/video from frontmost app
@@ -1673,6 +1598,13 @@ export default function Mini() {
             mascotScale: initialMascotScale,
           })
         } catch {}
+        // `set_mini_size` schedules its NSWindow resize on the main thread
+        // and returns immediately, so the modal would otherwise render
+        // inside the still-collapsed 96x96 frame and clip its own
+        // contents (clicks effectively land outside the visible area).
+        // A short delay lets the resize land before React mounts the
+        // modal at a sane size.
+        await new Promise<void>((r) => setTimeout(r, 120))
         setShowOnboarding(true)
       }
 
@@ -2117,8 +2049,6 @@ export default function Mini() {
         setAutoExpandOnTask(aet)
         autoExpandOnTaskRef.current = aet
       }
-      const dsa = await store.get('disable_sleep_anim')
-      if (typeof dsa === 'boolean') setDisableSleepAnim(dsa)
       const lm = await store.get('large_mascot')
       if (typeof lm === 'boolean' && appModeRef.current !== 'pet') {
         setLargeMascot(lm)
@@ -2408,13 +2338,26 @@ export default function Mini() {
     if (collapsingRef.current || expandingRef.current) return
     expandingRef.current = true
     setHiding(true)
+    // The native window has to be resized + repositioned before the
+    // expanded panel can render correctly. During that transition both
+    // Windows DWM and macOS WindowServer keep compositing the previous
+    // frame, so the collapsed mascot briefly appears at the new (notch-
+    // area) window location before the webview supplies a fresh frame.
+    // Hide the entire document during the transition and reveal it
+    // once the expanded panel has rendered. (Originally a Windows-only
+    // workaround; macOS exhibits the same ghost when hover-opening the
+    // panel from the notch.)
+    document.documentElement.style.opacity = '0'
     try {
       await new Promise<void>((r) => setTimeout(r, 50))
       await syncExpandedWindowLayout(viewModeRef.current)
       setExpanded(true)
       expandedRef.current = true
       requestAnimationFrame(() => {
-        requestAnimationFrame(() => setShowPanel(true))
+        requestAnimationFrame(() => {
+          setShowPanel(true)
+          document.documentElement.style.opacity = '1'
+        })
       })
     } catch (e) {
       console.warn('[mini] expand failed:', e)
@@ -2422,6 +2365,7 @@ export default function Mini() {
       setExpanded(false)
       expandedRef.current = false
       expandedWindowModeRef.current = null
+      document.documentElement.style.opacity = '1'
     } finally {
       setHiding(false)
       expandingRef.current = false
@@ -2549,20 +2493,39 @@ export default function Mini() {
     let cancelled = false
     const checkForUpdates = async () => {
       try {
+        // Always fetch — we want the `ui` block (e.g. petdex url) even
+        // when the modal cadence gate skips showing the update prompt.
+        const info = (await invoke('check_for_update', {
+          lang: i18n.language,
+        })) as UpdateModalInfo & { ui?: { petdex?: { url?: string } } | null }
+        if (cancelled) return
+        const remoteUrl = info?.ui?.petdex?.url
+        if (typeof remoteUrl === 'string' && /^https?:\/\//i.test(remoteUrl)) {
+          setPetdexUrl(remoteUrl)
+          setPetdexFailed(false)
+        } else {
+          // Server reachable but field missing/invalid: still treat as
+          // an error from the user's POV so the picker explains itself.
+          setPetdexFailed(true)
+        }
+        // Modal display is still rate-limited to once per day so we
+        // don't pester the user with the "new version" prompt on every
+        // app launch.
         const store = await load('settings.json', { defaults: {}, autoSave: true })
         const now = Date.now()
         const lastCheckedAt = Number((await store.get('update_last_check_at')) ?? 0)
         if (lastCheckedAt > 0 && now - lastCheckedAt < 86_400_000) return
         await store.set('update_last_check_at', now)
         await store.save()
-        const info = (await invoke('check_for_update', { lang: i18n.language })) as UpdateModalInfo
         if (!info?.hasUpdate) return
         const skippedVersion = ((await store.get('skipped_update_version')) as string) || ''
         if (skippedVersion && skippedVersion === info.latest) return
-        if (cancelled) return
         openAvailableUpdateModal(info)
       } catch {
-        /* ignore */
+        // Fetch failed entirely (offline, DNS, server down, etc.).
+        // Surface this to the petdex section via the "failed" flag so
+        // it can show a network error instead of silently breaking.
+        if (!cancelled) setPetdexFailed(true)
       }
     }
     void checkForUpdates()
@@ -2672,12 +2635,94 @@ export default function Mini() {
         }
         return
       }
-      // Coding mode: always expand immediately on click, independent of mascot size.
-      // This avoids pointerup/drag timing races on Windows.
+      // Coding mode collapsed mascot: drag to reposition, click (no movement)
+      // to expand the panel. Drag direction is mirrored into the codex
+      // sprite via updateWalkDir so the pet visibly runs while moving.
       if (!moveModeRef.current && appModeRef.current !== 'pet') {
-        hoverExpandedRef.current = false
-        setCompletionSessionId(null)
-        expand()
+        if (e.button !== 0 || e.ctrlKey || collapsingRef.current) return
+        // On macOS the cursor poll in lib.rs (efficiency_hover_poll) drives
+        // the drag itself via translate_mini_frame + mini-mascot-walk events.
+        // Letting the webview path also call move_mini_by would double the
+        // motion, so swallow the pointerdown here and rely on the Rust
+        // poll for translation + walk-dir + persistence.
+        if (!isWindowsPlatform) {
+          e.preventDefault()
+          return
+        }
+        // The window-focus auto-expand fires slightly before pointerdown
+        // when clicking an unfocused mini window. Cancel it so this click
+        // path is the single source of truth for expand vs drag —
+        // otherwise a quick wiggle ends up dragging the auto-expanded
+        // panel.
+        cancelFocusExpand()
+        e.preventDefault()
+        setMascotDragActive(true)
+        const startX = e.screenX
+        const startY = e.screenY
+        let lastX = e.screenX
+        let lastY = e.screenY
+        let dragging = false
+        const pid = e.pointerId
+        const DRAG_THRESHOLD = 3
+
+        const onMove = (ev: PointerEvent) => {
+          if (ev.pointerId !== pid) return
+          if (!dragging) {
+            if (Math.abs(ev.screenX - startX) + Math.abs(ev.screenY - startY) >= DRAG_THRESHOLD) {
+              dragging = true
+            } else {
+              return
+            }
+          }
+          const dx = ev.screenX - lastX
+          const dy = ev.screenY - lastY
+          lastX = ev.screenX
+          lastY = ev.screenY
+          if (dx !== 0 || dy !== 0) {
+            invoke('move_mini_by', { dx, dy }).catch(() => {})
+            if (dx !== 0) updateWalkDir(dx > 0 ? 1 : -1)
+          }
+        }
+
+        const cleanup = () => {
+          setMascotDragActive(false)
+          updateWalkDir(0)
+          window.removeEventListener('pointermove', onMove)
+          window.removeEventListener('pointerup', onUp)
+          window.removeEventListener('pointercancel', onCancel)
+        }
+
+        const onCancel = (ev: PointerEvent) => {
+          if (ev.pointerId !== pid) return
+          cleanup()
+        }
+
+        const onUp = (ev: PointerEvent) => {
+          if (ev.pointerId !== pid) return
+          cleanup()
+          if (!dragging) {
+            // macOS opens the panel via notch hover (efficiency_hover_poll),
+            // so a tap on the mascot stays a no-op there. Windows has no
+            // notch detection, so a tap is the only way to open the panel.
+            if (isWindowsPlatform) {
+              hoverExpandedRef.current = false
+              setCompletionSessionId(null)
+              expand()
+            }
+          } else {
+            invoke('get_mini_origin').then(async (pos) => {
+              const [x, y] = pos as [number, number]
+              customPosRef.current = { x, y }
+              const store = await load('settings.json', { defaults: {}, autoSave: true })
+              await store.set('mini_custom_pos', { x, y })
+              await store.save()
+            }).catch(() => {})
+          }
+        }
+
+        window.addEventListener('pointermove', onMove)
+        window.addEventListener('pointerup', onUp, { once: true })
+        window.addEventListener('pointercancel', onCancel, { once: true })
         return
       }
       if (e.button !== 0 || e.ctrlKey || collapsingRef.current) return
@@ -2723,7 +2768,7 @@ export default function Mini() {
       if (!isMoveMode && largeMascotRef.current && pomodoroRef.current?.active) return
       if (!isMoveMode && largeMascotRef.current) {
         e.preventDefault()
-        mascotDragActiveRef.current = true
+        setMascotDragActive(true)
         let lastX = e.screenX
         let lastY = e.screenY
         let dragging = false
@@ -2751,7 +2796,7 @@ export default function Mini() {
         }
 
         const cleanup = () => {
-          mascotDragActiveRef.current = false
+          setMascotDragActive(false)
           if (largePetActionRef.current === 'grasp') {
             setLargePetAction(null)
             largePetActionRef.current = null
@@ -2803,8 +2848,9 @@ export default function Mini() {
                   playPetAudio('headpat')
                 }
               }
-            } else {
-              // Coding mode should open panel on click, regardless of large mascot size.
+            } else if (isWindowsPlatform) {
+              // Coding mode: tap-to-open is Windows-only. macOS uses the
+              // notch-hover poll instead so the click stays a no-op.
               hoverExpandedRef.current = false
               setCompletionSessionId(null)
               expand()
@@ -2833,7 +2879,7 @@ export default function Mini() {
       // a native window move (which kills pointer capture and fires
       // lostpointercapture, aborting the first drag attempt).
       e.preventDefault()
-      mascotDragActiveRef.current = true
+      setMascotDragActive(true)
 
       let lastX = e.screenX
       let lastY = e.screenY
@@ -2859,11 +2905,15 @@ export default function Mini() {
         const dy = ev.screenY - lastY
         lastX = ev.screenX
         lastY = ev.screenY
-        if (dx !== 0 || dy !== 0) invoke('move_mini_by', { dx, dy })
+        if (dx !== 0 || dy !== 0) {
+          invoke('move_mini_by', { dx, dy })
+          if (dx !== 0) updateWalkDir(dx > 0 ? 1 : -1)
+        }
       }
 
       const cleanup = () => {
-        mascotDragActiveRef.current = false
+        setMascotDragActive(false)
+        updateWalkDir(0)
         if (largeMascotRef.current && largePetActionRef.current === 'grasp') {
           setLargePetAction(null)
           largePetActionRef.current = null
@@ -2907,12 +2957,12 @@ export default function Mini() {
       window.addEventListener('pointerup', onUp)
       window.addEventListener('pointercancel', onCancel)
     },
-    [expand],
+    [expand, updateWalkDir, cancelFocusExpand],
   )
 
   const enterMoveMode = useCallback(async () => {
     moveModeRef.current = true
-    mascotDragActiveRef.current = true
+    setMascotDragActive(true)
     // Immediately hide everything, skip the panel close animation so the
     // user doesn't see a 350ms delay followed by a position jump.
     setShowPanel(false)
@@ -2937,12 +2987,25 @@ export default function Mini() {
     setMoveMode(true)
     setHiding(false)
     setTimeout(() => {
-      if (moveModeRef.current) mascotDragActiveRef.current = false
+      if (moveModeRef.current) setMascotDragActive(false)
     }, 500)
   }, [restoreCollapsedMascotPosition])
 
   const collapse = useCallback(async () => {
     if (collapsingRef.current) return
+    // Defense in depth: while a native folder picker is in flight (or its
+    // post-close grace window is still active), don't tear down the
+    // expanded/settings UI underneath it.
+    if (isSettingsPickerBlockingClose()) {
+      debugToTerminal('close', 'collapse blocked: settings picker active')
+      return
+    }
+    // The enter/exit-settings transition resizes the native window which
+    // can momentarily steal focus → onBlur → collapse. Skip collapse
+    // while we're mid-transition so the UI we're building isn't torn
+    // down before it appears.
+    if (settingsTransitioningRef.current) return
+    debugToTerminal('close', 'collapse proceed')
     collapsingRef.current = true
     hoverExpandedRef.current = false
     setCompletionSessionId(null)
@@ -2963,6 +3026,8 @@ export default function Mini() {
     }
     const delay = isWindowsPlatform ? 150 : wasSettings ? 280 : 480
     setTimeout(async () => {
+      debugToTerminal('close', `collapse timeout fired (wasSettings=${wasSettings})`)
+      settingsPickerOpenRef.current = false
       settingsModeRef.current = false
       setSettingsMode(false)
       setShowSettingsOverlay(false)
@@ -3026,7 +3091,7 @@ export default function Mini() {
         settingsTransitioningRef.current = false
       }, 300)
     }, delay)
-  }, [fetchAgents, restoreCollapsedMascotPosition])
+  }, [fetchAgents, restoreCollapsedMascotPosition, debugToTerminal, isSettingsPickerBlockingClose])
 
   // ── Efficiency-mode notch hover tracking (native cursor polling) ──
   // On macOS the mini window sits in the menu-bar / notch area where the
@@ -3045,6 +3110,58 @@ export default function Mini() {
       invoke('set_efficiency_hover_tracking', { active: false }).catch(() => {})
     }
   }, [viewMode, moveMode, updateModalOpen, settingsMode, settingsTransitioning, appMode])
+
+  // Bridge the Rust cursor poll's `mini-mascot-hover` event to local state
+  // so the codex sprite can play its jump animation on hover even before
+  // the user has focused the mini window. macOS does not deliver
+  // mouseEntered to non-key floating windows, which is why webview-only
+  // hover handling alone leaves the mascot frozen until first click.
+  useEffect(() => {
+    if (appMode === 'pet') return
+    const unlisten = listen<boolean>('mini-mascot-hover', (event) => {
+      setMascotHover(!!event.payload)
+    })
+    return () => {
+      unlisten.then((fn) => fn())
+    }
+  }, [appMode])
+
+  // Mirror the run-left/run-right sprite state during a Rust-driven drag.
+  // The poll thread emits walk-dir = -1 / 1 / 0 as the user drags the
+  // mascot horizontally so the sprite matches the drag direction.
+  useEffect(() => {
+    if (appMode === 'pet') return
+    const unlisten = listen<number>('mini-mascot-walk', (event) => {
+      const dir = event.payload
+      if (dir === 1 || dir === -1 || dir === 0) {
+        updateWalkDir(dir)
+      }
+    })
+    return () => {
+      unlisten.then((fn) => fn())
+    }
+  }, [appMode, updateWalkDir])
+
+  // Persist the mascot's new origin after a Rust-driven drag finishes so
+  // the position survives across collapsed/expanded mode switches.
+  useEffect(() => {
+    if (appMode === 'pet') return
+    const unlisten = listen('mini-mascot-drag-end', async () => {
+      try {
+        const pos = (await invoke('get_mini_origin')) as [number, number]
+        const [x, y] = pos
+        customPosRef.current = { x, y }
+        const store = await load('settings.json', { defaults: {}, autoSave: true })
+        await store.set('mini_custom_pos', { x, y })
+        await store.save()
+      } catch {
+        /* ignore */
+      }
+    })
+    return () => {
+      unlisten.then((fn) => fn())
+    }
+  }, [appMode])
 
   useEffect(() => {
     if (viewMode !== 'efficiency' || appMode === 'pet') return
@@ -3106,6 +3223,7 @@ export default function Mini() {
 
   const enterSettings = useCallback(async () => {
     if (settingsModeRef.current || settingsTransitioningRef.current) return
+    settingsPickerOpenRef.current = false
     hoverExpandedRef.current = false
     settingsTransitioningRef.current = true
     setSelectedAgentId(null)
@@ -3137,8 +3255,29 @@ export default function Mini() {
     settingsTransitioningRef.current = false
   }, [])
 
-  const exitSettings = useCallback(async () => {
+  // `force` is set when the close path is a trusted, in-app user action
+  // (e.g. clicking the ✕ button). Untrusted paths (blur / backdrop click)
+  // still go through the picker-grace guard so macOS-synthesised events
+  // can't tear settings down right after a native dialog closes.
+  const exitSettings = useCallback(async (force = false) => {
     if (!settingsModeRef.current || settingsTransitioningRef.current) return
+    if (!force && isSettingsPickerBlockingClose()) {
+      debugToTerminal('close', 'exitSettings blocked: settings picker active')
+      return
+    }
+    if (force) {
+      // The X button click is the user explicitly asking to close.
+      // Drop any lingering picker grace so subsequent blurs / outside
+      // clicks during the close animation don't double-fire spurious
+      // collapses on the now-closed settings panel.
+      settingsPickerOpenRef.current = false
+      settingsPickerCloseGraceUntilRef.current = 0
+      if (nativeDialogActiveRef.current) {
+        setNativeDialogActive(false)
+      }
+    }
+    debugToTerminal('close', `exitSettings proceed force=${force}`)
+    setIsCreateModalOpen(false)
     settingsTransitioningRef.current = true
     setShowSettingsOverlay(false)
     try {
@@ -3148,6 +3287,12 @@ export default function Mini() {
       setSettingsMode(false)
       setSettingsNav('pairing')
       // Always return to collapsed visual state when leaving settings.
+      // Hide the collapsed mascot tree until the native window has been
+      // resized + repositioned. Without this guard React would render the
+      // collapsed mascot inside the still-large settings window, briefly
+      // showing it centred in the old (settings) frame before Rust snaps
+      // the window back — visually that looks like the mascot teleports.
+      setHiding(true)
       setShowPanel(false)
       setExpanded(false)
       expandedRef.current = false
@@ -3191,22 +3336,31 @@ export default function Mini() {
       }
     } finally {
       // Always clear transition/hiding guards so mascot can't get stuck invisible.
+      settingsPickerOpenRef.current = false
       setSettingsTransitioning(false)
       settingsTransitioningRef.current = false
       setHiding(false)
+      debugToTerminal('close', 'exitSettings finished')
     }
-  }, [fetchAgents, restoreCollapsedMascotPosition])
+  }, [fetchAgents, restoreCollapsedMascotPosition, debugToTerminal, isSettingsPickerBlockingClose, setNativeDialogActive])
 
   // Click outside to collapse (only when not pinned)
   useEffect(() => {
     if (!expanded || pinned || settingsMode || settingsTransitioning || updateModalOpen) return
     const onClick = (e: MouseEvent) => {
       if (isCreateModalOpenRef.current) return
-      if (!(e.target as HTMLElement).closest('#mini-panel')) collapse()
+      if (isSettingsPickerBlockingClose()) {
+        debugToTerminal('outside', 'window mousedown ignored: settings picker active')
+        return
+      }
+      if (!(e.target as HTMLElement).closest('#mini-panel')) {
+        debugToTerminal('outside', 'window mousedown outside mini-panel -> collapse')
+        collapse()
+      }
     }
     window.addEventListener('mousedown', onClick)
     return () => window.removeEventListener('mousedown', onClick)
-  }, [expanded, pinned, settingsMode, settingsTransitioning, updateModalOpen, collapse])
+  }, [expanded, pinned, settingsMode, settingsTransitioning, updateModalOpen, collapse, debugToTerminal, isSettingsPickerBlockingClose])
 
   // Window blur: collapse when user clicks outside the app (when not pinned, or in settings mode)
   // Skip blur when a file picker dialog is open
@@ -3220,22 +3374,58 @@ export default function Mini() {
       const el = e.target as HTMLElement
       if (el instanceof HTMLInputElement && el.type === 'file') {
         filePickerOpenRef.current = true
+        debugToTerminal('blur', 'clickCapture mark filePickerOpen=true (input[type=file])')
       }
       if (el.closest('a[target="_blank"]')) {
         filePickerOpenRef.current = true
+        debugToTerminal('blur', 'clickCapture mark filePickerOpen=true (target=_blank)')
       }
     }
     const onFocus = () => {
       filePickerOpenRef.current = false
+      debugToTerminal('blur', 'window focus -> filePickerOpen=false')
+      // We're back in front. Re-assert always-on-top here too: macOS can
+      // sometimes demote the level silently before our blur listener
+      // observes it, leaving the settings panel sitting at normal level
+      // when focus returns. This is cheap and idempotent.
+      if (isSettingsPickerBlockingClose() || settingsModeRef.current) {
+        invoke('reassert_floating').catch(() => {})
+      }
     }
     const onBlur = () => {
-      if (filePickerOpenRef.current) return
+      if (filePickerOpenRef.current) {
+        debugToTerminal('blur', 'ignore blur: filePickerOpen=true')
+        return
+      }
+      if (isSettingsPickerBlockingClose()) {
+        debugToTerminal('blur', 'ignore blur: settings picker active')
+        // Re-assert always-on-top whenever we lose focus while a native
+        // dialog is open. Both Windows and macOS will demote our floating
+        // mini window back to a normal level when another app (or the
+        // dialog itself) becomes active, which makes the settings panel +
+        // picker visually disappear behind other windows. Pinging Rust
+        // here pulls the window back up to status level immediately.
+        invoke('reassert_floating').catch(() => {})
+        return
+      }
+      // Resizing the native window via `set_mini_size` during the
+      // enter/exit-settings transition can momentarily steal focus from
+      // the webview. Without this guard, the resulting blur tears the
+      // half-built settings UI back down via `collapse()`, leaving the
+      // user staring at an empty mascot ("设置页出不来"). Skip blur while
+      // either transition is in flight.
+      if (settingsTransitioningRef.current) {
+        debugToTerminal('blur', 'ignore blur: settingsTransitioning=true')
+        return
+      }
       // When settings is open, use the dedicated close path so pet mode
       // restores window geometry/state consistently.
       if (settingsModeRef.current) {
+        debugToTerminal('blur', 'blur -> exitSettings')
         exitSettings()
         return
       }
+      debugToTerminal('blur', 'blur -> collapse')
       collapse()
     }
     window.addEventListener('click', onClickCapture, true)
@@ -3246,21 +3436,41 @@ export default function Mini() {
       window.removeEventListener('blur', onBlur)
       window.removeEventListener('focus', onFocus)
     }
-  }, [expanded, pinned, settingsMode, updateModalOpen, collapse, exitSettings])
+  }, [expanded, pinned, settingsMode, updateModalOpen, collapse, exitSettings, debugToTerminal, isSettingsPickerBlockingClose])
 
   useEffect(() => {
     if (expanded || moveMode || updateModalOpen) return
+    // Auto-expand on window focus is Windows-only. macOS opens the panel
+    // through the notch-hover poll, and clicking the mascot will focus the
+    // mini window — auto-expanding here would re-introduce the popup that
+    // we explicitly suppressed in the pointerdown handler.
+    if (!isWindowsPlatform) return
     const onFocus = () => {
       if (appModeRef.current === 'pet') return // no auto-expand in pet mode
       if (collapsingRef.current || moveModeRef.current || mascotDragActiveRef.current) return
       // Large mascot uses long-press to expand; auto-expand on focus
       // would race with the pointerdown handler and steal the click.
       if (largeMascotRef.current) return
-      expand()
+      // Defer expand by one tick so a pointerdown landing on the mascot
+      // can cancel it. Without this delay, clicking an unfocused mini
+      // window fires `focus` before `pointerdown`; the focus path opens
+      // the panel while the pointerdown path simultaneously starts the
+      // drag flow, dragging the freshly-opened panel along with the
+      // window. Cancellation lives in handleMascotPointerDown.
+      cancelFocusExpand()
+      focusExpandTimerRef.current = setTimeout(() => {
+        focusExpandTimerRef.current = null
+        if (collapsingRef.current || moveModeRef.current || mascotDragActiveRef.current) return
+        if (largeMascotRef.current) return
+        expand()
+      }, 80)
     }
     window.addEventListener('focus', onFocus)
-    return () => window.removeEventListener('focus', onFocus)
-  }, [expanded, expand, moveMode, updateModalOpen])
+    return () => {
+      window.removeEventListener('focus', onFocus)
+      cancelFocusExpand()
+    }
+  }, [expanded, expand, moveMode, updateModalOpen, cancelFocusExpand])
 
   // Exit move mode when clicking outside mascot or when window loses focus.
   // Use a debounced blur so that programmatic window moves (which briefly
@@ -3296,7 +3506,14 @@ export default function Mini() {
   const hasWorking = anySessionActive || Object.values(healthMap).some(Boolean) || claudeWorking || claudeCompacting || claudeWaiting
   // Priority: waiting > compacting > working > idle
   const mainPetState: PetState = claudeWaiting ? 'waiting' : claudeCompacting ? 'compacting' : hasWorking ? 'working' : 'idle'
-  const miniGif = getMiniGif(miniChar ?? undefined, mainPetState, true)
+  // Sprite resting state for the main mascot. Walking direction (set by
+  // the walk timer) overrides the working/waiting/idle mapping so the pet
+  // visibly runs left/right while the native window is moving.
+  const mainSpriteState: CodexPetState = walkDir === 1
+    ? 'run-right'
+    : walkDir === -1
+      ? 'run-left'
+      : petStateToCodexState(mainPetState)
   const fallbackLargeActions = useMemo(() => {
     const c = characters.find((ch) => ch.largeActions && Object.keys(ch.largeActions).length > 0)
     return c?.largeActions
@@ -3304,8 +3521,10 @@ export default function Mini() {
   const largeCharForRender = (appMode === 'pet' || appMode === 'coding')
     ? ({ name: '香企鹅', largeActions: petBuiltinLargeActions } as CharacterMeta)
     : miniChar
-  const hasAnyLargeActions = !!(largeCharForRender?.largeActions && Object.keys(largeCharForRender.largeActions).length > 0) || !!(fallbackLargeActions && Object.keys(fallbackLargeActions).length > 0)
-  const showLargeMascotToggle = appMode === 'coding' || (appMode !== 'pet' && hasAnyLargeActions)
+  // hasAnyLargeActions used to gate the legacy header toggle. Toggling is
+  // now driven from the pet picker (selecting 香企鹅 enters large-mascot
+  // mode), so the predicate itself is no longer referenced — but we keep
+  // the computation cheap in case future logic wants to read it.
   const largeVideoBaseUrl = largeMascot
     ? appMode === 'pet'
       ? getLargeVideoPetMode(largeCharForRender ?? undefined, currentPetAction, fallbackLargeActions)
@@ -3430,23 +3649,6 @@ export default function Mini() {
   // <video> elements remount — leaving the mascot blank after closing a popup.
   }, [largeVideoUrl, expanded, hiding])
 
-  const handleDeleteChar = useCallback(async (name: string) => {
-    try {
-      await invoke('delete_character_assets', { name })
-      const chars = await loadCharacters()
-      setCharacters(chars)
-    } catch (e) {
-      console.warn('delete char failed:', e)
-    }
-  }, [])
-  const saveCharQueue = useCallback(async (queue: string[]) => {
-    setCharQueue(queue)
-    const store = await load('settings.json', { defaults: {}, autoSave: true })
-    await store.set('char_queue', queue)
-    await store.save()
-  }, [])
-  const [queuePickerOpen, setQueuePickerOpen] = useState(false)
-
   const inAgentDetail = selectedAgentId !== null
   const selectedAgent = agents.find((a) => a.id === selectedAgentId)
   const inDetailPage = inAgentDetail || selectedClaudeSession !== null || selectedSessionKey !== null || showClaudeStats
@@ -3546,8 +3748,8 @@ export default function Mini() {
   const collapsedMascotSize = Math.round(MASCOT_BASE_SIZE * mascotScale)
   const collapsedPlaceholderRadius = Math.round(10 * mascotScale)
   const collapsedPlaceholderFontSize = Math.max(16, Math.round(16 * mascotScale))
-  const collapsedStatusSize = largeMascot ? 6 : 8
-  const collapsedStatusBorder = largeMascot ? 1.1 : 1.5
+  const collapsedStatusSize = largeMascot ? 5 : 6
+  const collapsedStatusBorder = largeMascot ? 1.1 : 1.2
   const largeMascotVisualSize = collapsedMascotSize * largeMascotScale
 
   useEffect(() => {
@@ -3626,7 +3828,7 @@ export default function Mini() {
             height: '100%',
             position: 'relative',
             display: (appMode === 'pet' && largeMascot) ? 'block' : 'flex',
-            alignItems: (appMode === 'pet' && largeMascot) ? undefined : 'flex-start',
+            alignItems: (appMode === 'pet' && largeMascot) ? undefined : 'center',
             justifyContent: (appMode === 'pet' && largeMascot) ? undefined : 'center',
             background: (viewMode === 'efficiency' && appMode !== 'pet') ? 'rgba(0,0,0,0.01)' : undefined,
             pointerEvents: 'auto',
@@ -3777,14 +3979,24 @@ export default function Mini() {
                   />
                 )
               })}
-            </div>) : miniGif ? (
-              disableSleepAnim && mainPetState === 'idle' ? (
-                <FrozenImg src={miniGif} style={{ width: collapsedMascotSize, height: collapsedMascotSize, objectFit: 'contain', pointerEvents: 'none' }} draggable={false} />
-              ) : mainPetState === 'compacting' ? (
-                <IntervalGif src={miniGif} style={{ width: collapsedMascotSize, height: collapsedMascotSize, objectFit: 'contain', pointerEvents: 'none' }} />
-              ) : (
-                <img src={miniGif} alt="mini" style={{ width: collapsedMascotSize, height: collapsedMascotSize, objectFit: 'contain', pointerEvents: 'none' }} draggable={false} />
-              )
+            </div>) : miniPet ? (
+              <div
+                style={{
+                  position: 'relative',
+                  width: collapsedMascotSize * MINI_SPRITE_DISPLAY_MULTIPLIER,
+                  height: Math.round(collapsedMascotSize * MINI_SPRITE_DISPLAY_MULTIPLIER * (208 / 192)),
+                }}
+              >
+                <MiniPetMascot
+                  pet={miniPet}
+                  baseState={mainSpriteState}
+                  size={collapsedMascotSize * MINI_SPRITE_DISPLAY_MULTIPLIER}
+                  enableHoverJump
+                  externalHover={mascotHover}
+                  useExternalHover={!isWindowsPlatform}
+                  suppressHover={mascotDragActive}
+                />
+              </div>
             ) : (
               <div
                 style={{
@@ -3806,8 +4018,8 @@ export default function Mini() {
               <div
                 style={{
                   position: 'absolute',
-                  bottom: 0,
-                  right: 0,
+                  bottom: 8,
+                  right: 10,
                   width: collapsedStatusSize,
                   height: collapsedStatusSize,
                   borderRadius: '50%',
@@ -4016,31 +4228,12 @@ export default function Mini() {
               >
                 {soundEnabled || codexSoundEnabled || cursorSoundEnabled ? <Bell className="w-4 h-4" strokeWidth={2.5} /> : <BellOff className="w-4 h-4" strokeWidth={2.5} />}
               </button>
-              {showLargeMascotToggle && (
-                <button
-                  data-no-drag
-                  onClick={async (e) => {
-                    e.stopPropagation()
-                    const next = !largeMascot
-                    setLargeMascot(next)
-                    largeMascotRef.current = next
-                    if (largeActionTimerRef.current) clearTimeout(largeActionTimerRef.current)
-                    largeActionTimerRef.current = null
-                    setLargePetAction(null)
-                    largePetActionRef.current = null
-                    const store = await load('settings.json', { defaults: {}, autoSave: true })
-                    await store.set('large_mascot', next)
-                    await store.save()
-                  }}
-                  className={`transition-colors ${largeMascot ? 'text-[#F0D140]' : 'text-slate-400 hover:text-slate-200'}`}
-                  title={largeMascot ? '切换到小看板娘' : '切换到大看板娘'}
-                >
-                  {largeMascot ? <Minimize className="w-4 h-4" strokeWidth={2.5} /> : <Maximize className="w-4 h-4" strokeWidth={2.5} />}
-                </button>
-              )}
             </div>
             <div className="flex items-center gap-4">
-              {appMode !== 'pet' && (
+              {/* Move-mode toggle is Windows-only. macOS supports direct
+                  drag from the collapsed mascot, so the explicit toggle is
+                  redundant there. Pet mode never shows this button. */}
+              {isWindowsPlatform && appMode !== 'pet' && (
                 <button
                   data-no-drag
                   onClick={(e) => {
@@ -4203,12 +4396,10 @@ export default function Mini() {
                                 const agent = agents.find((a) => a.id === s.agentId)
                                 const seq = (agentSeqCount[s.agentId] = (agentSeqCount[s.agentId] || 0) + 1)
                                 const agentName = `${agent?.identityEmoji || ''} ${agent?.identityName || s.agentId}`.trim()
-                                const charName = agentCharMap[s.agentId]
-                                const charMeta = characters.find((c) => c.name === charName)
                                 const recentlyDone = !s.active && s.updatedAt && Date.now() - s.updatedAt < 5 * 60 * 1000
                                 const showCharGif = s.active || recentlyDone
                                 const petState: PetState = s.active ? 'working' : 'idle'
-                                const gif = charMeta ? getMiniGif(charMeta, petState) : undefined
+                                const ocSpriteState: CodexPetState = petStateToCodexState(petState)
                                 const title = `${agentName} #${seq}`
                                 const subtitle = s.lastUserMsg || ''
                                 const timeAgo = formatTimeAgo(s.updatedAt)
@@ -4256,24 +4447,31 @@ export default function Mini() {
                                           e.stopPropagation()
                                           openOcDetail()
                                         }}
-                                        className="relative shrink-0 w-10 h-10 flex items-center justify-center cursor-pointer"
+                                        className="relative shrink-0 flex items-center justify-center cursor-pointer"
+                                        style={{
+                                          width: Math.round(40 * SESSION_SPRITE_DISPLAY_MULTIPLIER),
+                                          height: Math.round(40 * SESSION_SPRITE_DISPLAY_MULTIPLIER * (208 / 192)),
+                                        }}
                                       >
                                         <div className="absolute inset-0" style={{ left: -16 }} />
-                                        {gif ? (
-                                          <img src={gif} alt="" className="w-10 h-10 object-contain" style={{ imageRendering: 'pixelated' }} draggable={false} />
-                                        ) : (
-                                          <span className="text-white/40 text-lg">{agent?.identityEmoji || '?'}</span>
-                                        )}
+                                        {(() => {
+                                          const rowPet = getQueuePet(index)
+                                          return rowPet ? (
+                                            <SpritePet pet={rowPet} state={ocSpriteState} size={Math.round(40 * SESSION_SPRITE_DISPLAY_MULTIPLIER)} />
+                                          ) : (
+                                            <span className="text-white/40 text-lg">{agent?.identityEmoji || '?'}</span>
+                                          )
+                                        })()}
                                         <div
                                           style={{
                                             position: 'absolute',
-                                            bottom: 0,
-                                            right: 0,
-                                            width: 8,
-                                            height: 8,
+                                            bottom: -2,
+                                            right: -2,
+                                            width: 6,
+                                            height: 6,
                                             borderRadius: '50%',
                                             background: recentlyDone ? '#94a3b8' : '#2ecc71',
-                                            border: '1.5px solid rgba(0,0,0,0.3)',
+                                            border: '1.2px solid rgba(0,0,0,0.3)',
                                           }}
                                         />
                                       </div>
@@ -4371,10 +4569,8 @@ export default function Mini() {
                                 const isWorking = isActive || isWaiting || isCompacting
                                 const recentlyDone = !isWorking && cs.status === 'stopped' && cs.updatedAt && Date.now() - cs.updatedAt < 5 * 60 * 1000
                                 const showCharGif = isWorking || recentlyDone
-                                const ci = 'claudeIdx' in item ? (item as { claudeIdx: number }).claudeIdx : 0
-                                const charMeta = characters.find((c) => c.name === charQueue[ci % charQueue.length])
-                                const petState = isWaiting ? 'waiting' : isCompacting ? 'compacting' : isActive ? 'working' : 'idle'
-                                const gif = charMeta ? getMiniGif(charMeta, petState) : undefined
+                                const petState: PetState = isWaiting ? 'waiting' : isCompacting ? 'compacting' : isActive ? 'working' : 'idle'
+                                const claudeSpriteState: CodexPetState = petStateToCodexState(petState)
                                 const subtitle = cs.userPrompt || ''
                                 const timeAgo = formatTimeAgo(cs.updatedAt || 0)
                                 const isCursorSource = cs.source === 'cursor'
@@ -4417,24 +4613,31 @@ export default function Mini() {
                                             e.stopPropagation()
                                             openClaudeDetail()
                                           }}
-                                          className="relative shrink-0 w-10 h-10 flex items-center justify-center cursor-pointer"
+                                          className="relative shrink-0 flex items-center justify-center cursor-pointer"
+                                          style={{
+                                            width: Math.round(40 * SESSION_SPRITE_DISPLAY_MULTIPLIER),
+                                            height: Math.round(40 * SESSION_SPRITE_DISPLAY_MULTIPLIER * (208 / 192)),
+                                          }}
                                         >
                                           <div className="absolute inset-0" style={{ left: -16 }} />
-                                          {gif ? (
-                                            <img src={gif} alt="" className="w-10 h-10 object-contain" style={{ imageRendering: 'pixelated' }} draggable={false} />
-                                          ) : (
-                                            <span className="text-white/40 text-lg">🤖</span>
-                                          )}
+                                          {(() => {
+                                            const rowPet = getQueuePet(index)
+                                            return rowPet ? (
+                                              <SpritePet pet={rowPet} state={claudeSpriteState} size={Math.round(40 * SESSION_SPRITE_DISPLAY_MULTIPLIER)} />
+                                            ) : (
+                                              <span className="text-white/40 text-lg">🤖</span>
+                                            )
+                                          })()}
                                           <div
                                             style={{
                                               position: 'absolute',
-                                              bottom: 0,
-                                              right: 0,
-                                              width: 8,
-                                              height: 8,
+                                              bottom: -2,
+                                              right: -2,
+                                              width: 6,
+                                              height: 6,
                                               borderRadius: '50%',
                                               background: isWaiting ? '#f59e0b' : recentlyDone ? '#94a3b8' : '#2ecc71',
-                                              border: '1.5px solid rgba(0,0,0,0.3)',
+                                              border: '1.2px solid rgba(0,0,0,0.3)',
                                             }}
                                           />
                                         </div>
@@ -4856,38 +5059,29 @@ export default function Mini() {
                         </>
                       )}
 
-                      {sessionSlots.length === 0 &&
-                        (() => {
-                          const emptyGif = getMiniGif(miniChar ?? undefined, 'idle', true)
-                          return (
-                            <div
-                              style={{
-                                position: 'absolute',
-                                inset: 0,
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                zIndex: 2,
-                              }}
-                            >
-                              {emptyGif ? (
-                                <img
-                                  src={emptyGif}
-                                  style={{
-                                    width: 68,
-                                    height: 68,
-                                    objectFit: 'contain',
-                                    animation: 'bob 2s ease-in-out infinite',
-                                    opacity: 0.8,
-                                  }}
-                                  draggable={false}
-                                />
-                              ) : (
-                                <span style={{ color: 'rgba(255,255,255,0.3)', fontSize: 11 }}>{t('mini.waitingForAgents')}</span>
-                              )}
-                            </div>
-                          )
-                        })()}
+                      {sessionSlots.length === 0 && (
+                        <div
+                          style={{
+                            position: 'absolute',
+                            inset: 0,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            zIndex: 2,
+                          }}
+                        >
+                          {miniPet ? (
+                            <SpritePet
+                              pet={miniPet}
+                              state="idle"
+                              size={Math.round(68 * SESSION_SPRITE_DISPLAY_MULTIPLIER)}
+                              style={{ animation: 'bob 2s ease-in-out infinite', opacity: 0.8 }}
+                            />
+                          ) : (
+                            <span style={{ color: 'rgba(255,255,255,0.3)', fontSize: 11 }}>{t('mini.waitingForAgents')}</span>
+                          )}
+                        </div>
+                      )}
 
                       {(() => {
                         const shuffled = sessionSlots
@@ -4898,7 +5092,8 @@ export default function Mini() {
                           .sort((a, b) => ((a.seed * 7 + 13) % 97) - ((b.seed * 7 + 13) % 97))
 
                         return shuffled.map(({ slot, seed }, sortedIdx) => {
-                          const gif = getMiniGif(slot.char, slot.petState ?? (slot.isWorking ? 'working' : 'idle'), true)
+                          const slotPetState: PetState = slot.petState ?? (slot.isWorking ? 'working' : 'idle')
+                          const slotSpriteState: CodexPetState = petStateToCodexState(slotPetState)
                           const singleRow = sessionSlots.length <= 6
                           const row = sortedIdx < 6 ? 0 : 1
                           const col = row === 0 ? sortedIdx : sortedIdx - 6
@@ -4942,9 +5137,13 @@ export default function Mini() {
                               }}
                             >
                               <div style={{ position: 'relative' }}>
-                                {gif ? (
-                                  <img src={gif} alt={slot.char?.name} style={{ width: 56, height: 56, objectFit: 'contain' }} draggable={false} />
-                                ) : (
+                                {(() => {
+                                  const rowPet = getQueuePet(sortedIdx)
+                                  return rowPet ? (
+                                    <SpritePet pet={rowPet} state={slotSpriteState} size={Math.round(56 * SESSION_SPRITE_DISPLAY_MULTIPLIER)} />
+                                  ) : null
+                                })()}
+                                {!miniPet && petQueueResolved.length === 0 && (
                                   <div
                                     style={{
                                       width: 56,
@@ -5213,17 +5412,36 @@ export default function Mini() {
             <div
               data-no-drag
               onMouseDown={(e) => {
+                // While a native picker is active, also swallow mousedown
+                // so the underlying mini panel cannot receive a stray
+                // click that would tear down the settings layout (and
+                // leave the mascot stuck in the `hiding` state).
+                if (isSettingsPickerBlockingClose()) {
+                  debugToTerminal('overlay', 'overlay mousedown swallowed: settings picker active')
+                  e.preventDefault()
+                  e.stopPropagation()
+                  return
+                }
                 if (e.target === e.currentTarget) {
+                  debugToTerminal('overlay', 'overlay mousedown on backdrop (swallow)')
                   e.preventDefault()
                   e.stopPropagation()
                 }
               }}
               onClick={(e) => {
-                if (e.target === e.currentTarget) {
+                if (isSettingsPickerBlockingClose()) {
+                  // Always swallow clicks while a picker is in flight,
+                  // regardless of which descendant they hit.
+                  debugToTerminal('overlay', 'overlay click swallowed: settings picker active')
                   e.preventDefault()
                   e.stopPropagation()
-                  exitSettings()
+                  return
                 }
+                if (e.target !== e.currentTarget) return
+                debugToTerminal('overlay', 'overlay click backdrop -> exitSettings')
+                e.preventDefault()
+                e.stopPropagation()
+                exitSettings()
               }}
               style={{
                 position: 'fixed',
@@ -5268,7 +5486,7 @@ export default function Mini() {
                       data-no-drag
                       onClick={(e) => {
                         e.stopPropagation()
-                        exitSettings()
+                        exitSettings(true)
                       }}
                       style={{
                         background: 'rgba(255,255,255,0.06)',
@@ -5309,43 +5527,11 @@ export default function Mini() {
                     ))}
                   </div>
                 </div>
-                {showLargeMascotToggle && (
-                  <button
-                    data-no-drag
-                    onClick={async (e) => {
-                      e.stopPropagation()
-                      const next = !largeMascot
-                      setLargeMascot(next)
-                      largeMascotRef.current = next
-                      if (largeActionTimerRef.current) clearTimeout(largeActionTimerRef.current)
-                      largeActionTimerRef.current = null
-                      setLargePetAction(null)
-                      largePetActionRef.current = null
-                      const store = await load('settings.json', { defaults: {}, autoSave: true })
-                      await store.set('large_mascot', next)
-                      await store.save()
-                    }}
-                    style={{
-                      background: largeMascot ? 'rgba(240,209,64,0.15)' : 'rgba(255,255,255,0.06)',
-                      border: largeMascot ? '1px solid rgba(240,209,64,0.3)' : '1px solid transparent',
-                      color: largeMascot ? '#F0D140' : 'rgba(255,255,255,0.5)',
-                      fontSize: 11,
-                      cursor: 'pointer',
-                      padding: '3px 10px',
-                      borderRadius: 6,
-                      fontWeight: 500,
-                      marginRight: 8,
-                      transition: 'all 0.2s',
-                    }}
-                  >
-                    {largeMascot ? '小看板娘' : '🐧 大看板娘'}
-                  </button>
-                )}
                 <button
                   data-no-drag
                   onClick={(e) => {
                     e.stopPropagation()
-                    exitSettings()
+                    exitSettings(true)
                   }}
                   className="text-slate-400 hover:text-rose-500 transition-colors ml-1"
                 >
@@ -5357,216 +5543,63 @@ export default function Mini() {
                   {settingsNav === 'pairing' && (
                     <div className="h-full overflow-y-auto bg-[#151515] pt-6 px-6 pb-10 scrollbar-hidden">
                       <div className="max-w-3xl mx-auto">
-                        <p className="text-sm text-white/50 mb-10">{t('mini.pairingDesc')}</p>
-                        <div className="mb-8">
-                          <h2 className="text-xs font-bold text-white/30 uppercase tracking-widest mb-3 px-4">{t('mini.mascot')}</h2>
-                          <div className="bg-[#0f0f0f] rounded-2xl border border-white/5 shadow-2xl overflow-hidden">
-                            <AgentAccordionItem
-                              agent={{ id: '__mini__', identityName: t('mini.mascot') }}
-                              characters={characters}
-                              currentChar={miniChar?.name || ''}
-                              isOpen={openAccordionId === '__mini__'}
-                              onToggle={() => setOpenAccordionId(openAccordionId === '__mini__' ? null : '__mini__')}
-                              onOpenCreate={() => setIsCreateModalOpen(true)}
-                              onDeleteChar={handleDeleteChar}
-                              onSelect={async (name) => {
-                                const store = await load('settings.json', { defaults: {}, autoSave: true })
-                                await store.set('mini_character', name)
-                                await store.save()
-                                loadMiniChar()
-                              }}
-                            />
-                          </div>
-                        </div>
-                        {agents.length > 0 && (
-                          <div className="mb-8">
-                            <h2 className="text-xs font-bold text-white/30 uppercase tracking-widest mb-3 px-4">OpenClaw Agents</h2>
-                            <div className="bg-[#0f0f0f] rounded-2xl border border-white/5 shadow-2xl overflow-hidden">
-                              {agents.map((agent) => (
-                                <AgentAccordionItem
-                                  key={agent.id}
-                                  agent={agent}
-                                  characters={characters}
-                                  currentChar={agentCharMap[agent.id] || DEFAULT_CHAR_NAME}
-                                  isOpen={openAccordionId === agent.id}
-                                  onToggle={() => setOpenAccordionId(openAccordionId === agent.id ? null : agent.id)}
-                                  sourceLabel={agentSourceLabels[agent.id]}
-                                  onOpenCreate={() => setIsCreateModalOpen(true)}
-                                  onDeleteChar={handleDeleteChar}
-                                  onSelect={async (charName) => {
-                                    const updated = { ...agentCharMap, [agent.id]: charName }
-                                    setAgentCharMap(updated)
-                                    await saveAgentCharMap(updated)
-                                  }}
-                                />
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                        <div className="mb-8">
-                          <h2 className="text-xs font-bold text-white/30 uppercase tracking-widest mb-3 px-4">{t('mini.charQueue', 'Agent Character Queue')}</h2>
-                          <div className="bg-[#0f0f0f] rounded-2xl border border-white/5 shadow-2xl overflow-hidden">
-                            <div className="p-4 space-y-2">
-                              {charQueue.map((name, qi) => {
-                                const charMeta = characters.find((c) => c.name === name)
-                                const preview = charMeta ? getMiniGif(charMeta, false) : undefined
-                                return (
-                                  <div key={`${name}-${qi}`} className="flex items-center gap-3 p-2.5 rounded-xl bg-white/5 border border-white/10">
-                                    <span className="text-[11px] text-white/30 w-5 text-center shrink-0">{qi + 1}</span>
-                                    <div className="w-9 h-9 shrink-0 rounded-lg overflow-hidden bg-black/50 border border-white/10">
-                                      {preview ? (
-                                        <img src={preview} alt={name} className="w-full h-full object-contain opacity-90" style={{ imageRendering: 'pixelated' }} draggable={false} />
-                                      ) : (
-                                        <div className="w-full h-full flex items-center justify-center text-white/30 text-xs">?</div>
-                                      )}
-                                    </div>
-                                    <span className="text-sm text-white/80 truncate flex-1">{charMeta?.builtin ? t(`charNames.${name}`, name) : name}</span>
-                                    <div className="flex items-center gap-1 shrink-0">
-                                      <button
-                                        onClick={() => {
-                                          if (qi === 0) return
-                                          const q = [...charQueue]
-                                          ;[q[qi - 1], q[qi]] = [q[qi], q[qi - 1]]
-                                          saveCharQueue(q)
-                                        }}
-                                        disabled={qi === 0}
-                                        className="w-6 h-6 flex items-center justify-center rounded text-white/40 hover:text-white hover:bg-white/10 transition-colors disabled:opacity-20 disabled:cursor-not-allowed"
-                                      >
-                                        <ChevronUp className="w-3.5 h-3.5" />
-                                      </button>
-                                      <button
-                                        onClick={() => {
-                                          if (qi === charQueue.length - 1) return
-                                          const q = [...charQueue]
-                                          ;[q[qi], q[qi + 1]] = [q[qi + 1], q[qi]]
-                                          saveCharQueue(q)
-                                        }}
-                                        disabled={qi === charQueue.length - 1}
-                                        className="w-6 h-6 flex items-center justify-center rounded text-white/40 hover:text-white hover:bg-white/10 transition-colors disabled:opacity-20 disabled:cursor-not-allowed"
-                                      >
-                                        <ChevronDown className="w-3.5 h-3.5" />
-                                      </button>
-                                      <button
-                                        onClick={() => {
-                                          if (charQueue.length <= 1) return
-                                          saveCharQueue(charQueue.filter((_, j) => j !== qi))
-                                        }}
-                                        disabled={charQueue.length <= 1}
-                                        className="w-6 h-6 flex items-center justify-center rounded text-white/40 hover:text-red-400 hover:bg-red-500/10 transition-colors disabled:opacity-20 disabled:cursor-not-allowed ml-1"
-                                      >
-                                        <X className="w-3.5 h-3.5" />
-                                      </button>
-                                    </div>
-                                  </div>
-                                )
-                              })}
-                              <button
-                                onClick={() => setQueuePickerOpen(!queuePickerOpen)}
-                                className="flex items-center gap-2 w-full p-2.5 rounded-xl border border-dashed border-white/10 text-white/40 hover:text-white/70 hover:border-white/20 hover:bg-white/[0.02] transition-colors"
-                              >
-                                <Plus className="w-4 h-4" />
-                                <span className="text-sm">{t('mini.addChar', 'Add Character')}</span>
-                              </button>
-                              <AnimatePresence>
-                                {queuePickerOpen && (
-                                  <motion.div
-                                    initial={{ height: 0, opacity: 0 }}
-                                    animate={{ height: 'auto', opacity: 1 }}
-                                    exit={{ height: 0, opacity: 0 }}
-                                    transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
-                                    className="overflow-hidden"
-                                  >
-                                    <div className="pt-2 border-t border-white/5">
-                                      <div className="flex items-center justify-between mb-2">
-                                        <span className="text-[11px] text-white/30">{t('mini.selectToAdd', 'Select a character to add')}</span>
-                                        <button
-                                          onClick={() => setIsCreateModalOpen(true)}
-                                          className="flex items-center justify-center w-6 h-6 rounded text-white/40 hover:text-white hover:bg-white/10 transition-colors"
-                                          title={t('mini.createChar')}
-                                        >
-                                          <Plus className="w-3.5 h-3.5" />
-                                        </button>
-                                      </div>
-                                      <div className="max-h-[220px] overflow-y-auto pr-1 scrollbar-white">
-                                        {(() => {
-                                          const charsWithMini = characters.filter((c) => c.miniActions && Object.keys(c.miniActions).length > 0)
-                                          const groups: { ip: string; chars: typeof charsWithMini }[] = []
-                                          const ipOrder: string[] = []
-                                          for (const c of charsWithMini) {
-                                            const ip = c.ip || '自定义'
-                                            if (!ipOrder.includes(ip)) ipOrder.push(ip)
-                                          }
-                                          const customIdx = ipOrder.indexOf('自定义')
-                                          if (customIdx > 0) {
-                                            ipOrder.splice(customIdx, 1)
-                                            ipOrder.unshift('自定义')
-                                          }
-                                          const otherIdx = ipOrder.indexOf('其他')
-                                          if (otherIdx >= 0 && otherIdx < ipOrder.length - 1) {
-                                            ipOrder.splice(otherIdx, 1)
-                                            ipOrder.push('其他')
-                                          }
-                                          for (const ip of ipOrder) {
-                                            groups.push({ ip, chars: charsWithMini.filter((c) => (c.ip || '自定义') === ip) })
-                                          }
-                                          return groups.map(({ ip, chars }) => (
-                                            <div key={ip} className="mb-3 last:mb-0">
-                                              <div className="text-[10px] font-medium text-white/25 uppercase tracking-wider mb-2 px-1">
-                                                {ip === '自定义'
-                                                  ? t('mini.custom')
-                                                  : ip === '其他'
-                                                    ? t('mini.other')
-                                                    : ip === '原神'
-                                                      ? t('mini.ipGenshin')
-                                                      : ip === '赛马娘'
-                                                        ? t('mini.ipUmaMusume')
-                                                        : ip}
-                                              </div>
-                                              <div className="grid grid-cols-3 gap-2">
-                                                {chars.map((c) => {
-                                                  const cPreview = getMiniGif(c, false)
-                                                  return (
-                                                    <div
-                                                      key={c.name}
-                                                      onClick={() => {
-                                                        saveCharQueue([...charQueue, c.name])
-                                                        setQueuePickerOpen(false)
-                                                      }}
-                                                      className="flex items-center gap-2 p-2 rounded-lg bg-white/5 border border-transparent hover:bg-white/10 hover:border-white/10 cursor-pointer transition-all"
-                                                    >
-                                                      <div className="w-8 h-8 shrink-0 rounded-md overflow-hidden bg-black/50 border border-white/10">
-                                                        {cPreview ? (
-                                                          <img
-                                                            src={cPreview}
-                                                            alt={c.name}
-                                                            className="w-full h-full object-contain opacity-90"
-                                                            style={{ imageRendering: 'pixelated' }}
-                                                            draggable={false}
-                                                          />
-                                                        ) : (
-                                                          <div className="w-full h-full flex items-center justify-center text-white/30 text-xs">?</div>
-                                                        )}
-                                                      </div>
-                                                      <span className="text-xs text-white/70 truncate">{c.builtin ? t(`charNames.${c.name}`, c.name) : c.name}</span>
-                                                    </div>
-                                                  )
-                                                })}
-                                              </div>
-                                            </div>
-                                          ))
-                                        })()}
-                                      </div>
-                                    </div>
-                                  </motion.div>
-                                )}
-                              </AnimatePresence>
-                              <p className="text-[11px] text-white/20 px-1 pt-1">{t('mini.queueHint', 'Characters rotate across sessions in queue order.')}</p>
-                            </div>
-                          </div>
-                        </div>
-                        {agents.length > 0 && characters.filter((c) => c.miniActions && Object.keys(c.miniActions).length > 0).length < agents.length && (
-                          <div className="text-xs text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded-lg p-3">{t('mini.notEnoughChars')}</div>
-                        )}
+                        <p className="text-sm text-white/50 mb-6">
+                          选择小看板娘要使用的 codex 像素宠物。大看板娘（香企鹅）由顶部按钮切换。
+                        </p>
+                        <PetPicker
+                          selectedId={largeMascot ? '__xiang-qi-e__' : (miniPet?.id ?? null)}
+                          onSelect={async (pet) => {
+                            await saveMiniPetId(pet.id)
+                            setMiniPet(pet)
+                            if (largeMascot) {
+                              setLargeMascot(false)
+                              largeMascotRef.current = false
+                              const store = await load('settings.json', { defaults: {}, autoSave: true })
+                              await store.set('large_mascot', false)
+                              await store.save()
+                            }
+                          }}
+                          specialPets={[
+                            {
+                              id: '__xiang-qi-e__',
+                              displayName: '香企鹅',
+                              description: '特殊的存在',
+                              avatar: <span style={{ fontSize: 24, lineHeight: 1 }}>🐧</span>,
+                            },
+                          ]}
+                          onSelectSpecial={async (pet) => {
+                            if (pet.id !== '__xiang-qi-e__') return
+                            setLargeMascot(true)
+                            largeMascotRef.current = true
+                            if (largeActionTimerRef.current) clearTimeout(largeActionTimerRef.current)
+                            largeActionTimerRef.current = null
+                            setLargePetAction(null)
+                            largePetActionRef.current = null
+                            const store = await load('settings.json', { defaults: {}, autoSave: true })
+                            await store.set('large_mascot', true)
+                            await store.save()
+                          }}
+                          queueIds={petQueue}
+                          onChangeQueue={savePetQueue}
+                          onNativeDialogStart={() => {
+                            debugToTerminal('dialog', `native picker start (before=${nativeDialogActiveRef.current})`)
+                            if (settingsModeRef.current) {
+                              settingsPickerOpenRef.current = true
+                              debugToTerminal('dialog', 'settingsPickerOpen=true')
+                            }
+                            settingsPickerCloseGraceUntilRef.current = Date.now() + 600
+                            setNativeDialogActive(true)
+                          }}
+                          onNativeDialogEnd={() => {
+                            debugToTerminal('dialog', `native picker end (before=${nativeDialogActiveRef.current})`)
+                            settingsPickerOpenRef.current = false
+                            settingsPickerCloseGraceUntilRef.current = Date.now() + 2000
+                            debugToTerminal('dialog', 'settingsPickerOpen=false')
+                            setNativeDialogActive(false)
+                          }}
+                          petdexUrl={petdexUrl}
+                          petdexFailed={petdexFailed}
+                        />
                       </div>
                     </div>
                   )}

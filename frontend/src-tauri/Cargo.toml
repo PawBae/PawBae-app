@@ -1,6 +1,6 @@
 [package]
 name = "oc_claw"
-version = "1.8.2"
+version = "1.8.3"
 description = "OpenClaw Desktop Pet"
 authors = ["you"]
 license = "MIT"
@@ -20,6 +20,7 @@ serde = { version = "1", features = ["derive"] }
 log = "0.4"
 tauri-plugin-log = "2"
 tauri-plugin-store = "2"
+tauri-plugin-dialog = "2"
 reqwest = { version = "0.12", features = ["json"] }
 tokio = { version = "1", features = ["full"] }
 base64 = "0.22"

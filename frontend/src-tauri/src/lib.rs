@@ -48,6 +48,19 @@ static PET_CONTEXT_MENU_OPEN: AtomicBool = AtomicBool::new(false);
 /// inset region and would otherwise pass through to whatever is behind).
 static PET_POMODORO_ACTIVE: AtomicBool = AtomicBool::new(false);
 
+/// Coalesces drag-apply tasks so we never queue more than one
+/// setFrameOrigin: call on the main thread at a time. The poll thread
+/// records the anchor (cursor-to-origin offset at drag start) once; each
+/// scheduled main-thread task simply reads the live cursor position and
+/// snaps the window origin to (cursor - anchor). This is the same pattern
+/// macOS uses for native window dragging and avoids the lag introduced by
+/// accumulating deltas across pre-empted frames.
+static DRAG_TASK_PENDING: AtomicBool = AtomicBool::new(false);
+static DRAG_ANCHOR: std::sync::OnceLock<Mutex<Option<(f64, f64)>>> = std::sync::OnceLock::new();
+fn drag_anchor() -> &'static Mutex<Option<(f64, f64)>> {
+    DRAG_ANCHOR.get_or_init(|| Mutex::new(None))
+}
+
 /// Per-host SSH backoff state.
 struct SshBackoffState {
     fail_count: u32,
@@ -1475,6 +1488,12 @@ async fn scan_characters(app: tauri::AppHandle) -> Result<serde_json::Value, Str
         };
         for entry in entries.filter_map(|e| e.ok()) {
             if !entry.path().is_dir() { continue; }
+            // Skip codex sprite-pet directories. Those carry `pet.json` +
+            // `spritesheet.{webp,png}` and are consumed by the frontend's
+            // mini-mode pet loader directly, not by this anime-character
+            // scan. Without this guard the 9 builtin codex pets would
+            // pollute the IP/character lists with empty entries.
+            if entry.path().join("pet.json").is_file() { continue; }
             let name = entry.file_name().to_string_lossy().to_string();
 
             let mut work_gifs = vec![];
@@ -2955,6 +2974,7 @@ async fn get_agent_extra_info(agent_id: String, mode: Option<String>, ssh_host: 
 
 #[tauri::command]
 async fn open_mini(app: tauri::AppHandle) -> Result<(), String> {
+    log::info!("[mini-pos] open_mini called");
     if let Some(win) = app.get_webview_window("mini") {
         // Reposition to collapsed position before showing
         #[cfg(target_os = "macos")]
@@ -2995,7 +3015,13 @@ async fn open_mini(app: tauri::AppHandle) -> Result<(), String> {
                             .map(|(_, _, w, h)| (w, h))
                             .unwrap_or_else(|| collapsed_mascot_window_size(1.0));
                         let x = sx + sw / 2.0 + notch_off;
-                        let y = sy + sh - win_h;
+                        // Pull the window down by MASCOT_TOP_INSET so it
+                        // does not sit under the menu bar / notch on launch.
+                        let y = sy + sh - win_h - MASCOT_TOP_INSET;
+                        log::info!(
+                            "[mini-pos] open_mini(existing,mac) target frame x={:.1} y={:.1} w={:.1} h={:.1} inset={:.1} screen=({:.1},{:.1},{:.1},{:.1}) notch_off={:.1}",
+                            x, y, win_w, win_h, MASCOT_TOP_INSET, sx, sy, sw, sh, notch_off
+                        );
                         let frame = NSRect::new(NSPoint::new(x, y), NSSize::new(win_w, win_h));
                         unsafe {
                             let _: () = msg_send![obj, setFrame: frame, display: true];
@@ -3023,6 +3049,10 @@ async fn open_mini(app: tauri::AppHandle) -> Result<(), String> {
                 let notch_off = (80.0 * ui).round();
                 let x = sw / 2.0 + notch_off;
                 let _ = win.set_size(tauri::LogicalSize::new(win_w, win_h));
+                log::info!(
+                    "[mini-pos] open_mini(existing,win) target pos x={:.1} y={:.1} w={:.1} h={:.1} ui={:.2} notch_off={:.1}",
+                    x, 0.0, win_w, win_h, ui, notch_off
+                );
                 let _ = win.set_position(tauri::LogicalPosition::new(x, 0.0));
             }
             if !FULLSCREEN_HIDING.load(std::sync::atomic::Ordering::SeqCst) {
@@ -3085,7 +3115,13 @@ async fn open_mini(app: tauri::AppHandle) -> Result<(), String> {
                 if let Some((sx, sy, sw, sh, notch_off)) = screen_info {
                     let (win_w, win_h) = collapsed_mascot_window_size(1.0);
                     let x = sx + sw / 2.0 + notch_off;
-                    let y = sy + sh - win_h;
+                    // Pull the window down by MASCOT_TOP_INSET so the sprite
+                    // is fully visible below the menu bar / notch on launch.
+                    let y = sy + sh - win_h - MASCOT_TOP_INSET;
+                    log::info!(
+                        "[mini-pos] open_mini(new,mac) target frame x={:.1} y={:.1} w={:.1} h={:.1} inset={:.1} screen=({:.1},{:.1},{:.1},{:.1}) notch_off={:.1}",
+                        x, y, win_w, win_h, MASCOT_TOP_INSET, sx, sy, sw, sh, notch_off
+                    );
                     let frame = NSRect::new(
                         NSPoint::new(x, y),
                         NSSize::new(win_w, win_h),
@@ -3115,6 +3151,10 @@ async fn open_mini(app: tauri::AppHandle) -> Result<(), String> {
             let notch_off = (80.0 * ui).round();
             let x = sw / 2.0 + notch_off;
             let _ = win.set_size(tauri::LogicalSize::new(win_w, win_h));
+            log::info!(
+                "[mini-pos] open_mini(new,win) target pos x={:.1} y={:.1} w={:.1} h={:.1} ui={:.2} notch_off={:.1}",
+                x, 0.0, win_w, win_h, ui, notch_off
+            );
             let _ = win.set_position(tauri::LogicalPosition::new(x, 0.0));
         }
         if !FULLSCREEN_HIDING.load(std::sync::atomic::Ordering::SeqCst) {
@@ -3142,8 +3182,17 @@ fn collapsed_x(sx: f64, sw: f64, win_w: f64, position: &str, notch_offset: f64) 
     }
 }
 
-const COLLAPSED_MASCOT_BASE_W: f64 = 60.0;
-const COLLAPSED_MASCOT_BASE_H: f64 = 45.0;
+// Bumped from 60x45 so the codex sprite-pet (rendered at ~86x93 CSS px due
+// to the MINI_SPRITE_DISPLAY_MULTIPLIER=2 used in Mini.tsx) fits entirely
+// inside the native window. Without the extra room the sprite gets clipped
+// at the bottom/right edges of the OS-level mascot window.
+const COLLAPSED_MASCOT_BASE_W: f64 = 96.0;
+const COLLAPSED_MASCOT_BASE_H: f64 = 96.0;
+// Vertical inset applied to the default mascot position so the sprite is
+// always rendered below the macOS menu bar / notch (or the equivalent top
+// chrome on Windows). Covers both notched (~38pt) and non-notched (~24pt)
+// menu bars with extra breathing room.
+const MASCOT_TOP_INSET: f64 = 120.0;
 const MASCOT_SCALE_MIN: f64 = 1.0;
 const MASCOT_SCALE_MAX: f64 = 3.0;
 const LARGE_MASCOT_SIZE_MULTIPLIER: f64 = 3.0;
@@ -3420,6 +3469,7 @@ async fn get_mini_monitor_rect(app: tauri::AppHandle) -> Result<(f64, f64, f64, 
 /// macOS: bottom-left origin. Windows: top-left origin.
 #[tauri::command]
 async fn set_mini_origin(app: tauri::AppHandle, x: f64, y: f64) -> Result<(), String> {
+    log::info!("[mini-pos] set_mini_origin request x={:.1} y={:.1}", x, y);
     let win = app.get_webview_window("mini").ok_or("mini not found")?;
     #[cfg(target_os = "macos")]
     {
@@ -3451,9 +3501,16 @@ async fn set_mini_origin(app: tauri::AppHandle, x: f64, y: f64) -> Result<(), St
                 let min_x = screen_frame.origin.x;
                 let max_x = (screen_frame.origin.x + screen_frame.size.width - frame.size.width).max(min_x);
                 let min_y = screen_frame.origin.y;
-                let max_y = (screen_frame.origin.y + screen_frame.size.height - frame.size.height).max(min_y);
+                // Keep collapsed mascot windows below top chrome. This also
+                // prevents stale persisted positions from parking the window
+                // under the notch/menu bar after startup.
+                let max_y = (screen_frame.origin.y + screen_frame.size.height - frame.size.height - MASCOT_TOP_INSET).max(min_y);
                 let clamped_x = x.max(min_x).min(max_x);
                 let clamped_y = y.max(min_y).min(max_y);
+                log::info!(
+                    "[mini-pos] set_mini_origin(mac) clamped x={:.1}->{:.1} y={:.1}->{:.1} bounds x[{:.1},{:.1}] y[{:.1},{:.1}]",
+                    x, clamped_x, y, clamped_y, min_x, max_x, min_y, max_y
+                );
                 let new_frame = NSRect::new(
                     NSPoint::new(clamped_x, clamped_y),
                     NSSize::new(frame.size.width, frame.size.height),
@@ -3469,7 +3526,36 @@ async fn set_mini_origin(app: tauri::AppHandle, x: f64, y: f64) -> Result<(), St
     }
     #[cfg(target_os = "windows")]
     {
-        let _ = win.set_position(tauri::LogicalPosition::new(x, y));
+        if let Ok(Some(monitor)) = win.current_monitor() {
+            let scale = monitor.scale_factor();
+            let mp = monitor.position();
+            let mx = mp.x as f64 / scale;
+            let my = mp.y as f64 / scale;
+            let sw = monitor.size().width as f64 / scale;
+            let sh = monitor.size().height as f64 / scale;
+            let ui = win_ui_scale(&monitor);
+            let (ww, wh) = win
+                .outer_size()
+                .map(|s| (s.width as f64 / scale, s.height as f64 / scale))
+                .unwrap_or((0.0, 0.0));
+            let min_x = mx;
+            let max_x = (mx + sw - ww).max(min_x);
+            let min_y = my + (MASCOT_TOP_INSET * ui).round();
+            let max_y = (my + sh - wh).max(min_y);
+            let clamped_x = x.max(min_x).min(max_x);
+            let clamped_y = y.max(min_y).min(max_y);
+            log::info!(
+                "[mini-pos] set_mini_origin(win) clamped x={:.1}->{:.1} y={:.1}->{:.1} bounds x[{:.1},{:.1}] y[{:.1},{:.1}]",
+                x, clamped_x, y, clamped_y, min_x, max_x, min_y, max_y
+            );
+            let _ = win.set_position(tauri::LogicalPosition::new(clamped_x, clamped_y));
+        } else {
+            log::info!(
+                "[mini-pos] set_mini_origin(win,fallback) apply x={:.1} y={:.1} (with inset)",
+                x, y + MASCOT_TOP_INSET
+            );
+            let _ = win.set_position(tauri::LogicalPosition::new(x, y + MASCOT_TOP_INSET));
+        }
     }
     Ok(())
 }
@@ -3489,6 +3575,10 @@ async fn set_mini_expanded(app: tauri::AppHandle, expanded: bool, position: Opti
     let pos = position.unwrap_or_else(|| "right".to_string());
     let mascot_scale = sanitized_mascot_scale(mascot_scale);
     let large_mascot_scale = large_mascot_scale.unwrap_or(LARGE_MASCOT_SIZE_MULTIPLIER);
+    log::info!(
+        "[mini-pos] set_mini_expanded request expanded={} pos={} efficiency={:?} keep_position={:?} large_mascot={:?} mascot_scale={:.2} large_scale={:.2}",
+        expanded, pos, efficiency, keep_position, large_mascot, mascot_scale, large_mascot_scale
+    );
 
     #[cfg(target_os = "macos")]
     {
@@ -3534,7 +3624,15 @@ async fn set_mini_expanded(app: tauri::AppHandle, expanded: bool, position: Opti
                         let win_w = if efficiency.unwrap_or(false) { 600.0 } else { 500.0 };
                         let win_h = max_height.unwrap_or(350.0).max(200.0).min(500.0);
                         let x = sx + (sw - win_w) / 2.0;
+                        // Expanded panel hugs the top of the screen (its window
+                        // level is high enough to draw over the menu bar). The
+                        // MASCOT_TOP_INSET only applies to the collapsed mascot
+                        // so it stays clear of the notch.
                         let y = sy + sh - win_h;
+                        log::info!(
+                            "[mini-pos] set_mini_expanded(mac,expanded) frame x={:.1} y={:.1} w={:.1} h={:.1}",
+                            x, y, win_w, win_h
+                        );
                         let frame = NSRect::new(NSPoint::new(x, y), NSSize::new(win_w, win_h));
                         unsafe {
                             let _: () = msg_send![obj, setFrame: frame, display: true, animate: false];
@@ -3551,7 +3649,7 @@ async fn set_mini_expanded(app: tauri::AppHandle, expanded: bool, position: Opti
                         } else {
                             collapsed_mascot_window_size(mascot_scale)
                         };
-                        let (x, y) = if keep_position.unwrap_or(false) {
+                        let (mut x, mut y) = if keep_position.unwrap_or(false) {
                             let cur: NSRect = unsafe { msg_send![obj, frame] };
                             (cur.origin.x, cur.origin.y + cur.size.height - win_h)
                         } else if large_mascot.unwrap_or(false) {
@@ -3559,8 +3657,19 @@ async fn set_mini_expanded(app: tauri::AppHandle, expanded: bool, position: Opti
                             let margin_y = 300.0;
                             (sx + sw - win_w - margin_x, sy + margin_y)
                         } else {
-                            (collapsed_x(sx, sw, win_w, &pos, notch_off), sy + sh - win_h)
+                            (
+                                collapsed_x(sx, sw, win_w, &pos, notch_off),
+                                sy + sh - win_h - MASCOT_TOP_INSET,
+                            )
                         };
+                        if !large_mascot.unwrap_or(false) {
+                            let max_y = sy + sh - win_h - MASCOT_TOP_INSET;
+                            if y > max_y { y = max_y; }
+                        }
+                        log::info!(
+                            "[mini-pos] set_mini_expanded(mac,collapsed) frame x={:.1} y={:.1} w={:.1} h={:.1} keep_position={}",
+                            x, y, win_w, win_h, keep_position.unwrap_or(false)
+                        );
                         let frame = NSRect::new(NSPoint::new(x, y), NSSize::new(win_w, win_h));
                         unsafe {
                             let _: () = msg_send![obj, setFrame: frame, display: true, animate: false];
@@ -3592,8 +3701,15 @@ async fn set_mini_expanded(app: tauri::AppHandle, expanded: bool, position: Opti
                 let win_w = (base_w * ui).round();
                 let win_h = (400.0 * ui).round();
                 let x = mx + (sw - win_w) / 2.0;
+                // Expanded panel hugs the top of the monitor (no inset) so it
+                // does not get pushed below the IDE chrome.
+                let y = my;
+                log::info!(
+                    "[mini-pos] set_mini_expanded(win,expanded) frame x={:.1} y={:.1} w={:.1} h={:.1} ui={:.2}",
+                    x, y, win_w, win_h, ui
+                );
                 let _ = win.set_size(tauri::LogicalSize::new(win_w, win_h));
-                let _ = win.set_position(tauri::LogicalPosition::new(x, my));
+                let _ = win.set_position(tauri::LogicalPosition::new(x, y));
             } else {
                 let (base_w, base_h) = if large_mascot.unwrap_or(false) {
                     large_collapsed_mascot_window_size(mascot_scale, large_mascot_scale)
@@ -3614,7 +3730,12 @@ async fn set_mini_expanded(app: tauri::AppHandle, expanded: bool, position: Opti
                     } else {
                         let notch_off = (80.0 * ui).round();
                         let x = mx + if pos == "left" { sw / 2.0 - notch_off - win_w } else { sw / 2.0 + notch_off };
-                        let _ = win.set_position(tauri::LogicalPosition::new(x, my));
+                        let y = my + (MASCOT_TOP_INSET * ui).round();
+                        log::info!(
+                            "[mini-pos] set_mini_expanded(win,collapsed) frame x={:.1} y={:.1} w={:.1} h={:.1} keep_position={}",
+                            x, y, win_w, win_h, keep_position.unwrap_or(false)
+                        );
+                        let _ = win.set_position(tauri::LogicalPosition::new(x, y));
                     }
                 }
             }
@@ -3656,15 +3777,33 @@ fn efficiency_hover_poll(app: tauri::AppHandle) {
     use std::time::{Duration, Instant};
     EFFICIENCY_HOVER_THREAD_ALIVE.store(true, Ordering::SeqCst);
     let mut was_inside = false;
+    let mut was_over_mascot = false;
     let mut last_enter_emit = Instant::now();
+    // Drag state machine, driven entirely by NSEvent.pressedMouseButtons +
+    // NSEvent.mouseLocation. The webview cannot observe mouseDown on a
+    // non-key floating window, so the JS-side drag would otherwise need a
+    // priming click. We mirror codex's approach: poll cursor + button,
+    // translate the mini NSWindow ourselves, and emit walk-dir events to
+    // the frontend so the codex sprite shows run-left/run-right.
+    let mut drag_active = false;
+    let mut last_cursor: (f64, f64) = (0.0, 0.0);
+    let mut last_walk_dir: i32 = 0;
+    let mut was_pressed = false;
+    // Used only for run-left/right detection — measured between successive
+    // poll iterations. Window translation itself is anchor-based and lives
+    // in request_drag_apply (which reads the live cursor on main thread).
+
     while EFFICIENCY_HOVER_ACTIVE.load(Ordering::SeqCst) {
         let info = NOTCH_SCREEN_INFO.lock().ok().and_then(|g| *g);
         let sleep_ms = if let Some((sx, sy, sw, sh, notch_off)) = info {
             let cursor = macos_cursor_position();
+            let buttons = macos_pressed_mouse_buttons();
+            let left_pressed = (buttons & 1) != 0;
             let is_expanded = EFFICIENCY_EXPANDED.load(Ordering::SeqCst);
+            let frame = MINI_WINDOW_FRAME.lock().ok().and_then(|g| *g);
 
             let inside = if is_expanded {
-                if let Some((fx, fy, fw, fh)) = MINI_WINDOW_FRAME.lock().ok().and_then(|g| *g) {
+                if let Some((fx, fy, fw, fh)) = frame {
                     cursor.0 >= fx && cursor.0 <= fx + fw
                         && cursor.1 >= fy && cursor.1 <= fy + fh
                 } else {
@@ -3672,10 +3811,7 @@ fn efficiency_hover_poll(app: tauri::AppHandle) {
                 }
             } else {
                 let rw = (notch_off * 2.0 + 10.0).max(80.0);
-                let rh = MINI_WINDOW_FRAME
-                    .lock()
-                    .ok()
-                    .and_then(|g| *g)
+                let rh = frame
                     .map(|(_, _, _, fh)| fh.clamp(20.0, 28.0))
                     .unwrap_or(35.0);
                 let rx = sx + (sw - rw) / 2.0;
@@ -3695,14 +3831,115 @@ fn efficiency_hover_poll(app: tauri::AppHandle) {
             }
             was_inside = inside;
 
-            // Adaptive polling: fast when cursor is near/inside the target,
-            // slow when far away to save CPU/battery.
-            if is_expanded || inside {
+            // ── Mascot body hit-test ──
+            // Use a tighter rect than the full 96x96 window: the codex
+            // 192x208 cell paints the character roughly in its centre with
+            // transparent margins (and the status badge lives in the
+            // bottom-right corner). Hover/drag should only fire on the
+            // visible body, so we inset to ~35% wide x 65% tall around the
+            // upper-centre where the head/torso sit.
+            let over_mascot = if is_expanded {
+                false
+            } else if let Some((fx, fy, fw, fh)) = frame {
+                let l = fx + fw * 0.32;
+                let r = fx + fw * 0.68;
+                let b = fy + fh * 0.25; // NSEvent y axis grows upward
+                let t = fy + fh * 0.90;
+                cursor.0 >= l && cursor.0 <= r && cursor.1 >= b && cursor.1 <= t
+            } else {
+                false
+            };
+
+            // ── Drag state machine ──
+            // Only engage in collapsed (mascot) state, never in expanded
+            // panel mode (clicks inside the panel must keep their normal
+            // webview behavior).
+            if !is_expanded {
+                if drag_active {
+                    if left_pressed {
+                        // Always request a fresh window-snap; the main-thread
+                        // task reads cursor position itself, so even if many
+                        // requests collapse into one, the window still ends
+                        // up under the live cursor.
+                        request_drag_apply(&app);
+                        let dx = cursor.0 - last_cursor.0;
+                        last_cursor = cursor;
+                        let walk_dir = if dx > 0.5 { 1 } else if dx < -0.5 { -1 } else { last_walk_dir };
+                        if walk_dir != last_walk_dir {
+                            let _ = app.emit("mini-mascot-walk", walk_dir);
+                            last_walk_dir = walk_dir;
+                        }
+                    } else {
+                        // Drag finished. Clear anchor + walk dir and notify
+                        // the frontend so it can persist the new origin.
+                        drag_active = false;
+                        if let Ok(mut a) = drag_anchor().lock() {
+                            *a = None;
+                        }
+                        if last_walk_dir != 0 {
+                            let _ = app.emit("mini-mascot-walk", 0i32);
+                            last_walk_dir = 0;
+                        }
+                        let _ = app.emit("mini-mascot-drag-end", ());
+                    }
+                } else if over_mascot && left_pressed && !was_pressed {
+                    drag_active = true;
+                    last_cursor = cursor;
+                    // Capture the cursor-to-origin offset at drag start so
+                    // the main-thread task can place the window absolutely
+                    // each frame instead of summing deltas.
+                    if let Some((fx, fy, _, _)) = frame {
+                        if let Ok(mut a) = drag_anchor().lock() {
+                            *a = Some((cursor.0 - fx, cursor.1 - fy));
+                        }
+                    }
+                    // Cancel any active hover so the sprite immediately
+                    // switches from `jumping` to its base/run state when
+                    // the drag begins.
+                    if was_over_mascot {
+                        let _ = app.emit("mini-mascot-hover", false);
+                        was_over_mascot = false;
+                    }
+                }
+            } else if drag_active {
+                drag_active = false;
+                if let Ok(mut a) = drag_anchor().lock() {
+                    *a = None;
+                }
+                if last_walk_dir != 0 {
+                    let _ = app.emit("mini-mascot-walk", 0i32);
+                    last_walk_dir = 0;
+                }
+            }
+            was_pressed = left_pressed;
+
+            // Hover signal is suppressed while dragging so the sprite
+            // shows run-left/run-right instead of jumping.
+            let hover_signal = over_mascot && !drag_active;
+            if hover_signal != was_over_mascot {
+                let _ = app.emit("mini-mascot-hover", hover_signal);
+                was_over_mascot = hover_signal;
+            }
+
+            // Adaptive polling: fastest while dragging (60fps) so the
+            // window keeps up with the cursor; slower when just hovering;
+            // very slow when far from the mascot to save battery.
+            if drag_active {
+                16
+            } else if is_expanded || inside || over_mascot {
                 30
             } else {
                 let screen_top = sy + sh;
                 let dist_from_top = screen_top - cursor.1;
-                if dist_from_top < 200.0 {
+                let near_mascot = frame
+                    .map(|(fx, fy, fw, fh)| {
+                        cursor.0 >= fx - 80.0
+                            && cursor.0 <= fx + fw + 80.0
+                            && cursor.1 >= fy - 80.0
+                            && cursor.1 <= fy + fh + 80.0
+                    })
+                    .unwrap_or(false);
+                if near_mascot || dist_from_top < 200.0 {
                     50
                 } else {
                     500
@@ -3714,6 +3951,51 @@ fn efficiency_hover_poll(app: tauri::AppHandle) {
         std::thread::sleep(Duration::from_millis(sleep_ms));
     }
     EFFICIENCY_HOVER_THREAD_ALIVE.store(false, Ordering::SeqCst);
+}
+
+/// Schedule a main-thread task that snaps the mini window origin to
+/// `(cursor_now - DRAG_ANCHOR)` — i.e. wherever the cursor currently is,
+/// minus the offset captured at drag-start. Calls coalesce: while a task
+/// is in flight, repeated invocations are no-ops; the running task always
+/// reads the freshest cursor position. This keeps drag tracking tight
+/// even when the poll thread runs much faster than the main thread can
+/// repaint, and avoids the cumulative lag of relative-delta translation.
+#[cfg(target_os = "macos")]
+fn request_drag_apply(app: &tauri::AppHandle) {
+    if DRAG_TASK_PENDING.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let app_clone = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        use objc2::msg_send;
+        use objc2::runtime::AnyObject;
+        use objc2_foundation::NSPoint;
+
+        DRAG_TASK_PENDING.store(false, Ordering::SeqCst);
+        let anchor = drag_anchor().lock().ok().and_then(|g| *g);
+        let Some((ax, ay)) = anchor else { return };
+
+        let cursor = macos_cursor_position();
+        let new_origin = NSPoint::new(cursor.0 - ax, cursor.1 - ay);
+
+        if let Some(win) = app_clone.get_webview_window("mini") {
+            if let Ok(ns_win) = win.ns_window() {
+                let obj = unsafe { &*(ns_win as *mut AnyObject) };
+                // setFrameOrigin: only moves the window — it does not
+                // redraw the contents — so it is far cheaper than
+                // setFrame:display:animate:NO and keeps up with fast
+                // cursor motion.
+                unsafe {
+                    let _: () = msg_send![obj, setFrameOrigin: new_origin];
+                }
+                if let Ok(mut f) = MINI_WINDOW_FRAME.lock() {
+                    if let Some((_, _, w, h)) = *f {
+                        *f = Some((new_origin.x, new_origin.y, w, h));
+                    }
+                }
+            }
+        }
+    });
 }
 
 /// Read the current mouse cursor position via `[NSEvent mouseLocation]`.
@@ -3732,13 +4014,43 @@ fn macos_cursor_position() -> (f64, f64) {
     }
 }
 
+/// Returns the bitmask of currently pressed mouse buttons via
+/// `[NSEvent pressedMouseButtons]`. Bit 0 = left button. This works
+/// regardless of whether the receiving window is the key window, which is
+/// what we need to detect drags on the floating mini mascot.
+#[cfg(target_os = "macos")]
+fn macos_pressed_mouse_buttons() -> usize {
+    unsafe {
+        use objc2::msg_send;
+        if let Some(cls) = objc2::runtime::AnyClass::get(c"NSEvent") {
+            let mask: usize = msg_send![cls, pressedMouseButtons];
+            mask
+        } else {
+            0
+        }
+    }
+}
+
 #[cfg(not(target_os = "macos"))]
 fn macos_cursor_position() -> (f64, f64) {
     (0.0, 0.0)
 }
 
+// Non-macOS stubs: the efficiency hover / notch drag tracker is a macOS-only
+// feature (driven by NSEvent), but the polling loop itself is not gated, so
+// we provide no-op implementations on other platforms to keep the build
+// happy. The poll loop never engages drag here because `NOTCH_SCREEN_INFO`
+// stays unset on Windows/Linux.
+#[cfg(not(target_os = "macos"))]
+fn macos_pressed_mouse_buttons() -> usize {
+    0
+}
+
+#[cfg(not(target_os = "macos"))]
+fn request_drag_apply(_app: &tauri::AppHandle) {}
+
 /// Resize the expanded mini window height while keeping it top-aligned.
-/// macOS: bottom-left origin, so adjust y to keep bottom aligned.
+/// macOS: bottom-left origin, so adjust y to keep the same top anchor.
 /// Windows: top-left origin, so just resize height.
 #[tauri::command]
 async fn resize_mini_height(app: tauri::AppHandle, height: f64, max_height: Option<f64>, animate: Option<bool>) -> Result<(), String> {
@@ -3773,10 +4085,17 @@ async fn resize_mini_height(app: tauri::AppHandle, height: f64, max_height: Opti
                 let sf: NSRect = unsafe { msg_send![&*screen_ptr, frame] };
                 let cur: NSRect = unsafe { msg_send![obj, frame] };
                 let capped_h = h.min((sf.size.height * 0.75).max(200.0));
+                // Top-aligned to the screen, matching the expanded panel's
+                // initial placement in `set_mini_expanded`. No MASCOT_TOP_INSET
+                // here — that inset only applies to the collapsed mascot.
                 let new_y = sf.origin.y + sf.size.height - capped_h;
                 let new_frame = NSRect::new(
                     NSPoint::new(cur.origin.x, new_y),
                     NSSize::new(cur.size.width, capped_h),
+                );
+                log::info!(
+                    "[mini-pos] resize_mini_height(mac) frame x={:.1} y={:.1} w={:.1} h={:.1}",
+                    cur.origin.x, new_y, cur.size.width, capped_h
                 );
                 unsafe {
                     let do_animate: bool = animate.unwrap_or(false);
@@ -5340,7 +5659,10 @@ async fn set_mini_size(
                             let margin = 10.0;
                             (sx + sw - win_w - margin, sy + margin)
                         } else {
-                            (collapsed_x(sx, sw, win_w, &pos, notch_off), sy + sh - win_h)
+                            (
+                                collapsed_x(sx, sw, win_w, &pos, notch_off),
+                                sy + sh - win_h - MASCOT_TOP_INSET,
+                            )
                         };
                         let frame = NSRect::new(NSPoint::new(x, y), NSSize::new(win_w, win_h));
                         unsafe {
@@ -5411,7 +5733,10 @@ async fn set_mini_size(
                 } else {
                     let notch_off = (80.0 * ui).round();
                     let x = mx + if pos == "left" { sw / 2.0 - notch_off - win_w } else { sw / 2.0 + notch_off };
-                    let _ = win.set_position(tauri::LogicalPosition::new(x, my));
+                    let _ = win.set_position(tauri::LogicalPosition::new(
+                        x,
+                        my + (MASCOT_TOP_INSET * ui).round(),
+                    ));
                 }
             } else {
                 let win_w = (sw * 0.85).round();
@@ -7241,9 +7566,460 @@ async fn open_url(url: String) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     { std::process::Command::new("open").arg(&url).spawn().map_err(|e| e.to_string())?; }
     #[cfg(target_os = "windows")]
-    { std::process::Command::new("cmd").args(["/C", "start", "", &url]).spawn().map_err(|e| e.to_string())?; }
+    {
+        // `cmd /C start ""` opens the URL in the default browser, but cmd
+        // itself is a console app so without CREATE_NO_WINDOW the user
+        // sees a black console flash next to the freshly opened browser
+        // tab. Hide it.
+        let mut cmd = std::process::Command::new("cmd");
+        cmd.args(["/C", "start", "", &url]);
+        hide_window_cmd(&mut cmd);
+        cmd.spawn().map_err(|e| e.to_string())?;
+    }
     #[cfg(target_os = "linux")]
     { std::process::Command::new("xdg-open").arg(&url).spawn().map_err(|e| e.to_string())?; }
+    Ok(())
+}
+
+#[derive(Debug, Serialize)]
+pub struct CodexPetMeta {
+    pub id: String,
+    #[serde(rename = "displayName")]
+    pub display_name: String,
+    pub description: String,
+    #[serde(rename = "spritesheetUrl")]
+    pub spritesheet_url: String,
+}
+
+/// Path to the user's codex CLI pets directory (`~/.codex/pets`). Mirrors
+/// the layout used by the codex CLI hatch-pet skill so users can drop the
+/// same pet folders here and have them show up in the picker.
+fn codex_pets_dir() -> Option<PathBuf> {
+    dirs::home_dir().map(|h| h.join(".codex").join("pets"))
+}
+
+/// List custom codex pets the user has dropped into `~/.codex/pets`. Each
+/// pet folder must contain a `pet.json` metadata file plus a spritesheet
+/// (.webp/.png/.jpg). Missing pieces are skipped silently.
+#[tauri::command]
+async fn list_custom_codex_pets() -> Result<Vec<CodexPetMeta>, String> {
+    let Some(root) = codex_pets_dir() else {
+        return Ok(Vec::new());
+    };
+    if !root.exists() {
+        return Ok(Vec::new());
+    }
+    let mut out = Vec::new();
+    let entries = match std::fs::read_dir(&root) {
+        Ok(e) => e,
+        Err(_) => return Ok(Vec::new()),
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let pet_json = path.join("pet.json");
+        if !pet_json.is_file() {
+            continue;
+        }
+        let raw = match std::fs::read_to_string(&pet_json) {
+            Ok(s) => s,
+            Err(_) => continue,
+        };
+        let meta: serde_json::Value = match serde_json::from_str(&raw) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        let id = meta
+            .get("id")
+            .and_then(|v| v.as_str())
+            .map(String::from)
+            .unwrap_or_else(|| {
+                path.file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default()
+            });
+        let display_name = meta
+            .get("displayName")
+            .and_then(|v| v.as_str())
+            .map(String::from)
+            .unwrap_or_else(|| id.clone());
+        let description = meta
+            .get("description")
+            .and_then(|v| v.as_str())
+            .map(String::from)
+            .unwrap_or_default();
+        let sheet_path = meta
+            .get("spritesheetPath")
+            .and_then(|v| v.as_str())
+            .map(String::from)
+            .unwrap_or_else(|| "spritesheet.webp".into());
+        let abs = path.join(&sheet_path);
+        if !abs.is_file() {
+            continue;
+        }
+        let url = codex_asset_url(&abs);
+        out.push(CodexPetMeta {
+            id,
+            display_name,
+            description,
+            spritesheet_url: url,
+        });
+    }
+    out.sort_by(|a, b| a.display_name.to_lowercase().cmp(&b.display_name.to_lowercase()));
+    Ok(out)
+}
+
+/// Forward a frontend diagnostic line to the dev terminal so debugging
+/// modal/blur/exit paths doesn't require opening webview DevTools.
+#[tauri::command]
+async fn debug_log(scope: String, msg: String) -> Result<(), String> {
+    log::info!("[fe:{}] {}", scope, msg);
+    Ok(())
+}
+
+/// Spawn a demo-mode mini mascot window. Each window runs the bundled
+/// frontend with `?demo=1&pet=<id>` query params, which routes to a
+/// minimal mascot-only React tree. Used by the dev-mode "演示模式" toggle
+/// to drop multiple animated mascots on screen for demo recordings.
+#[tauri::command]
+async fn spawn_demo_mascot(app: tauri::AppHandle, pet_id: String) -> Result<String, String> {
+    use std::sync::atomic::AtomicU64;
+    static DEMO_COUNTER: AtomicU64 = AtomicU64::new(0);
+    let n = DEMO_COUNTER.fetch_add(1, Ordering::SeqCst);
+    let label = format!("demo-mascot-{}", n);
+
+    let url = format!("index.html#/mini?demo=1&pet={}", pet_id);
+    let win = tauri::WebviewWindowBuilder::new(
+        &app,
+        label.clone(),
+        tauri::WebviewUrl::App(url.into()),
+    )
+    .title("oc-claw demo mascot")
+    .inner_size(96.0, 96.0)
+    .min_inner_size(96.0, 96.0)
+    .resizable(false)
+    .decorations(false)
+    .transparent(true)
+    .shadow(false)
+    .always_on_top(true)
+    .skip_taskbar(true)
+    .build()
+    .map_err(|e| e.to_string())?;
+
+    // Position the demo window in a known-good area near the top-right
+    // of the screen, stepping each subsequent spawn by one collapsed
+    // mascot width so they line up next to each other. Avoiding the
+    // main mini window's frame keeps us correct even when the user is
+    // currently in settings (where the main window is 600px wide and
+    // would otherwise push the demos off-screen).
+    const DEMO_STEP_W: f64 = 96.0;
+    #[cfg(target_os = "macos")]
+    {
+        let win_clone = win.clone();
+        let _ = app.run_on_main_thread(move || {
+            use objc2::msg_send;
+            use objc2::runtime::{AnyClass, AnyObject};
+            use objc2_foundation::{NSPoint, NSRect, NSSize};
+            if let Ok(demo_ns) = win_clone.ns_window() {
+                let demo_obj = unsafe { &*(demo_ns as *mut AnyObject) };
+
+                // Pull the active screen frame from NSScreen so we can
+                // anchor relative to the visible area rather than guessing.
+                let screen_frame: Option<NSRect> = unsafe {
+                    AnyClass::get(c"NSScreen").and_then(|cls| {
+                        let screens: *mut AnyObject = msg_send![cls, screens];
+                        if screens.is_null() {
+                            return None;
+                        }
+                        let count: usize = msg_send![&*screens, count];
+                        if count == 0 {
+                            return None;
+                        }
+                        let screen: *mut AnyObject = msg_send![&*screens, objectAtIndex: 0usize];
+                        if screen.is_null() {
+                            return None;
+                        }
+                        let frame: NSRect = msg_send![&*screen, frame];
+                        Some(frame)
+                    })
+                };
+                let Some(sf) = screen_frame else { return };
+
+                // Right-aligned baseline anchor: ~120pt below the menu
+                // bar on the right edge, then step left by one mascot
+                // width per spawn.
+                let baseline_x = sf.origin.x + sf.size.width - DEMO_STEP_W * 2.0;
+                let baseline_y = sf.origin.y + sf.size.height - DEMO_STEP_W - MASCOT_TOP_INSET;
+                let x = baseline_x - (n as f64) * DEMO_STEP_W;
+                let new_origin = NSPoint::new(x.max(sf.origin.x), baseline_y);
+                let new_frame = NSRect::new(new_origin, NSSize::new(DEMO_STEP_W, DEMO_STEP_W));
+
+                unsafe {
+                    let _: () = msg_send![demo_obj, setLevel: 27isize];
+                    let _: () = msg_send![demo_obj, setFrame: new_frame, display: true, animate: false];
+                    let behavior: usize = (1 << 0) | (1 << 4) | (1 << 8) | (1 << 6);
+                    let _: () = msg_send![demo_obj, setCollectionBehavior: behavior];
+                    let _: () = msg_send![demo_obj, setAcceptsMouseMovedEvents: true];
+                }
+            }
+        });
+    }
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(Some(monitor)) = win.current_monitor() {
+            let scale = monitor.scale_factor();
+            let mp = monitor.position();
+            let mx = mp.x as f64 / scale;
+            let my = mp.y as f64 / scale;
+            let sw = monitor.size().width as f64 / scale;
+            let baseline_x = mx + sw - DEMO_STEP_W * 2.0;
+            let baseline_y = my + MASCOT_TOP_INSET;
+            let x = (baseline_x - (n as f64) * DEMO_STEP_W).max(mx);
+            let _ = win.set_position(tauri::LogicalPosition::new(x, baseline_y));
+        }
+        let _ = win.set_always_on_top(true);
+    }
+    let _ = win.show();
+    Ok(label)
+}
+
+/// Close a single spawned demo mascot window by label.
+#[tauri::command]
+async fn close_demo_mascot(app: tauri::AppHandle, label: String) -> Result<bool, String> {
+    if !label.starts_with("demo-mascot-") {
+        return Err("invalid demo mascot label".into());
+    }
+    if let Some(win) = app.get_webview_window(&label) {
+        let _ = win.close();
+        Ok(true)
+    } else {
+        Ok(false)
+    }
+}
+
+/// Close every spawned demo mascot window, leaving only the main mini.
+#[tauri::command]
+async fn close_demo_mascots(app: tauri::AppHandle) -> Result<u32, String> {
+    let mut closed = 0u32;
+    let labels: Vec<String> = app
+        .webview_windows()
+        .keys()
+        .filter(|l| l.starts_with("demo-mascot-"))
+        .cloned()
+        .collect();
+    for label in labels {
+        if let Some(win) = app.get_webview_window(&label) {
+            let _ = win.close();
+            closed += 1;
+        }
+    }
+    Ok(closed)
+}
+
+/// Open the platform's native folder picker so the user can choose a
+/// codex pet directory to import. Returns the absolute path or `null` if
+/// the user cancelled. Implemented with `osascript` on macOS and
+/// PowerShell's `FolderBrowserDialog` on Windows so we don't need to add
+/// `tauri-plugin-dialog` just for this one flow.
+// macOS occasionally demotes our floating mini window back to the normal
+// NSWindow level after a foreign helper (osascript, NSOpenPanel-driven
+// pickers, etc.) takes focus. Re-apply level 27 (status) and reassert
+// always-on-top so the mascot/settings panel stays on top of everything.
+//
+// All AppKit work is dispatched to the main thread — calling NSWindow
+// methods from the Tauri command (runtime) thread trips AppKit's
+// main-thread assertions and aborts the app with SIGTERM.
+fn reassert_mini_floating(app: &tauri::AppHandle) {
+    use tauri::Manager;
+    let Some(win) = app.get_webview_window("mini") else {
+        return;
+    };
+    let win_clone = win.clone();
+    let _ = app.run_on_main_thread(move || {
+        #[cfg(target_os = "macos")]
+        {
+            use objc2::runtime::AnyObject;
+            use objc2::msg_send;
+            if let Ok(ns_win) = win_clone.ns_window() {
+                let obj = unsafe { &*(ns_win as *mut AnyObject) };
+                unsafe {
+                    let _: () = msg_send![obj, setLevel: 27isize];
+                    let behavior: usize = (1 << 0) | (1 << 4) | (1 << 8) | (1 << 6);
+                    let _: () = msg_send![obj, setCollectionBehavior: behavior];
+                }
+            }
+        }
+        let _ = win_clone.set_always_on_top(true);
+    });
+}
+
+#[tauri::command]
+async fn reassert_floating(app: tauri::AppHandle) -> Result<(), String> {
+    reassert_mini_floating(&app);
+    Ok(())
+}
+
+#[tauri::command]
+async fn pick_codex_pet_folder(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    use tauri::Manager;
+    use tauri_plugin_dialog::DialogExt;
+
+    // Use the official tauri-plugin-dialog so we get a real native folder
+    // picker on every platform: NSOpenPanel on macOS, IFileOpenDialog
+    // (modern explorer-style) on Windows, GTK on Linux.
+    //
+    // Bind the dialog to the mini window as its parent. Without an explicit
+    // owner the dialog renders as a peer top-level window that sits below
+    // our always-on-top mini frame on Windows (the user sees the picker
+    // visually behind the settings panel on the second open). With a parent
+    // window, the OS layers the dialog above its owner.
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let mut builder = app.dialog().file().set_title("选择 codex 宠物文件夹");
+    if let Some(win) = app.get_webview_window("mini") {
+        builder = builder.set_parent(&win);
+    }
+    builder.pick_folder(move |path| {
+        let _ = tx.send(path);
+    });
+    let picked = rx.await.map_err(|e| e.to_string())?;
+    let result = picked.and_then(|p| p.into_path().ok())
+        .map(|p| p.to_string_lossy().into_owned());
+
+    // The dialog briefly steals focus and the OS can demote our floating
+    // mini window back to the normal level. Re-apply always-on-top so the
+    // settings panel doesn't visually sink under other apps.
+    reassert_mini_floating(&app);
+    Ok(result)
+}
+
+/// Open `~/.codex/pets` in the platform's file manager. Creates the
+/// directory if it doesn't exist yet so the picker's "Open Folder" link
+/// always lands somewhere usable.
+#[tauri::command]
+async fn open_codex_pets_dir() -> Result<String, String> {
+    let Some(dir) = codex_pets_dir() else {
+        return Err("home directory not found".into());
+    };
+    if !dir.exists() {
+        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    }
+    let path = dir.to_string_lossy().to_string();
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open").arg(&path).spawn().map_err(|e| e.to_string())?;
+    }
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer").arg(&path).spawn().map_err(|e| e.to_string())?;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open").arg(&path).spawn().map_err(|e| e.to_string())?;
+    }
+    Ok(path)
+}
+
+/// Import a dropped pet folder into `~/.codex/pets`. The source must be a
+/// directory containing at minimum a `pet.json` and a spritesheet image.
+/// Existing folders with the same id are overwritten so re-dropping a
+/// pet upgrades it in place.
+#[tauri::command]
+async fn import_codex_pet(src_path: String) -> Result<CodexPetMeta, String> {
+    let src = PathBuf::from(&src_path);
+    if !src.is_dir() {
+        return Err(format!("not a directory: {}", src_path));
+    }
+    let pet_json = src.join("pet.json");
+    if !pet_json.is_file() {
+        return Err("missing pet.json in dropped folder".into());
+    }
+    let raw = std::fs::read_to_string(&pet_json).map_err(|e| e.to_string())?;
+    let meta: serde_json::Value = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
+    let id = meta
+        .get("id")
+        .and_then(|v| v.as_str())
+        .map(String::from)
+        .unwrap_or_else(|| {
+            src.file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| "pet".into())
+        });
+    let Some(root) = codex_pets_dir() else {
+        return Err("home directory not found".into());
+    };
+    std::fs::create_dir_all(&root).map_err(|e| e.to_string())?;
+    let dst = root.join(&id);
+    if dst.exists() {
+        let _ = std::fs::remove_dir_all(&dst);
+    }
+    copy_dir_recursive(&src, &dst)?;
+    let display_name = meta
+        .get("displayName")
+        .and_then(|v| v.as_str())
+        .map(String::from)
+        .unwrap_or_else(|| id.clone());
+    let description = meta
+        .get("description")
+        .and_then(|v| v.as_str())
+        .map(String::from)
+        .unwrap_or_default();
+    let sheet_path = meta
+        .get("spritesheetPath")
+        .and_then(|v| v.as_str())
+        .map(String::from)
+        .unwrap_or_else(|| "spritesheet.webp".into());
+    let url = codex_asset_url(&dst.join(&sheet_path));
+    Ok(CodexPetMeta {
+        id,
+        display_name,
+        description,
+        spritesheet_url: url,
+    })
+}
+
+/// Build a Tauri custom-protocol URL the webview can fetch. The path is
+/// resolved relative to `~/.codex/pets/` by the `codexpet://` scheme
+/// registered on the Tauri builder, so files outside the bundled
+/// `public/` folder still load.
+fn codex_asset_url(abs: &std::path::Path) -> String {
+    use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
+    let Some(root) = codex_pets_dir() else {
+        return String::new();
+    };
+    let rel = match abs.strip_prefix(&root) {
+        Ok(p) => p.to_path_buf(),
+        Err(_) => return String::new(),
+    };
+    let parts: Vec<String> = rel
+        .components()
+        .map(|c| utf8_percent_encode(&c.as_os_str().to_string_lossy(), NON_ALPHANUMERIC).to_string())
+        .collect();
+    // Windows WebView2 cannot fetch `<scheme>://...` URLs registered via
+    // `register_uri_scheme_protocol`; Tauri exposes them as
+    // `http://<scheme>.localhost/...` instead. Match the same convention as
+    // localasset/customasset so codex pet sprites actually load.
+    let prefix = if cfg!(target_os = "windows") {
+        "http://codexpet.localhost"
+    } else {
+        "codexpet://localhost"
+    };
+    format!("{}/{}", prefix, parts.join("/"))
+}
+
+fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> Result<(), String> {
+    std::fs::create_dir_all(dst).map_err(|e| e.to_string())?;
+    for entry in std::fs::read_dir(src).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let from = entry.path();
+        let to = dst.join(entry.file_name());
+        if from.is_dir() {
+            copy_dir_recursive(&from, &to)?;
+        } else {
+            std::fs::copy(&from, &to).map_err(|e| e.to_string())?;
+        }
+    }
     Ok(())
 }
 
@@ -8207,12 +8983,19 @@ async fn check_for_update(app: tauri::AppHandle, lang: Option<String>) -> Result
     let has_update = version_cmp(latest, &current);
     log::info!("[update] platform={} latest={} current={} hasUpdate={}", platform_key, latest, current, has_update);
 
+    // Pass through any `ui` block as-is. This lets us push UI-level
+    // config (e.g. the codex-pets.net URL inside the Create section)
+    // without shipping a new app build, while keeping the namespace
+    // separated from the platform-specific update metadata above.
+    let ui = json.get("ui").cloned().unwrap_or(serde_json::Value::Null);
+
     Ok(serde_json::json!({
         "current": current,
         "latest": latest,
         "hasUpdate": has_update,
         "url": url,
         "notes": notes,
+        "ui": ui,
     }))
 }
 
@@ -8928,6 +9711,58 @@ async fn install_codex_hooks() -> Result<(), String> {
     let home = dirs::home_dir().ok_or("no home dir")?;
     let codex_dir = home.join(".Codex");
     let hooks_dir = codex_dir.join("hooks");
+
+    // Codex support is dropped on Windows. Same as the cursor branch above:
+    // proactively delete any previously-installed hook script and strip our
+    // entries from hooks.json so the codex CLI cannot reach the oc-claw
+    // socket on this machine anymore.
+    #[cfg(windows)]
+    {
+        let _ = std::fs::remove_file(hooks_dir.join("ooclaw-codex-hook.ps1"));
+        // Codex's home is conventionally `.codex` on Windows but the install
+        // path used `.Codex` historically — the file system is case-
+        // insensitive so we clean the same dir, but also catch the
+        // lowercase variant explicitly in case both ever exist.
+        let alt = home.join(".codex").join("hooks").join("ooclaw-codex-hook.ps1");
+        if alt.exists() {
+            let _ = std::fs::remove_file(&alt);
+        }
+        for hooks_json_path in [codex_dir.join("hooks.json"), home.join(".codex").join("hooks.json")] {
+            if !hooks_json_path.exists() { continue; }
+            let Ok(content) = std::fs::read_to_string(&hooks_json_path) else { continue; };
+            let Ok(mut config) = serde_json::from_str::<serde_json::Value>(&content) else { continue; };
+            if let Some(hooks) = config.get_mut("hooks").and_then(|v| v.as_object_mut()) {
+                let event_names: Vec<String> = hooks.keys().cloned().collect();
+                for name in event_names {
+                    if let Some(arr) = hooks.get_mut(&name).and_then(|v| v.as_array_mut()) {
+                        arr.retain(|entry| {
+                            let cmd_match = entry.get("command").and_then(|c| c.as_str())
+                                .map(|c| c.contains("ooclaw-codex-hook"))
+                                .unwrap_or(false);
+                            let nested_match = entry.get("hooks").and_then(|hs| hs.as_array())
+                                .map(|hs| hs.iter().any(|inner| {
+                                    inner.get("command").and_then(|c| c.as_str())
+                                        .map(|c| c.contains("ooclaw-codex-hook"))
+                                        .unwrap_or(false)
+                                }))
+                                .unwrap_or(false);
+                            !(cmd_match || nested_match)
+                        });
+                        if arr.is_empty() {
+                            hooks.remove(&name);
+                        }
+                    }
+                }
+            }
+            if let Ok(json_str) = serde_json::to_string_pretty(&config) {
+                let _ = std::fs::write(&hooks_json_path, json_str);
+            }
+        }
+        log::info!("[codex_hooks] codex support disabled on windows; cleaned previously installed hooks");
+        return Ok(());
+    }
+
+    #[cfg(not(windows))]
     std::fs::create_dir_all(&hooks_dir).map_err(|e| e.to_string())?;
 
     #[cfg(unix)]
@@ -9189,6 +10024,19 @@ fn codex_requires_escalation(event: &serde_json::Value) -> bool {
         None
     }
 
+    // Hard guard: this helper exists only for Codex events. CC's
+    // PreToolUse payload may carry overlapping field names (e.g. a future
+    // CC release adding a `justification` field), and previous iterations
+    // of the looser checks below already mis-classified CC's Bash calls
+    // as needing approval. Bail out immediately for anything that isn't
+    // unambiguously a Codex event so the function name and behaviour
+    // stay aligned, no matter what gets added inside it later.
+    let is_codex_event = event.get("turn_id").is_some()
+        || read_string(event, &["source"]).unwrap_or("").eq_ignore_ascii_case("codex");
+    if !is_codex_event {
+        return false;
+    }
+
     // Preferred path: explicit approval/escalation fields.
     if has_explicit_escalation_markers(event) {
         return true;
@@ -9205,10 +10053,7 @@ fn codex_requires_escalation(event: &serde_json::Value) -> bool {
     // out-of-workspace write command almost always means approval UI.
     let tool_name = read_string(event, &["tool", "tool_name"]).unwrap_or("");
     let permission_mode = read_string(event, &["permission_mode", "permissionMode"]).unwrap_or("");
-    let is_codex_like = event.get("turn_id").is_some()
-        || event.get("hook_event_name").is_some()
-        || read_string(event, &["source"]).unwrap_or("").eq_ignore_ascii_case("codex");
-    if !(is_codex_like && tool_name == "Bash" && permission_mode == "default") {
+    if !(tool_name == "Bash" && permission_mode == "default") {
         return false;
     }
 
@@ -9749,6 +10594,50 @@ async fn install_cursor_hooks() -> Result<(), String> {
     let home = dirs::home_dir().ok_or("no home dir")?;
     let cursor_dir = home.join(".cursor");
     let hooks_dir = cursor_dir.join("hooks");
+
+    // Cursor support is dropped on Windows. Instead of installing hooks we
+    // actively clean up anything a previous oc-claw build might have left
+    // behind so the user can really stop hearing the completion sound.
+    #[cfg(windows)]
+    {
+        let _ = std::fs::remove_file(hooks_dir.join("occlaw-cursor-hook.ps1"));
+        let hooks_json_path = cursor_dir.join("hooks.json");
+        if hooks_json_path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&hooks_json_path) {
+                if let Ok(mut config) = serde_json::from_str::<serde_json::Value>(&content) {
+                    if let Some(hooks) = config.get_mut("hooks").and_then(|v| v.as_object_mut()) {
+                        let marker = "occlaw-cursor-hook";
+                        // Strip any oc-claw entry from every event bucket and
+                        // drop now-empty buckets so the file stays tidy.
+                        let event_names: Vec<String> = hooks.keys().cloned().collect();
+                        for name in event_names {
+                            if let Some(arr) = hooks.get_mut(&name).and_then(|v| v.as_array_mut()) {
+                                arr.retain(|entry| {
+                                    !entry.get("command").and_then(|c| c.as_str())
+                                        .map(|c| c.contains(marker))
+                                        .unwrap_or(false)
+                                });
+                                if arr.is_empty() {
+                                    hooks.remove(&name);
+                                }
+                            }
+                        }
+                    }
+                    if let Ok(json_str) = serde_json::to_string_pretty(&config) {
+                        let _ = std::fs::write(&hooks_json_path, json_str);
+                    }
+                }
+            }
+        }
+        let ext_dir = home.join(".cursor").join("extensions").join("oc-claw.terminal-focus-1.0.0");
+        if ext_dir.exists() {
+            let _ = std::fs::remove_dir_all(&ext_dir);
+        }
+        log::info!("[cursor_hooks] cursor support disabled on windows; cleaned previously installed hooks");
+        return Ok(());
+    }
+
+    #[cfg(not(windows))]
     std::fs::create_dir_all(&hooks_dir).map_err(|e| e.to_string())?;
 
     // ── Write hook script (Unix) ──
@@ -10355,6 +11244,22 @@ fn start_claude_socket_server(
                                 }
                             }
                             let text = String::from_utf8_lossy(&buf);
+                            // Cursor + Codex support are dropped on Windows.
+                            // Their hook scripts (or, in cursor's case, the
+                            // bundled Claude Code extension) still occasionally
+                            // reach this socket. Cursor payloads always carry
+                            // `cursor_version`; Codex hooks always set
+                            // `"source":"codex"`. Drop both outright so they
+                            // cannot drive the completion sound or pollute the
+                            // session list.
+                            if text.contains("\"cursor_version\"") {
+                                log::info!("[claude_tcp] dropping cursor-originated event on windows (len={})", text.len());
+                                return;
+                            }
+                            if text.contains("\"source\":\"codex\"") || text.contains("\"source\": \"codex\"") {
+                                log::info!("[claude_tcp] dropping codex-originated event on windows (len={})", text.len());
+                                return;
+                            }
                             if let Some((session_id, hook_event)) = process_claude_event(&text, &state, &app, None) {
                                 if hook_event == "PermissionRequest" {
                                     let (tx, rx) = std::sync::mpsc::channel::<String>();
@@ -10405,6 +11310,19 @@ fn install_wry_webview_ime_fix() {
         }
     }
 
+    // Always accept the first mouse event. By default NSView returns NO,
+    // which means the first click on an inactive floating window only
+    // activates the app — pointerdown is never delivered to the webview,
+    // breaking direct drag on the mini mascot. Returning YES delivers
+    // every click to the view immediately.
+    unsafe extern "C-unwind" fn accepts_first_mouse(
+        _this: &AnyObject,
+        _cmd: Sel,
+        _event: *mut AnyObject,
+    ) -> bool {
+        true
+    }
+
     fn patch_class(class_name: &'static std::ffi::CStr, text_input_protocol: Option<&'static AnyProtocol>) {
         let Some(cls) = AnyClass::get(class_name) else {
             log::warn!("[ime] class not found: {}", class_name.to_string_lossy());
@@ -10412,7 +11330,8 @@ fn install_wry_webview_ime_fix() {
         };
 
         let cls_ptr = cls as *const AnyClass as *mut AnyClass;
-        let type_encoding = CString::new("q@:").unwrap();
+        let level_encoding = CString::new("q@:").unwrap();
+        let bool_arg_encoding = CString::new("c@:@").unwrap();
         unsafe {
             if let Some(protocol) = text_input_protocol {
                 let _ = ffi::class_addProtocol(cls_ptr, protocol);
@@ -10421,7 +11340,23 @@ fn install_wry_webview_ime_fix() {
                 cls_ptr,
                 sel!(windowLevel),
                 std::mem::transmute::<unsafe extern "C-unwind" fn(&AnyObject, Sel) -> isize, Imp>(window_level),
-                type_encoding.as_ptr(),
+                level_encoding.as_ptr(),
+            );
+            // Use class_replaceMethod so we win even when the class (or one
+            // of its superclasses, via class_addMethod's behavior) already
+            // implements acceptsFirstMouse:.
+            let _ = ffi::class_replaceMethod(
+                cls_ptr,
+                sel!(acceptsFirstMouse:),
+                std::mem::transmute::<
+                    unsafe extern "C-unwind" fn(&AnyObject, Sel, *mut AnyObject) -> bool,
+                    Imp,
+                >(accepts_first_mouse),
+                bool_arg_encoding.as_ptr(),
+            );
+            log::info!(
+                "[first-mouse] patched {} with acceptsFirstMouse:=YES",
+                class_name.to_string_lossy()
             );
         }
     }
@@ -10430,8 +11365,15 @@ fn install_wry_webview_ime_fix() {
         let text_input_protocol = AnyProtocol::get(c"NSTextInputClient");
         patch_class(c"WryWebView", text_input_protocol);
         patch_class(c"WKWebView", text_input_protocol);
+        // Patch NSView itself so EVERY subclass (including private/leaf
+        // WebKit views whose names we cannot rely on across macOS versions)
+        // returns YES from acceptsFirstMouse:. acceptsFirstMouse: is only
+        // queried when the click target's window is not the key window, so
+        // patching the base class is safe for normal activating windows.
+        patch_class(c"NSView", None);
     });
 }
+
 
 fn asset_mime_for_path(path: &str) -> &'static str {
     let lower = path.to_ascii_lowercase();
@@ -10552,6 +11494,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_store::Builder::default().build())
+        .plugin(tauri_plugin_dialog::init())
         .register_uri_scheme_protocol("localasset", |ctx, req| {
             let raw_path = req.uri().path();
             let path = percent_decode_str(raw_path).decode_utf8_lossy();
@@ -10568,11 +11511,19 @@ pub fn run() {
             let file_path = data_dir.join("characters").join(path.trim_start_matches('/'));
             build_asset_response(&req, path.as_ref(), &file_path, cfg!(target_os = "windows"), "customasset")
         })
+        .register_uri_scheme_protocol("codexpet", |_ctx, req| {
+            // Custom codex pets the user dropped into `~/.codex/pets`.
+            // Avatars are loaded through this protocol so the picker can
+            // display sprites that live outside the bundled assets dir.
+            let raw_path = req.uri().path();
+            let path = percent_decode_str(raw_path).decode_utf8_lossy();
+            let root = codex_pets_dir().unwrap_or_default();
+            let file_path = root.join(path.trim_start_matches('/'));
+            build_asset_response(&req, path.as_ref(), &file_path, cfg!(target_os = "windows"), "codexpet")
+        })
         .setup(|app| {
             // Fix PATH so openclaw (Node.js script) and node are both reachable
             fix_path();
-            #[cfg(target_os = "macos")]
-            install_wry_webview_ime_fix();
 
             // Install Claude + Codex hooks on every startup (idempotent)
             if let Err(e) = tauri::async_runtime::block_on(install_claude_hooks()) {
@@ -10588,6 +11539,13 @@ pub fn run() {
                     .level(log::LevelFilter::Info)
                     .build(),
             )?;
+
+            // Run the WKWebView swizzle AFTER the log plugin is initialized so
+            // its [first-mouse] / IME log lines are actually visible in the
+            // tauri-plugin-log stream. Order vs window creation is fine —
+            // setup() runs after the mini webview already exists.
+            #[cfg(target_os = "macos")]
+            install_wry_webview_ime_fix();
 
             // Accessibility permission is no longer requested automatically on
             // startup. Cursor window raising is handled by the extension running
@@ -10624,6 +11582,13 @@ pub fn run() {
                             let _: () = msg_send![obj, setLevel: 27isize];
                             let behavior: usize = (1 << 0) | (1 << 4) | (1 << 8) | (1 << 6);
                             let _: () = msg_send![obj, setCollectionBehavior: behavior];
+                            // Deliver mouse-moved / mouse-entered events to
+                            // the mini window even when it is not the key
+                            // window. Without this, hovering the unfocused
+                            // mascot does not fire mouseenter on the webview
+                            // and the codex sprite never starts its jump
+                            // until the user clicks once to activate.
+                            let _: () = msg_send![obj, setAcceptsMouseMovedEvents: true];
                         }
 
                         let screen_info: Option<(f64, f64, f64, f64, f64)> = unsafe {
@@ -10645,7 +11610,7 @@ pub fn run() {
                         if let Some((sx, sy, sw, sh, notch_off)) = screen_info {
                             let (win_w, win_h) = collapsed_mascot_window_size(1.0);
                             let x = sx + sw / 2.0 + notch_off;
-                            let y = sy + sh - win_h;
+                            let y = sy + sh - win_h - MASCOT_TOP_INSET;
                             let frame = NSRect::new(NSPoint::new(x, y), NSSize::new(win_w, win_h));
                             unsafe {
                                 let _: () = msg_send![obj, setFrame: frame, display: true];
@@ -10666,7 +11631,7 @@ pub fn run() {
                     let scale = monitor.scale_factor();
                     let sw = screen.width as f64 / scale;
                     let x = sw / 2.0 + 40.0;
-                    let _ = win.set_position(tauri::LogicalPosition::new(x, 0.0));
+                    let _ = win.set_position(tauri::LogicalPosition::new(x, MASCOT_TOP_INSET));
                 }
                 let _ = win.show();
             }
@@ -10841,7 +11806,7 @@ pub fn run() {
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![get_status, send_chat, open_detail_panel, save_character_gif, delete_character_assets, delete_character_gif, get_agents, get_health, get_agent_metrics, interrupt_agent, scan_characters, get_agent_extra_info, open_mini, close_mini, set_mini_expanded, set_mini_size, set_efficiency_hover_tracking, resize_mini_height, move_mini_by, get_mini_origin, get_mini_monitor_rect, set_mini_origin, set_ime_mode, get_agent_sessions, get_session_preview, get_session_messages, get_active_sessions, proxy_post, play_sound, get_claude_sessions, get_claude_conversation, install_claude_hooks, install_cursor_hooks, remove_claude_session, resolve_claude_permission, get_claude_stats, open_url, activate_app, focus_cursor_terminal, check_ax_permission, request_ax_permission, jump_to_claude_terminal, check_for_update, run_update, close_ssh, read_local_file, list_backgrounds, save_background, get_background_data, exit_app, get_ssh_key_info, reset_ssh, get_ui_scale, update_tray_language, set_pet_mode_window, set_pet_context_menu, set_pet_pomodoro_active, get_now_playing, get_system_idle_time])
+        .invoke_handler(tauri::generate_handler![get_status, send_chat, open_detail_panel, save_character_gif, delete_character_assets, delete_character_gif, get_agents, get_health, get_agent_metrics, interrupt_agent, scan_characters, get_agent_extra_info, open_mini, close_mini, set_mini_expanded, set_mini_size, set_efficiency_hover_tracking, resize_mini_height, move_mini_by, get_mini_origin, get_mini_monitor_rect, set_mini_origin, set_ime_mode, get_agent_sessions, get_session_preview, get_session_messages, get_active_sessions, proxy_post, play_sound, get_claude_sessions, get_claude_conversation, install_claude_hooks, install_cursor_hooks, remove_claude_session, resolve_claude_permission, get_claude_stats, open_url, activate_app, focus_cursor_terminal, check_ax_permission, request_ax_permission, jump_to_claude_terminal, check_for_update, run_update, close_ssh, read_local_file, list_backgrounds, save_background, get_background_data, exit_app, get_ssh_key_info, reset_ssh, get_ui_scale, list_custom_codex_pets, open_codex_pets_dir, import_codex_pet, pick_codex_pet_folder, reassert_floating, spawn_demo_mascot, close_demo_mascot, close_demo_mascots, debug_log, update_tray_language, set_pet_mode_window, set_pet_context_menu, set_pet_pomodoro_active, get_now_playing, get_system_idle_time])
         .manage(ActiveAgentPid { pid: Mutex::new(None) })
         .manage(ClaudeState { sessions: Arc::new(Mutex::new(HashMap::new())), pending_permissions: Arc::new(Mutex::new(HashMap::new())) })
         .run(tauri::generate_context!())

@@ -1,11 +1,22 @@
 import { motion, AnimatePresence } from 'motion/react'
 import { useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
+import { SpritePet } from './SpritePet'
+import type { CodexPet } from '../lib/codexPet'
 import type { AppMode } from '../lib/petStore'
 
 interface OnboardingModalProps {
   open: boolean
   onSelect: (mode: AppMode) => void
+}
+
+// Codex pet metadata constructed inline so the onboarding modal renders
+// instantly without waiting for the pets manifest fetch.
+const PHOEBE_PET: CodexPet = {
+  id: 'phoebe',
+  displayName: 'Phoebe',
+  description: '',
+  spritesheetUrl: '/assets/builtin/phoebe.codex-pet/spritesheet.webp',
 }
 
 export function OnboardingModal({ open, onSelect }: OnboardingModalProps) {
@@ -45,7 +56,7 @@ export function OnboardingModal({ open, onSelect }: OnboardingModalProps) {
               background: 'linear-gradient(135deg, #1a1a1a 0%, #111 100%)',
               border: '1px solid rgba(255,255,255,0.08)',
               boxShadow: '0 24px 80px rgba(0,0,0,0.8), 0 0 0 1px rgba(255,255,255,0.05)',
-              maxWidth: 520,
+              maxWidth: 560,
               width: '90vw',
               flexDirection: 'column',
               alignItems: 'center',
@@ -58,24 +69,17 @@ export function OnboardingModal({ open, onSelect }: OnboardingModalProps) {
               {t('onboarding.chooseModeSubtitle')}
             </p>
 
-            <div style={{ display: 'flex', gap: 16, width: '100%', marginTop: 8 }}>
-              <ModeCard
-                title={t('settings.petMode')}
-                mediaSrc={petPreviewSrc}
-                mediaType="video"
-                mediaSize={200}
-                description={t('onboarding.petModeLongDesc')}
-                accent="#f59e0b"
-                onClick={() => onSelect('pet')}
-              />
-              <ModeCard
+            <div style={{ display: 'flex', gap: 16, width: '100%', marginTop: 8, alignItems: 'stretch' }}>
+              <CodingModeCard
                 title={t('settings.codingMode')}
-                mediaSrc="/assets/builtin/诗歌剧/mini/top/working.gif"
-                mediaType="image"
-                mediaSize={80}
                 description={t('onboarding.codingModeLongDesc')}
-                accent="#3b82f6"
                 onClick={() => onSelect('coding')}
+              />
+              <PetModeCard
+                title={t('settings.petMode')}
+                petPreviewSrc={petPreviewSrc}
+                description={t('onboarding.petModeLongDesc')}
+                onClick={() => onSelect('pet')}
               />
             </div>
           </motion.div>
@@ -85,62 +89,118 @@ export function OnboardingModal({ open, onSelect }: OnboardingModalProps) {
   )
 }
 
-function ModeCard({ title, mediaSrc, mediaType, mediaSize = 50, description, accent, onClick }: {
+// Recommended primary card. Larger flex weight, accent border, codex
+// sprite preview to lean into the agent-monitoring identity.
+function CodingModeCard({
+  title,
+  description,
+  onClick,
+}: {
   title: string
-  mediaSrc: string
-  mediaType: 'image' | 'video'
-  mediaSize?: number
   description: string
-  accent: string
+  onClick: () => void
+}) {
+  const { t } = useTranslation()
+  return (
+    <motion.button
+      whileHover={{ scale: 1.02 }}
+      whileTap={{ scale: 0.98 }}
+      onClick={onClick}
+      style={{
+        flex: 1.4,
+        position: 'relative',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        gap: 12,
+        padding: '32px 20px',
+        borderRadius: 18,
+        background:
+          'linear-gradient(160deg, rgba(59,130,246,0.16) 0%, rgba(59,130,246,0.04) 60%, rgba(255,255,255,0.02) 100%)',
+        border: '1px solid rgba(59,130,246,0.45)',
+        boxShadow: '0 0 0 1px rgba(59,130,246,0.12), 0 12px 28px rgba(59,130,246,0.18)',
+        cursor: 'pointer',
+        color: '#fff',
+        textAlign: 'center',
+      }}
+    >
+      <span
+        style={{
+          position: 'absolute',
+          top: 10,
+          right: 10,
+          fontSize: 10,
+          fontWeight: 600,
+          letterSpacing: '0.06em',
+          padding: '3px 8px',
+          borderRadius: 999,
+          background: 'rgba(59,130,246,0.18)',
+          color: '#93c5fd',
+          border: '1px solid rgba(59,130,246,0.35)',
+        }}
+      >
+        {t('onboarding.recommended', '推荐')}
+      </span>
+      <div
+        style={{
+          height: 200,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          imageRendering: 'pixelated',
+        }}
+      >
+        <SpritePet pet={PHOEBE_PET} state="idle" size={150} />
+      </div>
+      <span style={{ fontSize: 16, fontWeight: 700, letterSpacing: '-0.01em' }}>{title}</span>
+      <span style={{ fontSize: 12.5, color: 'rgba(255,255,255,0.65)', lineHeight: 1.55 }}>
+        {description}
+      </span>
+    </motion.button>
+  )
+}
+
+// Secondary card. Visually muted (lower opacity, subdued border) so the
+// recommended primary stands out, but still clearly clickable.
+function PetModeCard({
+  title,
+  petPreviewSrc,
+  description,
+  onClick,
+}: {
+  title: string
+  petPreviewSrc: string
+  description: string
   onClick: () => void
 }) {
   return (
     <motion.button
-      whileHover={{ scale: 1.03, borderColor: accent }}
-      whileTap={{ scale: 0.97 }}
+      whileHover={{ scale: 1.02, opacity: 1 }}
+      whileTap={{ scale: 0.98 }}
       onClick={onClick}
       style={{
         flex: 1,
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
-        gap: 12,
-        padding: '28px 20px',
+        gap: 10,
+        padding: '24px 16px',
         borderRadius: 16,
-        background: 'rgba(255,255,255,0.03)',
-        border: '1px solid rgba(255,255,255,0.08)',
+        background: 'rgba(255,255,255,0.025)',
+        border: '1px solid rgba(255,255,255,0.06)',
         cursor: 'pointer',
-        transition: 'border-color 0.2s, background 0.2s',
+        opacity: 0.78,
         color: '#fff',
         textAlign: 'center',
       }}
-      onMouseEnter={(e) => {
-        ;(e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.06)'
-      }}
-      onMouseLeave={(e) => {
-        ;(e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.03)'
-      }}
     >
-      <div style={{ height: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column' }}>
-        {mediaType === 'video' ? (
-          <ChromaKeyVideo src={mediaSrc} size={mediaSize} />
-        ) : (
-          <img
-            src={mediaSrc}
-            alt=""
-            style={{
-              width: mediaSize,
-              height: mediaSize,
-              objectFit: 'contain',
-              pointerEvents: 'none',
-              filter: 'drop-shadow(0 2px 8px rgba(0,0,0,0.45))',
-              imageRendering: 'pixelated',
-            }}
-          />
-        )}
+      <div style={{ height: 200, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <ChromaKeyVideo src={petPreviewSrc} size={150} />
       </div>
-      <span style={{ fontSize: 15, fontWeight: 600, letterSpacing: '-0.01em' }}>{title}</span>
-      <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.45)', lineHeight: 1.5 }}>{description}</span>
+      <span style={{ fontSize: 14, fontWeight: 500, color: 'rgba(255,255,255,0.85)' }}>{title}</span>
+      <span style={{ fontSize: 11.5, color: 'rgba(255,255,255,0.4)', lineHeight: 1.5 }}>
+        {description}
+      </span>
     </motion.button>
   )
 }
