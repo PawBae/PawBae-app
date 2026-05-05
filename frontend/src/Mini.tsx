@@ -389,12 +389,42 @@ export default function Mini() {
   // `mini_pet_queue`. Defaults to a single-item queue containing the
   // currently selected mini pet (or DEFAULT_PET_ID).
   const [petQueue, setPetQueue] = useState<string[]>([])
+  // Resolved CodexPet objects in queue order; populated by an effect that
+  // looks each id up via loadCodexPetById. The session-list / slot
+  // renderers index into this array by row position so multiple sessions
+  // visibly rotate through the configured pets.
+  const [petQueueResolved, setPetQueueResolved] = useState<CodexPet[]>([])
   const savePetQueue = useCallback(async (next: string[]) => {
     setPetQueue(next)
     const store = await load('settings.json', { defaults: {}, autoSave: true })
     await store.set('mini_pet_queue', next)
     await store.save()
   }, [])
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      if (petQueue.length === 0) {
+        if (!cancelled) setPetQueueResolved([])
+        return
+      }
+      const resolved = await Promise.all(petQueue.map((id) => loadCodexPetById(id)))
+      if (cancelled) return
+      setPetQueueResolved(resolved.filter((p): p is CodexPet => p !== null))
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [petQueue])
+  // Returns the queue pet for a given session row index. Falls back to
+  // the user's main mini pet when the queue is empty or hasn't resolved
+  // yet so rows never render with `null`.
+  const getQueuePet = useCallback(
+    (index: number): CodexPet | null => {
+      if (petQueueResolved.length === 0) return miniPet
+      return petQueueResolved[((index % petQueueResolved.length) + petQueueResolved.length) % petQueueResolved.length]
+    },
+    [petQueueResolved, miniPet],
+  )
   const [selectedClaudeSession, setSelectedClaudeSession] = useState<string | null>(null)
   const [claudeConversation, setClaudeConversation] = useState<any[]>([])
   const [showClaudeStats, setShowClaudeStats] = useState(false)
@@ -4206,11 +4236,14 @@ export default function Mini() {
                                         }}
                                       >
                                         <div className="absolute inset-0" style={{ left: -16 }} />
-                                        {miniPet ? (
-                                          <SpritePet pet={miniPet} state={ocSpriteState} size={Math.round(40 * SESSION_SPRITE_DISPLAY_MULTIPLIER)} />
-                                        ) : (
-                                          <span className="text-white/40 text-lg">{agent?.identityEmoji || '?'}</span>
-                                        )}
+                                        {(() => {
+                                          const rowPet = getQueuePet(index)
+                                          return rowPet ? (
+                                            <SpritePet pet={rowPet} state={ocSpriteState} size={Math.round(40 * SESSION_SPRITE_DISPLAY_MULTIPLIER)} />
+                                          ) : (
+                                            <span className="text-white/40 text-lg">{agent?.identityEmoji || '?'}</span>
+                                          )
+                                        })()}
                                         <div
                                           style={{
                                             position: 'absolute',
@@ -4369,11 +4402,14 @@ export default function Mini() {
                                           }}
                                         >
                                           <div className="absolute inset-0" style={{ left: -16 }} />
-                                          {miniPet ? (
-                                            <SpritePet pet={miniPet} state={claudeSpriteState} size={Math.round(40 * SESSION_SPRITE_DISPLAY_MULTIPLIER)} />
-                                          ) : (
-                                            <span className="text-white/40 text-lg">🤖</span>
-                                          )}
+                                          {(() => {
+                                            const rowPet = getQueuePet(index)
+                                            return rowPet ? (
+                                              <SpritePet pet={rowPet} state={claudeSpriteState} size={Math.round(40 * SESSION_SPRITE_DISPLAY_MULTIPLIER)} />
+                                            ) : (
+                                              <span className="text-white/40 text-lg">🤖</span>
+                                            )
+                                          })()}
                                           <div
                                             style={{
                                               position: 'absolute',
@@ -4883,9 +4919,13 @@ export default function Mini() {
                               }}
                             >
                               <div style={{ position: 'relative' }}>
-                                {miniPet ? (
-                                  <SpritePet pet={miniPet} state={slotSpriteState} size={Math.round(56 * SESSION_SPRITE_DISPLAY_MULTIPLIER)} />
-                                ) : (
+                                {(() => {
+                                  const rowPet = getQueuePet(sortedIdx)
+                                  return rowPet ? (
+                                    <SpritePet pet={rowPet} state={slotSpriteState} size={Math.round(56 * SESSION_SPRITE_DISPLAY_MULTIPLIER)} />
+                                  ) : null
+                                })()}
+                                {!miniPet && petQueueResolved.length === 0 && (
                                   <div
                                     style={{
                                       width: 56,
