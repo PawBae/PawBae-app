@@ -4036,6 +4036,19 @@ fn macos_cursor_position() -> (f64, f64) {
     (0.0, 0.0)
 }
 
+// Non-macOS stubs: the efficiency hover / notch drag tracker is a macOS-only
+// feature (driven by NSEvent), but the polling loop itself is not gated, so
+// we provide no-op implementations on other platforms to keep the build
+// happy. The poll loop never engages drag here because `NOTCH_SCREEN_INFO`
+// stays unset on Windows/Linux.
+#[cfg(not(target_os = "macos"))]
+fn macos_pressed_mouse_buttons() -> usize {
+    0
+}
+
+#[cfg(not(target_os = "macos"))]
+fn request_drag_apply(_app: &tauri::AppHandle) {}
+
 /// Resize the expanded mini window height while keeping it top-aligned.
 /// macOS: bottom-left origin, so adjust y to keep the same top anchor.
 /// Windows: top-left origin, so just resize height.
@@ -7860,16 +7873,27 @@ async fn pick_codex_pet_folder(app: tauri::AppHandle) -> Result<Option<String>, 
     }
     #[cfg(target_os = "windows")]
     {
+        // Use the legacy WinForms FolderBrowserDialog (the only thing
+        // available without extra deps on PowerShell 5.1 / .NET Framework).
+        // Defaults are bad: RootFolder is Desktop, so the picker only shows
+        // a single "桌面" node — users can't see other drives. We override
+        // RootFolder to MyComputer so all drives appear at the root, and
+        // pre-select the user's profile dir so the dialog opens at a sane
+        // location instead of an empty tree.
         let script = r#"
             Add-Type -AssemblyName System.Windows.Forms
             $d = New-Object System.Windows.Forms.FolderBrowserDialog
             $d.Description = "Select codex pet folder"
+            $d.UseDescriptionForTitle = $true
+            $d.RootFolder = [System.Environment+SpecialFolder]::MyComputer
+            $d.SelectedPath = [System.Environment]::GetFolderPath('UserProfile')
+            $d.ShowNewFolderButton = $true
             if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
                 Write-Output $d.SelectedPath
             }
         "#;
         let out = std::process::Command::new("powershell")
-            .args(["-NoProfile", "-Command", script])
+            .args(["-NoProfile", "-STA", "-Command", script])
             .output()
             .map_err(|e| e.to_string())?;
         reassert_mini_floating(&app);
@@ -7989,7 +8013,16 @@ fn codex_asset_url(abs: &std::path::Path) -> String {
         .components()
         .map(|c| utf8_percent_encode(&c.as_os_str().to_string_lossy(), NON_ALPHANUMERIC).to_string())
         .collect();
-    format!("codexpet://localhost/{}", parts.join("/"))
+    // Windows WebView2 cannot fetch `<scheme>://...` URLs registered via
+    // `register_uri_scheme_protocol`; Tauri exposes them as
+    // `http://<scheme>.localhost/...` instead. Match the same convention as
+    // localasset/customasset so codex pet sprites actually load.
+    let prefix = if cfg!(target_os = "windows") {
+        "http://codexpet.localhost"
+    } else {
+        "codexpet://localhost"
+    };
+    format!("{}/{}", prefix, parts.join("/"))
 }
 
 fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> Result<(), String> {
