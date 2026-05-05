@@ -3,6 +3,7 @@ import {
   ATLAS,
   ANIMATION_ROWS,
   fpsFor,
+  loopRestMsFor,
   type CodexPet,
   type CodexPetState,
 } from '../lib/codexPet'
@@ -35,10 +36,14 @@ export function SpritePet({ pet, state, size, onOneShotEnd, loop, className, sty
   const loopRef = useRef(loop ?? false)
   const onOneShotEndRef = useRef(onOneShotEnd)
   const oneShotFiredRef = useRef(false)
+  // Timestamp until which the current looping cycle is "resting" on the
+  // last frame. 0 means no rest in flight.
+  const restUntilRef = useRef(0)
 
   useEffect(() => {
     stateRef.current = state
     oneShotFiredRef.current = false
+    restUntilRef.current = 0
     setFrameIndex(0)
   }, [state])
 
@@ -58,6 +63,23 @@ export function SpritePet({ pet, state, size, onOneShotEnd, loop, className, sty
 
     const tick = (now: number) => {
       if (cancelled) return
+      // If we're in an inter-cycle rest, hold the last frame and skip
+      // frame advancement until the rest deadline passes.
+      if (restUntilRef.current > 0) {
+        if (now < restUntilRef.current) {
+          last = now
+          acc = 0
+          raf = requestAnimationFrame(tick)
+          return
+        }
+        // Rest finished: restart the cycle from frame 0.
+        restUntilRef.current = 0
+        setFrameIndex(0)
+        last = now
+        acc = 0
+        raf = requestAnimationFrame(tick)
+        return
+      }
       const dt = now - last
       last = now
       acc += dt
@@ -66,6 +88,7 @@ export function SpritePet({ pet, state, size, onOneShotEnd, loop, className, sty
       // the state changes mid-tick.
       const frameMs = 1000 / fpsFor(stateRef.current)
       while (acc >= frameMs) {
+        if (restUntilRef.current > 0) break
         acc -= frameMs
         const cur = stateRef.current
         const row = ANIMATION_ROWS[cur]
@@ -83,7 +106,17 @@ export function SpritePet({ pet, state, size, onOneShotEnd, loop, className, sty
             }
             return next
           }
-          return next % row.frames
+          // Looping state: optionally pause on the last frame so the cycle
+          // reads as a burst-then-rest rhythm instead of a continuous loop.
+          if (next >= row.frames) {
+            const restMs = loopRestMsFor(cur)
+            if (restMs > 0) {
+              restUntilRef.current = now + restMs
+              return row.frames - 1
+            }
+            return 0
+          }
+          return next
         })
       }
       raf = requestAnimationFrame(tick)

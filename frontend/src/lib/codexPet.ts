@@ -59,12 +59,26 @@ export const STATE_FPS: Partial<Record<CodexPetState, number>> = {
   idle: 2,
   jumping: 6,
   running: 6,
+  waiting: 6,
   'run-left': 8,
   'run-right': 8,
 }
 
 export function fpsFor(state: CodexPetState): number {
   return STATE_FPS[state] ?? SPRITE_FPS
+}
+
+// Inter-cycle rest (ms) for looping sprite states. After completing a
+// cycle, SpritePet holds the last frame for this duration before
+// restarting from frame 0. Lets passive states like `waiting` read as
+// repeated bursts with stillness in between (matching the jump cadence)
+// instead of a continuous animation that feels too busy.
+export const STATE_LOOP_REST_MS: Partial<Record<CodexPetState, number>> = {
+  waiting: 600,
+}
+
+export function loopRestMsFor(state: CodexPetState): number {
+  return STATE_LOOP_REST_MS[state] ?? 0
 }
 
 export const DEFAULT_PET_ID = 'phoebe'
