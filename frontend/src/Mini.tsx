@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { load } from '@tauri-apps/plugin-store'
-import { listen } from '@tauri-apps/api/event'
+import { emit, listen } from '@tauri-apps/api/event'
 import { ChevronDown, Loader2, X, Pin, Bell, BellOff, Move, Settings, Asterisk, Trash2, Cloud } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import ReactMarkdown from 'react-markdown'
@@ -3514,6 +3514,27 @@ export default function Mini() {
     : walkDir === -1
       ? 'run-left'
       : petStateToCodexState(mainPetState)
+  // Broadcast the resolved mascot state so dev-mode demo windows can
+  // mirror it. The main window owns the polling loops that derive
+  // working / waiting / idle (claude sessions every 2s, agents every
+  // 5s, health every 1s); demo windows have no business duplicating
+  // those polls. Emit on every change for low-latency mirroring, plus
+  // a 2s periodic re-emit so a freshly-spawned demo window catches
+  // the current state without waiting for the next change.
+  const mainPetStateRef = useRef<PetState>(mainPetState)
+  mainPetStateRef.current = mainPetState
+  useEffect(() => {
+    if (appMode !== 'coding') return
+    emit('mini-pet-state', { state: mainPetState }).catch(() => {})
+  }, [mainPetState, appMode])
+  useEffect(() => {
+    if (appMode !== 'coding') return
+    const t = setInterval(() => {
+      emit('mini-pet-state', { state: mainPetStateRef.current }).catch(() => {})
+    }, 2000)
+    return () => clearInterval(t)
+  }, [appMode])
+
   const fallbackLargeActions = useMemo(() => {
     const c = characters.find((ch) => ch.largeActions && Object.keys(ch.largeActions).length > 0)
     return c?.largeActions
@@ -3830,7 +3851,13 @@ export default function Mini() {
             display: (appMode === 'pet' && largeMascot) ? 'block' : 'flex',
             alignItems: (appMode === 'pet' && largeMascot) ? undefined : 'center',
             justifyContent: (appMode === 'pet' && largeMascot) ? undefined : 'center',
-            background: (viewMode === 'efficiency' && appMode !== 'pet') ? 'rgba(0,0,0,0.01)' : undefined,
+            // No background. Used to be `rgba(0,0,0,0.01)` to coax macOS
+            // WKWebView into delivering hover events on transparent area,
+            // but mini-panel no longer uses panel-level hover/click
+            // handlers (children carry their own), and the 1% alpha was
+            // visible on light-colored desktops as a faint gray tint
+            // around the mascot.
+            background: undefined,
             pointerEvents: 'auto',
             cursor: 'default',
           }}
