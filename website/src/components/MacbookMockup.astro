@@ -198,7 +198,7 @@ const mockupI18n = mockupI18nMap[lang] || mockupI18nMap.en;
 
       <!-- Collapsed mascot (visible when panel is hidden) -->
       <div class="oc-mascot" id="oc-mascot">
-        <img src="/images/pets/furina_working.gif" alt="" class="oc-mascot-img" />
+        <span class="oc-mascot-img oc-codex-sprite oc-codex-phoebe"></span>
         <div class="oc-mascot-dot" id="oc-mascot-dot" style="background:#2ecc71;"></div>
       </div>
 
@@ -293,7 +293,10 @@ const mockupI18n = mockupI18nMap[lang] || mockupI18nMap.en;
   z-index: 60; cursor: pointer;
   transition: opacity 0.3s;
 }
-.oc-mascot-img { width: 43px; height: 43px; object-fit: contain; image-rendering: pixelated; display: block; }
+/* Match the desktop app's collapsed mascot rendering: a codex sprite at
+ * MASCOT_BASE_SIZE (43) × MINI_SPRITE_DISPLAY_MULTIPLIER (2) = 86 wide,
+ * with the codex 192:208 cell aspect → 93 tall. */
+.oc-mascot-img { width: 86px; height: 93px; object-fit: contain; image-rendering: pixelated; display: block; }
 .oc-mascot-dot {
   position: absolute; bottom: 2px; right: 2px;
   width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid rgba(0,0,0,0.3);
@@ -582,6 +585,22 @@ const mockupI18n = mockupI18nMap[lang] || mockupI18nMap.en;
   position: relative;
   z-index: 1;
 }
+/* Codex sprite avatars used inside the mockup. The pet picker in the
+ * desktop app renders the same sprites; we mirror the idle frame here
+ * (row 0, col 0 of the 8x9 atlas) so the website demo matches what
+ * users actually see in-app. Applied to both .oc-pet-img (session
+ * avatars) and .oc-mascot-img (top-bar persistent mascot). */
+.oc-codex-sprite {
+  display: inline-block;
+  background-repeat: no-repeat;
+  background-size: 800% 900%; /* 8 cols x 9 rows */
+  background-position: 0% 0%;
+  image-rendering: pixelated;
+}
+.oc-codex-phoebe { background-image: url('/codex-pets/phoebe/spritesheet.webp'); }
+.oc-codex-doro { background-image: url('/codex-pets/doro/spritesheet.webp'); }
+.oc-codex-mambo { background-image: url('/codex-pets/mambo/spritesheet.webp'); }
+.oc-codex-taffy { background-image: url('/codex-pets/taffy/spritesheet.webp'); }
 .oc-action-btn::after {
   content: '';
   position: absolute;
@@ -691,9 +710,14 @@ function setupMockup() {
   function setMascotMode(mode) {
     if (!mascotImg || !mascotDot) return;
     const isSleep = mode === 'sleep';
-    mascotImg.src = isSleep
-      ? '/images/pets/furina_sleeping.gif'
-      : '/images/pets/furina_working.gif';
+    // The persistent mascot is now a codex sprite (a <span> with a
+    // background-image), so swapping `src` would be a no-op. Only the
+    // status dot needs to flip between working/idle colours.
+    if (mascotImg.tagName === 'IMG') {
+      mascotImg.src = isSleep
+        ? '/images/pets/furina_sleeping.gif'
+        : '/images/pets/furina_working.gif';
+    }
     mascotDot.style.background = isSleep ? '#94a3b8' : '#2ecc71';
   }
 
@@ -799,7 +823,7 @@ function setupMockup() {
     content.innerHTML = `
       <div class="oc-step" data-s="1">
         <div class="oc-item">
-          <div class="oc-avatar"><img src="/images/pets/paimon_sleeping.gif" alt="" class="oc-pet-img"/><div class="oc-dot" style="background:#2ecc71;"></div></div>
+          <div class="oc-avatar"><span class="oc-pet-img oc-codex-sprite oc-codex-phoebe"></span><div class="oc-dot" style="background:#2ecc71;"></div></div>
           <div class="oc-item-main"><span class="oc-title text-white">code2026</span><span class="oc-subtitle">· hi</span></div>
           <div class="oc-item-right"><span class="oc-badge" style="background:#1a2f3f;color:#5eb5f7;">Cursor</span><span class="oc-time"><1m</span></div>
         </div>
@@ -866,7 +890,7 @@ function setupMockup() {
     content.innerHTML = `
       <div class="oc-step" data-s="1">
         <div class="oc-item" style="align-items:flex-start;">
-          <div class="oc-avatar"><img src="/images/pets/furina_working.gif" alt="" class="oc-pet-img"/><div class="oc-dot" style="background:#f59e0b;"></div></div>
+          <div class="oc-avatar"><span class="oc-pet-img oc-codex-sprite oc-codex-doro"></span><div class="oc-dot" style="background:#f59e0b;"></div></div>
           <div style="flex:1;min-width:0;">
             <div class="oc-item-main"><span class="oc-title text-white">fix-auth-bug</span><span class="oc-subtitle">${T.approveWaiting}</span></div>
             <div class="oc-item-right" style="margin-top:2px;"><span class="oc-badge" style="background:#3f211d;color:#e87a65;">Claude</span><span class="oc-time"><1m</span></div>
@@ -940,33 +964,33 @@ function setupMockup() {
     const sessionRows = isWindows
       ? `
         <div class="oc-item">
-          <div class="oc-avatar"><img src="/images/pets/paimon_sleeping.gif" alt="" class="oc-pet-img"/><div class="oc-dot" style="background:#94a3b8;"></div></div>
+          <div class="oc-avatar"><span class="oc-pet-img oc-codex-sprite oc-codex-mambo"></span><div class="oc-dot" style="background:#94a3b8;"></div></div>
           <div class="oc-item-main"><span class="oc-title text-white">api-retry</span><span class="oc-subtitle">${T.subtitleInspect}</span></div>
           <div class="oc-item-right"><span class="oc-badge" style="background:#334155;color:#e2e8f0;">Feishu</span><span class="oc-time">18h</span></div>
         </div>
         <div class="oc-item oc-detail-entry-target">
-          <div class="oc-avatar"><img src="/images/pets/furina_working.gif" alt="" class="oc-pet-img"/><div class="oc-dot" style="background:#f59e0b;"></div></div>
+          <div class="oc-avatar"><span class="oc-pet-img oc-codex-sprite oc-codex-mambo"></span><div class="oc-dot" style="background:#f59e0b;"></div></div>
           <div class="oc-item-main"><span class="oc-title text-white">auth-fix</span><span class="oc-subtitle">${T.subtitleWaitingApproval}</span></div>
           <div class="oc-item-right"><span class="oc-badge" style="background:#3f211d;color:#e87a65;">Claude</span><span class="oc-time"><1m</span></div>
         </div>`
       : `
         <div class="oc-item oc-detail-entry-target">
-          <div class="oc-avatar"><img src="/images/pets/furina_working.gif" alt="" class="oc-pet-img"/><div class="oc-dot" style="background:#2ecc71;"></div></div>
+          <div class="oc-avatar"><span class="oc-pet-img oc-codex-sprite oc-codex-mambo"></span><div class="oc-dot" style="background:#2ecc71;"></div></div>
           <div class="oc-item-main"><span class="oc-title text-white">code2026</span><span class="oc-subtitle">${T.subtitleTune}</span></div>
           <div class="oc-item-right"><span class="oc-badge" style="background:#1a2f3f;color:#5eb5f7;">Cursor</span><span class="oc-time"><1m</span></div>
         </div>
         <div class="oc-item">
-          <div class="oc-avatar"><img src="/images/pets/paimon_sleeping.gif" alt="" class="oc-pet-img"/><div class="oc-dot" style="background:#94a3b8;"></div></div>
+          <div class="oc-avatar"><span class="oc-pet-img oc-codex-sprite oc-codex-mambo"></span><div class="oc-dot" style="background:#94a3b8;"></div></div>
           <div class="oc-item-main"><span class="oc-title text-white">api-retry</span><span class="oc-subtitle">${T.subtitleInspect}</span></div>
           <div class="oc-item-right"><span class="oc-badge" style="background:#334155;color:#e2e8f0;">Feishu</span><span class="oc-time">18h</span></div>
         </div>
         <div class="oc-item">
-          <div class="oc-avatar"><img src="/images/pets/paimon_sleeping.gif" alt="" class="oc-pet-img"/><div class="oc-dot" style="background:#2ecc71;"></div></div>
+          <div class="oc-avatar"><span class="oc-pet-img oc-codex-sprite oc-codex-mambo"></span><div class="oc-dot" style="background:#2ecc71;"></div></div>
           <div class="oc-item-main"><span class="oc-title text-white">codex-task</span><span class="oc-subtitle">${T.subtitleBatchComplete}</span></div>
           <div class="oc-item-right"><span class="oc-badge" style="background:#2a1f45;color:#c4b5fd;">Codex</span><span class="oc-time"><1m</span></div>
         </div>
         <div class="oc-item">
-          <div class="oc-avatar"><img src="/images/pets/furina_working.gif" alt="" class="oc-pet-img"/><div class="oc-dot" style="background:#f59e0b;"></div></div>
+          <div class="oc-avatar"><span class="oc-pet-img oc-codex-sprite oc-codex-mambo"></span><div class="oc-dot" style="background:#f59e0b;"></div></div>
           <div class="oc-item-main"><span class="oc-title text-white">auth-fix</span><span class="oc-subtitle">${T.subtitleWaitingApproval}</span></div>
           <div class="oc-item-right"><span class="oc-badge" style="background:#3f211d;color:#e87a65;">Claude</span><span class="oc-time"><1m</span></div>
         </div>`;
@@ -1098,12 +1122,12 @@ function setupMockup() {
     const monitorRows = isWindowsMonitor
       ? `
         <div class="oc-item oc-monitor-rename-row">
-          <div class="oc-avatar"><img src="/images/pets/furina_working.gif" alt="" class="oc-pet-img"/><div class="oc-dot" style="background:#2ecc71;"></div></div>
+          <div class="oc-avatar"><span class="oc-pet-img oc-codex-sprite oc-codex-phoebe"></span><div class="oc-dot" style="background:#2ecc71;"></div></div>
           <div class="oc-item-main"><span class="oc-title text-white oc-monitor-rename-title">${initialRenameTitle}</span><input class="oc-monitor-rename-input" value="${initialRenameTitle}" readonly /><span class="oc-subtitle oc-monitor-rename-subtitle">${T.subtitleMonitorWatch}</span></div>
           <div class="oc-item-right"><span class="oc-badge" style="background:#3f211d;color:#e87a65;">Claude</span><span class="oc-time"><1m</span></div>
         </div>
         <div class="oc-item oc-monitor-delete-row">
-          <div class="oc-avatar"><img src="/images/pets/paimon_sleeping.gif" alt="" class="oc-pet-img"/><div class="oc-dot" style="background:#94a3b8;"></div></div>
+          <div class="oc-avatar"><span class="oc-pet-img oc-codex-sprite oc-codex-doro"></span><div class="oc-dot" style="background:#94a3b8;"></div></div>
           <div class="oc-item-main"><span class="oc-title text-white">api-retry</span><span class="oc-subtitle">${T.subtitleIdle}</span></div>
           <div class="oc-item-right">
             <span class="oc-badge" style="background:#334155;color:#e2e8f0;">Feishu</span>
@@ -1117,12 +1141,12 @@ function setupMockup() {
         </div>`
       : `
         <div class="oc-item oc-monitor-rename-row">
-          <div class="oc-avatar"><img src="/images/pets/furina_working.gif" alt="" class="oc-pet-img"/><div class="oc-dot" style="background:#2ecc71;"></div></div>
+          <div class="oc-avatar"><span class="oc-pet-img oc-codex-sprite oc-codex-phoebe"></span><div class="oc-dot" style="background:#2ecc71;"></div></div>
           <div class="oc-item-main"><span class="oc-title text-white oc-monitor-rename-title">${initialRenameTitle}</span><input class="oc-monitor-rename-input" value="${initialRenameTitle}" readonly /><span class="oc-subtitle oc-monitor-rename-subtitle">${T.subtitleMonitorWatch}</span></div>
           <div class="oc-item-right"><span class="oc-badge" style="background:#2a1f45;color:#c4b5fd;">Codex</span><span class="oc-time"><1m</span></div>
         </div>
         <div class="oc-item oc-monitor-delete-row">
-          <div class="oc-avatar"><img src="/images/pets/paimon_working.gif" alt="" class="oc-pet-img"/><div class="oc-dot" style="background:#2ecc71;"></div></div>
+          <div class="oc-avatar"><span class="oc-pet-img oc-codex-sprite oc-codex-doro"></span><div class="oc-dot" style="background:#2ecc71;"></div></div>
           <div class="oc-item-main"><span class="oc-title text-white">cursor-review</span><span class="oc-subtitle">${T.subtitleSummarizeUiDiff}</span></div>
           <div class="oc-item-right">
             <span class="oc-badge" style="background:#1a2f3f;color:#5eb5f7;">Cursor</span>
@@ -1135,12 +1159,12 @@ function setupMockup() {
           </div>
         </div>
         <div class="oc-item">
-          <div class="oc-avatar"><img src="/images/pets/furina_working.gif" alt="" class="oc-pet-img"/><div class="oc-dot" style="background:#f59e0b;"></div></div>
+          <div class="oc-avatar"><span class="oc-pet-img oc-codex-sprite oc-codex-mambo"></span><div class="oc-dot" style="background:#f59e0b;"></div></div>
           <div class="oc-item-main"><span class="oc-title text-white">auth-fix</span><span class="oc-subtitle">${T.subtitleWaitingApproval}</span></div>
           <div class="oc-item-right"><span class="oc-badge" style="background:#3f211d;color:#e87a65;">Claude</span><span class="oc-time"><1m</span></div>
         </div>
         <div class="oc-item">
-          <div class="oc-avatar"><img src="/images/pets/qiqi_sleeping.gif" alt="" class="oc-pet-img"/><div class="oc-dot" style="background:#94a3b8;"></div></div>
+          <div class="oc-avatar"><span class="oc-pet-img oc-codex-sprite oc-codex-taffy"></span><div class="oc-dot" style="background:#94a3b8;"></div></div>
           <div class="oc-item-main"><span class="oc-title text-white">api-retry</span><span class="oc-subtitle">${T.subtitleIdle}</span></div>
           <div class="oc-item-right"><span class="oc-badge" style="background:#334155;color:#e2e8f0;">Feishu</span><span class="oc-time">18h</span></div>
         </div>`;
