@@ -4,5 +4,9 @@
 <dict>
     <key>LSUIElement</key>
     <true/>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>oc-claw needs microphone access for voice input to your desktop pet.</string>
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>oc-claw uses on-device speech recognition to convert voice to text.</string>
 </dict>
 </plist>

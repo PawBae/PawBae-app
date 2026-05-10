@@ -23,6 +23,7 @@ tauri-plugin-store = "2"
 tauri-plugin-dialog = "2"
 reqwest = { version = "0.12", features = ["json"] }
 tokio = { version = "1", features = ["full"] }
+tauri-plugin-global-shortcut = "2"
 base64 = "0.22"
 chrono = "0.4"
 dirs = "5"
@@ -35,6 +36,8 @@ objc2 = "0.6"
 block2 = "0.6"
 objc2-app-kit = { version = "0.3", features = ["NSWindow", "NSScreen", "NSApplication", "NSRunningApplication"] }
 objc2-foundation = { version = "0.3", features = ["NSGeometry", "NSArray"] }
+objc2-speech = { version = "0.3", features = ["SFSpeechRecognizer", "SFSpeechRecognitionTask", "SFSpeechRecognitionRequest", "SFSpeechRecognitionResult", "SFTranscription"] }
+objc2-avf-audio = { version = "0.3", features = ["AVAudioEngine", "AVAudioNode", "AVAudioIONode", "AVAudioFormat", "AVAudioBuffer", "AVAudioTypes"] }
 notify = { version = "6", default-features = false, features = ["macos_kqueue"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]

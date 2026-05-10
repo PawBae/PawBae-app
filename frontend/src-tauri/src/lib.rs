@@ -4,6 +4,9 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
+#[cfg(target_os = "macos")]
+mod speech;
+
 #[cfg(target_os = "windows")]
 static FULLSCREEN_HIDING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 use percent_encoding::percent_decode_str;
@@ -11659,6 +11662,34 @@ fn build_asset_response(
     }
 }
 
+#[tauri::command]
+async fn voice_toggle() -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        if speech::is_recording() {
+            speech::stop_recording()
+        } else {
+            speech::start_recording()
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Err("Voice input not supported on this platform".into())
+    }
+}
+
+#[tauri::command]
+fn voice_is_recording() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        speech::is_recording()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        false
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     #[cfg(target_os = "windows")]
@@ -11677,6 +11708,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .register_uri_scheme_protocol("localasset", |ctx, req| {
             let raw_path = req.uri().path();
             let path = percent_decode_str(raw_path).decode_utf8_lossy();
@@ -11729,11 +11761,26 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             install_wry_webview_ime_fix();
 
-            // Accessibility permission is no longer requested automatically on
-            // startup. Cursor window raising is handled by the extension running
-            // inside the Cursor process itself, which doesn't need AX permission.
-            // The check_ax_permission / request_ax_permission commands remain
-            // available for the frontend to invoke if needed.
+            // Init speech recognition thread and register global shortcut
+            #[cfg(target_os = "macos")]
+            {
+                speech::init_speech_thread(app.handle().clone());
+                log::info!("[voice] speech thread started, registering shortcut");
+                use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
+                if let Err(e) = app.global_shortcut().on_shortcut("ctrl+shift+v", move |_app, _shortcut, event| {
+                    if event.state == ShortcutState::Pressed {
+                        log::info!("[voice] shortcut pressed, recording={}", speech::is_recording());
+                        if speech::is_recording() {
+                            let _ = speech::stop_recording();
+                        } else {
+                            let _ = speech::start_recording();
+                        }
+                    }
+                }) {
+                    log::warn!("[voice] failed to register shortcut: {}", e);
+                }
+                log::info!("[voice] shortcut registered, setup continuing");
+            }
 
             // Hide from Dock, show only in menu bar (macOS only)
             #[cfg(target_os = "macos")]
@@ -12018,7 +12065,7 @@ pub fn run() {
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![get_status, send_chat, open_detail_panel, save_character_gif, delete_character_assets, delete_character_gif, get_agents, get_health, get_agent_metrics, interrupt_agent, scan_characters, get_agent_extra_info, open_mini, close_mini, set_mini_expanded, set_mini_size, set_efficiency_hover_tracking, resize_mini_height, move_mini_by, get_mini_origin, get_mini_monitor_rect, set_mini_origin, set_ime_mode, get_agent_sessions, get_session_preview, get_session_messages, get_active_sessions, proxy_post, play_sound, get_claude_sessions, get_claude_conversation, install_claude_hooks, install_cursor_hooks, remove_claude_session, resolve_claude_permission, get_claude_stats, open_url, activate_app, focus_cursor_terminal, check_ax_permission, request_ax_permission, jump_to_claude_terminal, check_for_update, run_update, close_ssh, read_local_file, list_backgrounds, save_background, get_background_data, exit_app, get_ssh_key_info, reset_ssh, get_ui_scale, list_custom_codex_pets, open_codex_pets_dir, import_codex_pet, pick_codex_pet_folder, reassert_floating, spawn_demo_mascot, close_demo_mascot, close_demo_mascots, debug_log, update_tray_language, set_pet_mode_window, set_pet_context_menu, set_pet_pomodoro_active, get_now_playing, get_system_idle_time, set_stroll_mode, set_throw_tracking])
+        .invoke_handler(tauri::generate_handler![get_status, send_chat, open_detail_panel, save_character_gif, delete_character_assets, delete_character_gif, get_agents, get_health, get_agent_metrics, interrupt_agent, scan_characters, get_agent_extra_info, open_mini, close_mini, set_mini_expanded, set_mini_size, set_efficiency_hover_tracking, resize_mini_height, move_mini_by, get_mini_origin, get_mini_monitor_rect, set_mini_origin, set_ime_mode, get_agent_sessions, get_session_preview, get_session_messages, get_active_sessions, proxy_post, play_sound, get_claude_sessions, get_claude_conversation, install_claude_hooks, install_cursor_hooks, remove_claude_session, resolve_claude_permission, get_claude_stats, open_url, activate_app, focus_cursor_terminal, check_ax_permission, request_ax_permission, jump_to_claude_terminal, check_for_update, run_update, close_ssh, read_local_file, list_backgrounds, save_background, get_background_data, exit_app, get_ssh_key_info, reset_ssh, get_ui_scale, list_custom_codex_pets, open_codex_pets_dir, import_codex_pet, pick_codex_pet_folder, reassert_floating, spawn_demo_mascot, close_demo_mascot, close_demo_mascots, debug_log, update_tray_language, set_pet_mode_window, set_pet_context_menu, set_pet_pomodoro_active, get_now_playing, get_system_idle_time, set_stroll_mode, set_throw_tracking, voice_toggle, voice_is_recording])
         .manage(ActiveAgentPid { pid: Mutex::new(None) })
         .manage(ClaudeState { sessions: Arc::new(Mutex::new(HashMap::new())), pending_permissions: Arc::new(Mutex::new(HashMap::new())) })
         .run(tauri::generate_context!())

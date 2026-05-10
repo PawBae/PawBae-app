@@ -15,6 +15,7 @@ import { getStore, DEFAULT_CHAR, DEFAULT_CHAR_NAME, loadCharacters, loadOcConnec
 import type { AgentMetrics, OcConnection } from './lib/types'
 import { OnboardingModal } from './components/OnboardingModal'
 import { PetContextMenu, PomodoroOverlay } from './components/PetContextMenu'
+import { VoiceBubble } from './components/VoiceBubble'
 import {
   type AppMode, type PetData, type PetAction, type PomodoroState,
   loadAppMode, saveAppMode, loadPetData, savePetData, tickPetData,
@@ -680,6 +681,13 @@ export default function Mini() {
   const [petBaseWinW, setPetBaseWinW] = useState<number | null>(null)
   const petBaseWinWRef = useRef<number | null>(null)
   useEffect(() => { petBaseWinWRef.current = petBaseWinW }, [petBaseWinW])
+
+  // Voice input state (pet mode only)
+  const [voiceRecording, setVoiceRecording] = useState(false)
+  const [voiceText, setVoiceText] = useState('')
+  const [voiceError, setVoiceError] = useState<string | undefined>()
+  const [voiceBubbleVisible, setVoiceBubbleVisible] = useState(false)
+  const voiceFadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Food rain effect (lives outside context menu so it persists after menu closes)
   interface FoodRainDrop { id: number; emoji: string; x: number; delay: number; duration: number; size: number }
@@ -1591,6 +1599,44 @@ export default function Mini() {
     })
     return () => {
       unlisten.then((fn) => fn())
+    }
+  }, [])
+
+  // Voice input event listeners (pet mode push-to-talk)
+  useEffect(() => {
+    const p1 = listen<{ recording: boolean; error?: string }>('voice-status', (ev) => {
+      console.warn('[voice-status]', ev.payload)
+      setVoiceRecording(ev.payload.recording)
+      setVoiceError(ev.payload.error)
+      if (ev.payload.error) {
+        setVoiceBubbleVisible(true)
+        if (voiceFadeTimerRef.current) clearTimeout(voiceFadeTimerRef.current)
+        voiceFadeTimerRef.current = setTimeout(() => {
+          setVoiceBubbleVisible(false)
+          setVoiceError(undefined)
+        }, 3000)
+      } else if (ev.payload.recording) {
+        setVoiceText('')
+        setVoiceError(undefined)
+        setVoiceBubbleVisible(true)
+        if (voiceFadeTimerRef.current) clearTimeout(voiceFadeTimerRef.current)
+      } else {
+        voiceFadeTimerRef.current = setTimeout(() => {
+          setVoiceBubbleVisible(false)
+          setVoiceText('')
+        }, 2000)
+      }
+    })
+    const p2 = listen<{ text: string; is_final: boolean }>('voice-transcript', (ev) => {
+      console.warn('[voice-transcript]', ev.payload)
+      // Ignore empty final results from cancellation
+      if (ev.payload.is_final && !ev.payload.text) return
+      setVoiceText(ev.payload.text)
+    })
+    return () => {
+      p1.then(fn => fn())
+      p2.then(fn => fn())
+      if (voiceFadeTimerRef.current) clearTimeout(voiceFadeTimerRef.current)
     }
   }, [])
 
@@ -4000,6 +4046,34 @@ export default function Mini() {
         userSelect: 'none',
       }}
     >
+      {/* Voice input bubble */}
+      {voiceBubbleVisible && (
+        <div style={{
+          position: 'absolute',
+          top: 8,
+          left: 0,
+          width: '100%',
+          display: 'flex',
+          justifyContent: 'center',
+          pointerEvents: 'none',
+          zIndex: 99999,
+        }}>
+          <div style={{
+            background: voiceError ? '#e74c3c' : '#F5A623',
+            borderRadius: 14,
+            padding: '6px 12px',
+            color: '#fff',
+            fontSize: 12,
+            fontWeight: 500,
+            textAlign: 'center',
+            boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
+            maxWidth: '90%',
+            lineHeight: 1.4,
+          }}>
+            {voiceError || voiceText || (voiceRecording ? '...' : '')}
+          </div>
+        </div>
+      )}
       {/* Collapsed */}
       {!expanded && !hiding && !updateModalOpen && !showOnboarding && (
         <div
