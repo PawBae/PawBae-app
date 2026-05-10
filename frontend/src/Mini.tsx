@@ -36,6 +36,7 @@ import {
 import { MiniPetMascot } from './components/MiniPetMascot'
 import { SpritePet } from './components/SpritePet'
 import { PetPicker } from './components/PetPicker'
+import { usePhysicsLoop, type PhysicsHandle } from './lib/petPhysics'
 
 interface CharacterMeta {
   name: string
@@ -605,6 +606,56 @@ export default function Mini() {
   const currentPetActionRef = useRef<PetAction>('idle')
   currentPetActionRef.current = currentPetAction
   const [walkFlipped, setWalkFlipped] = useState(false)
+
+  // ─── Stroll mode (Phase 2 pet physics) ───
+  // Global toggle persisted in settings.json::stroll_mode_enabled and
+  // mirrored in the Rust tray's CheckMenuItem. Independent of the
+  // selected pet — turning it off disables physics regardless of which
+  // pet has `physics.enabled=true`. Defaults to true so users who pick
+  // a physics-enabled pet (e.g. shimeji-bola) see the effect right
+  // away.
+  //
+  // Stroll fires whenever the codex sprite mascot is the visible
+  // mascot — that's coding mode, OR pet mode when the selected pet has
+  // no .mov video URL (i.e. it's a sprite-only codex pet like
+  // shimeji-bola). Pet mode with a video-backed character (the penguin)
+  // keeps the legacy peek/walk behaviour and never enters stroll. We
+  // can't read `largeVideoUrl` here because it's defined further down
+  // the component, so the test is structural: `appMode != null` (boot
+  // finished) AND a physics-capable mini pet is selected.
+  const [strollGlobalEnabled, setStrollGlobalEnabled] = useState(true)
+  const strollPlatformOk =
+    typeof navigator !== 'undefined'
+    && /Mac|Macintosh|Mac OS/.test(navigator.userAgent)
+  // Pause physics whenever any panel/overlay is visible. Without this,
+  // `move_mini_by` keeps shifting the window while the user is reading
+  // settings, the session list, or the onboarding modal — all of which
+  // are rendered inside the same mini window and visibly slide around
+  // with the cat. `updateModalOpen` lives further down the component;
+  // its check is done via the imperative ref pattern below.
+  const strollEnabled = appMode != null
+    && !!miniPet?.physics?.enabled
+    && strollGlobalEnabled
+    && strollPlatformOk
+    && !expanded
+    && !settingsMode
+    && !settingsTransitioning
+    && !showSettingsOverlay
+    && !showOnboarding
+    && !isCreateModalOpen
+  const strollEnabledRef = useRef(false)
+  strollEnabledRef.current = strollEnabled
+
+  // Mount the physics loop unconditionally — `enabled` toggles the
+  // underlying setInterval. Returning a stable handle means
+  // event-listener effects can dispatch into it without re-binding
+  // every render.
+  const physicsHandle: PhysicsHandle = usePhysicsLoop({
+    pet: miniPet,
+    enabled: strollEnabled,
+  })
+  const physicsHandleRef = useRef<PhysicsHandle>(physicsHandle)
+  physicsHandleRef.current = physicsHandle
   const walkTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const walkAutoRef = useRef(false)
   // When true, auto-walk heads straight to a screen edge (no flipping)
@@ -1084,6 +1135,9 @@ export default function Mini() {
     // update / onboarding modals) would visually slide along with it,
     // which is jarring. Pause walking while any of those are visible, and
     // skip entirely outside pet mode.
+    // Stroll mode owns position via the physics tick; the legacy walk
+    // loop must not run concurrently or the two will fight over
+    // `move_mini_by` calls.
     if (
       appMode !== 'pet' ||
       settingsMode ||
@@ -1092,7 +1146,8 @@ export default function Mini() {
       showSettingsOverlay ||
       updateModalOpen ||
       showOnboarding ||
-      isCreateModalOpen
+      isCreateModalOpen ||
+      strollEnabled
     ) {
       setWalkFlipped(false)
       updateWalkDir(0)
@@ -1219,6 +1274,7 @@ export default function Mini() {
     showOnboarding,
     isCreateModalOpen,
     updateWalkDir,
+    strollEnabled,
   ])
 
   // Pet mode: auto-detect music/video from frontmost app
@@ -1493,6 +1549,90 @@ export default function Mini() {
     }
   }, [])
 
+  // ─── Stroll-mode wiring ───
+  // Whenever the stroll-enabled state actually changes (toggle, pet
+  // swap, mode swap), keep Rust in sync:
+  //   1. set_stroll_mode mirrors the global toggle so the tray check
+  //      state and atomic flag match what the user sees.
+  //   2. set_throw_tracking flips the per-tick velocity sampler in the
+  //      drag loop on/off — only on when the full stroll path is live.
+  // Also force `currentPetAction = idle` on enable so the legacy walk
+  // loop early-returns and physics owns the position.
+  useEffect(() => {
+    invoke('set_throw_tracking', { enabled: strollEnabled }).catch(() => {})
+    if (strollEnabled) {
+      setCurrentPetAction('idle')
+      currentPetActionRef.current = 'idle'
+    }
+  }, [strollEnabled])
+
+  // Pause physics while the update modal is open. updateModalOpen is
+  // declared further down the component (so it can't be inlined into
+  // strollEnabled) but the imperative `setPaused` handle on the
+  // physics loop does the same job.
+  useEffect(() => {
+    physicsHandleRef.current.setPaused(updateModalOpen)
+  }, [updateModalOpen])
+
+  // Listen for the tray-driven toggle so the in-app state and
+  // settings.json stay in sync regardless of where the change came
+  // from. We persist here (single owner of settings.json writes).
+  useEffect(() => {
+    const unlisten = listen<boolean>('stroll-mode-changed', async (ev) => {
+      const enabled = !!ev.payload
+      setStrollGlobalEnabled(enabled)
+      try {
+        const store = await load('settings.json', { defaults: {}, autoSave: true })
+        await store.set('stroll_mode_enabled', enabled)
+        await store.save()
+      } catch (e) {
+        console.warn('[stroll] persist failed:', e)
+      }
+    })
+    return () => {
+      unlisten.then((fn) => fn())
+    }
+  }, [])
+
+  // Bridge Rust drag-loop events into the physics state machine.
+  // mini-mascot-drag-start: enter `pinched` (suspend gravity).
+  // mini-mascot-drag-throw: leave pinched + apply initial velocity.
+  // mini-mascot-drag-end: fallback unpinch when no throw fires
+  //   (e.g. user clicks without dragging or release without
+  //   sampling enabled).
+  useEffect(() => {
+    let unlistenStart: (() => void) | null = null
+    let unlistenThrow: (() => void) | null = null
+    let unlistenEnd: (() => void) | null = null
+    listen<unknown>('mini-mascot-drag-start', () => {
+      if (!strollEnabledRef.current) return
+      physicsHandleRef.current.setPinched(true)
+    }).then((fn) => {
+      unlistenStart = fn
+    })
+    listen<{ vx: number; vy: number }>('mini-mascot-drag-throw', (ev) => {
+      if (!strollEnabledRef.current) return
+      const { vx = 0, vy = 0 } = ev.payload || {}
+      physicsHandleRef.current.beginThrow(vx, vy)
+    }).then((fn) => {
+      unlistenThrow = fn
+    })
+    listen<unknown>('mini-mascot-drag-end', () => {
+      if (!strollEnabledRef.current) return
+      // beginThrow already cleared `pinched` if a throw fired; calling
+      // setPinched(false) here is a no-op in that case but ensures we
+      // don't get stuck pinched if the throw event was lost.
+      physicsHandleRef.current.setPinched(false)
+    }).then((fn) => {
+      unlistenEnd = fn
+    })
+    return () => {
+      unlistenStart?.()
+      unlistenThrow?.()
+      unlistenEnd?.()
+    }
+  }, [])
+
   const triggerFoodRain = useCallback((emoji: string) => {
     const drops: FoodRainDrop[] = Array.from({ length: 12 }, () => {
       foodRainIdRef.current += 1
@@ -1523,6 +1663,12 @@ export default function Mini() {
       const storedLargeMascot = await store.get('large_mascot')
       const storedLargeMascotScale = await store.get('large_mascot_scale')
       const initialLargeMascotScale = typeof storedLargeMascotScale === 'number' ? Math.min(6, Math.max(4, storedLargeMascotScale)) : 5
+      // Stroll-mode toggle. Stored as a boolean; falsy/unset values
+      // default to true (so first-run users with a physics pet can see
+      // it move). Mirrored back to Rust via set_stroll_mode so the tray
+      // CheckMenuItem starts in the right state.
+      const storedStrollEnabled = await store.get('stroll_mode_enabled')
+      const initialStrollEnabled = storedStrollEnabled === false ? false : true
       const existingMode = await loadAppMode()
       // Avoid startup flicker: decide large/small mascot from the persisted mode
       // BEFORE applying initial React/native window state. Otherwise we briefly
@@ -1546,6 +1692,12 @@ export default function Mini() {
       mascotScaleRef.current = initialMascotScale
       largeMascotRef.current = initialLargeMascot
       largeMascotScaleRef.current = initialLargeMascotScale
+      setStrollGlobalEnabled(initialStrollEnabled)
+      // Push the persisted stroll value back to Rust so the tray
+      // check-state starts in sync. set_throw_tracking is left off
+      // here; it gets enabled later by the strollEnabled effect once
+      // a physics-capable pet is selected.
+      invoke('set_stroll_mode', { enabled: initialStrollEnabled }).catch(() => {})
 
       const existingModeVersion = await loadAppModeVersion()
       // Force re-onboarding when the stored version is missing or older
@@ -3514,11 +3666,17 @@ export default function Mini() {
   // Sprite resting state for the main mascot. Walking direction (set by
   // the walk timer) overrides the working/waiting/idle mapping so the pet
   // visibly runs left/right while the native window is moving.
-  const mainSpriteState: CodexPetState = walkDir === 1
-    ? 'run-right'
-    : walkDir === -1
-      ? 'run-left'
-      : petStateToCodexState(mainPetState)
+  // Stroll mode owns position via the physics tick AND owns the sprite
+  // animation key. When it's active we ignore walkDir/PetState because
+  // the physics state machine knows the right key (idle/run-right/
+  // climb-wall/falling/etc) for each frame.
+  const mainSpriteState: CodexPetState = strollEnabled
+    ? physicsHandle.spriteName
+    : walkDir === 1
+      ? 'run-right'
+      : walkDir === -1
+        ? 'run-left'
+        : petStateToCodexState(miniPet, mainPetState)
   // Broadcast the resolved mascot state so dev-mode demo windows can
   // mirror it. The main window owns the polling loops that derive
   // working / waiting / idle (claude sessions every 2s, agents every
@@ -4016,7 +4174,7 @@ export default function Mini() {
                 style={{
                   position: 'relative',
                   width: collapsedMascotSize * MINI_SPRITE_DISPLAY_MULTIPLIER,
-                  height: Math.round(collapsedMascotSize * MINI_SPRITE_DISPLAY_MULTIPLIER * (208 / 192)),
+                  height: Math.round(collapsedMascotSize * MINI_SPRITE_DISPLAY_MULTIPLIER * (miniPet.atlas.cellH / miniPet.atlas.cellW)),
                 }}
               >
                 <MiniPetMascot
@@ -4419,7 +4577,11 @@ export default function Mini() {
                                 const recentlyDone = !s.active && s.updatedAt && Date.now() - s.updatedAt < 5 * 60 * 1000
                                 const showCharGif = s.active || recentlyDone
                                 const petState: PetState = s.active ? 'working' : 'idle'
-                                const ocSpriteState: CodexPetState = petStateToCodexState(petState)
+                                // Resolve the row's pet up front so we can use its atlas
+                                // for the wrapper's aspect ratio AND its stateMap for the
+                                // sprite-state lookup. Falls back to miniPet via getQueuePet.
+                                const rowPet = getQueuePet(index)
+                                const ocSpriteState: CodexPetState = petStateToCodexState(rowPet, petState)
                                 const title = `${agentName} #${seq}`
                                 const subtitle = s.lastUserMsg || ''
                                 const timeAgo = formatTimeAgo(s.updatedAt)
@@ -4470,18 +4632,15 @@ export default function Mini() {
                                         className="relative shrink-0 flex items-center justify-center cursor-pointer"
                                         style={{
                                           width: Math.round(40 * SESSION_SPRITE_DISPLAY_MULTIPLIER),
-                                          height: Math.round(40 * SESSION_SPRITE_DISPLAY_MULTIPLIER * (208 / 192)),
+                                          height: Math.round(40 * SESSION_SPRITE_DISPLAY_MULTIPLIER * ((rowPet?.atlas.cellH ?? 208) / (rowPet?.atlas.cellW ?? 192))),
                                         }}
                                       >
                                         <div className="absolute inset-0" style={{ left: -16 }} />
-                                        {(() => {
-                                          const rowPet = getQueuePet(index)
-                                          return rowPet ? (
-                                            <SpritePet pet={rowPet} state={ocSpriteState} size={Math.round(40 * SESSION_SPRITE_DISPLAY_MULTIPLIER)} />
-                                          ) : (
-                                            <span className="text-white/40 text-lg">{agent?.identityEmoji || '?'}</span>
-                                          )
-                                        })()}
+                                        {rowPet ? (
+                                          <SpritePet pet={rowPet} state={ocSpriteState} size={Math.round(40 * SESSION_SPRITE_DISPLAY_MULTIPLIER)} />
+                                        ) : (
+                                          <span className="text-white/40 text-lg">{agent?.identityEmoji || '?'}</span>
+                                        )}
                                         <div
                                           style={{
                                             position: 'absolute',
@@ -4590,7 +4749,9 @@ export default function Mini() {
                                 const recentlyDone = !isWorking && cs.status === 'stopped' && cs.updatedAt && Date.now() - cs.updatedAt < 5 * 60 * 1000
                                 const showCharGif = isWorking || recentlyDone
                                 const petState: PetState = isWaiting ? 'waiting' : isCompacting ? 'compacting' : isActive ? 'working' : 'idle'
-                                const claudeSpriteState: CodexPetState = petStateToCodexState(petState)
+                                // See OpenClaw branch above for why rowPet is lifted here.
+                                const rowPet = getQueuePet(index)
+                                const claudeSpriteState: CodexPetState = petStateToCodexState(rowPet, petState)
                                 const subtitle = cs.userPrompt || ''
                                 const timeAgo = formatTimeAgo(cs.updatedAt || 0)
                                 const isCursorSource = cs.source === 'cursor'
@@ -4636,18 +4797,15 @@ export default function Mini() {
                                           className="relative shrink-0 flex items-center justify-center cursor-pointer"
                                           style={{
                                             width: Math.round(40 * SESSION_SPRITE_DISPLAY_MULTIPLIER),
-                                            height: Math.round(40 * SESSION_SPRITE_DISPLAY_MULTIPLIER * (208 / 192)),
+                                            height: Math.round(40 * SESSION_SPRITE_DISPLAY_MULTIPLIER * ((rowPet?.atlas.cellH ?? 208) / (rowPet?.atlas.cellW ?? 192))),
                                           }}
                                         >
                                           <div className="absolute inset-0" style={{ left: -16 }} />
-                                          {(() => {
-                                            const rowPet = getQueuePet(index)
-                                            return rowPet ? (
-                                              <SpritePet pet={rowPet} state={claudeSpriteState} size={Math.round(40 * SESSION_SPRITE_DISPLAY_MULTIPLIER)} />
-                                            ) : (
-                                              <span className="text-white/40 text-lg">🤖</span>
-                                            )
-                                          })()}
+                                          {rowPet ? (
+                                            <SpritePet pet={rowPet} state={claudeSpriteState} size={Math.round(40 * SESSION_SPRITE_DISPLAY_MULTIPLIER)} />
+                                          ) : (
+                                            <span className="text-white/40 text-lg">🤖</span>
+                                          )}
                                           <div
                                             style={{
                                               position: 'absolute',
@@ -5113,7 +5271,8 @@ export default function Mini() {
 
                         return shuffled.map(({ slot, seed }, sortedIdx) => {
                           const slotPetState: PetState = slot.petState ?? (slot.isWorking ? 'working' : 'idle')
-                          const slotSpriteState: CodexPetState = petStateToCodexState(slotPetState)
+                          const slotPet = getQueuePet(sortedIdx)
+                          const slotSpriteState: CodexPetState = petStateToCodexState(slotPet, slotPetState)
                           const singleRow = sessionSlots.length <= 6
                           const row = sortedIdx < 6 ? 0 : 1
                           const col = row === 0 ? sortedIdx : sortedIdx - 6
@@ -5157,12 +5316,9 @@ export default function Mini() {
                               }}
                             >
                               <div style={{ position: 'relative' }}>
-                                {(() => {
-                                  const rowPet = getQueuePet(sortedIdx)
-                                  return rowPet ? (
-                                    <SpritePet pet={rowPet} state={slotSpriteState} size={Math.round(56 * SESSION_SPRITE_DISPLAY_MULTIPLIER)} />
-                                  ) : null
-                                })()}
+                                {slotPet ? (
+                                  <SpritePet pet={slotPet} state={slotSpriteState} size={Math.round(56 * SESSION_SPRITE_DISPLAY_MULTIPLIER)} />
+                                ) : null}
                                 {!miniPet && petQueueResolved.length === 0 && (
                                   <div
                                     style={{

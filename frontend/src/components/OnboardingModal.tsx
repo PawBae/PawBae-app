@@ -2,7 +2,13 @@ import { motion, AnimatePresence } from 'motion/react'
 import { useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { SpritePet } from './SpritePet'
-import type { CodexPet } from '../lib/codexPet'
+import {
+  DEFAULT_ATLAS,
+  DEFAULT_ONE_SHOT_STATES,
+  DEFAULT_STATE_MAP,
+  STANDARD_ANIMATION_ROWS,
+  type CodexPet,
+} from '../lib/codexPet'
 import type { AppMode } from '../lib/petStore'
 
 interface OnboardingModalProps {
@@ -11,12 +17,18 @@ interface OnboardingModalProps {
 }
 
 // Codex pet metadata constructed inline so the onboarding modal renders
-// instantly without waiting for the pets manifest fetch.
+// instantly without waiting for the pets manifest fetch. Uses the
+// canonical hatch-pet schema defaults.
 const PHOEBE_PET: CodexPet = {
   id: 'phoebe',
   displayName: 'Phoebe',
   description: '',
   spritesheetUrl: '/assets/builtin/phoebe.codex-pet/spritesheet.webp',
+  schemaVersion: 1,
+  atlas: DEFAULT_ATLAS,
+  animations: { ...STANDARD_ANIMATION_ROWS },
+  stateMap: { ...DEFAULT_STATE_MAP },
+  oneShot: new Set(DEFAULT_ONE_SHOT_STATES),
 }
 
 export function OnboardingModal({ open, onSelect }: OnboardingModalProps) {

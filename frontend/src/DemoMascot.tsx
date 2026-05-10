@@ -123,15 +123,21 @@ export function DemoMascot() {
     window.addEventListener('pointercancel', onCancel, { once: true })
   }, [])
 
+  // walkDir override directly uses run-right / run-left animation keys
+  // (every pet's stateMap is expected to declare these because
+  // resolvePet falls back to STANDARD_ANIMATION_ROWS which contains
+  // both). For working/waiting/idle we route through the pet's stateMap
+  // so custom packs (e.g. shimeji-bola) can map `working → run-right`
+  // when they don't have a separate `running` row.
   const baseState: CodexPetState = walkDir === 1
     ? 'run-right'
     : walkDir === -1
       ? 'run-left'
       : waiting
-        ? 'waiting'
+        ? (pet?.stateMap.waiting ?? 'waiting')
         : working
-          ? 'running'
-          : 'idle'
+          ? (pet?.stateMap.working ?? 'running')
+          : (pet?.stateMap.idle ?? 'idle')
 
   if (!pet) return null
 

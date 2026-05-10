@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { SpritePet } from './SpritePet'
-import { ANIMATION_ROWS, fpsFor } from '../lib/codexPet'
+import { animationFor, fpsFor } from '../lib/codexPet'
 import type { CodexPet, CodexPetState } from '../lib/codexPet'
 
 interface MiniPetMascotProps {
@@ -57,16 +57,23 @@ export function MiniPetMascot({
   const hoveringRef = useRef(false)
   const restTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  // Pets that don't define a `jumping` row (e.g. shimeji-bola) opt out
+  // of the hover-jump interaction entirely; the mascot just keeps
+  // playing baseState while hovered. Avoids forcing every external pack
+  // to ship a jump animation just so MiniPetMascot doesn't go blank.
+  const jumpRow = animationFor(pet, 'jumping')
+  const effectiveEnableHoverJump = enableHoverJump && !!jumpRow
+
   const onEnter = useCallback(() => {
-    if (enableHoverJump && !useExternalHover) setInternalHover(true)
-  }, [enableHoverJump, useExternalHover])
+    if (effectiveEnableHoverJump && !useExternalHover) setInternalHover(true)
+  }, [effectiveEnableHoverJump, useExternalHover])
 
   const onLeave = useCallback(() => {
-    if (enableHoverJump && !useExternalHover) setInternalHover(false)
-  }, [enableHoverJump, useExternalHover])
+    if (effectiveEnableHoverJump && !useExternalHover) setInternalHover(false)
+  }, [effectiveEnableHoverJump, useExternalHover])
 
   const hovering =
-    enableHoverJump
+    effectiveEnableHoverJump
     && !suppressHover
     && (useExternalHover ? externalHover : internalHover)
   hoveringRef.current = hovering
@@ -104,23 +111,22 @@ export function MiniPetMascot({
   // tab throttling), schedule the rest cycle by the animation's nominal
   // duration plus a small buffer.
   useEffect(() => {
-    if (!showJump) return
-    const row = ANIMATION_ROWS['jumping']
-    const fps = fpsFor('jumping')
-    const expected = (row.frames / Math.max(fps, 1)) * 1000
+    if (!showJump || !jumpRow) return
+    const fps = fpsFor(pet, 'jumping')
+    const expected = (jumpRow.frames / Math.max(fps, 1)) * 1000
     const fallback = setTimeout(() => {
       handleJumpEnd()
     }, expected + 200)
     return () => clearTimeout(fallback)
-  }, [showJump, jumpKey, handleJumpEnd])
+  }, [showJump, jumpKey, handleJumpEnd, jumpRow, pet])
 
   const renderState: CodexPetState = showJump ? 'jumping' : baseState
 
   return (
     <div
       className={className}
-      onMouseEnter={enableHoverJump && !useExternalHover ? onEnter : undefined}
-      onMouseLeave={enableHoverJump && !useExternalHover ? onLeave : undefined}
+      onMouseEnter={effectiveEnableHoverJump && !useExternalHover ? onEnter : undefined}
+      onMouseLeave={effectiveEnableHoverJump && !useExternalHover ? onLeave : undefined}
       style={{ display: 'inline-block', lineHeight: 0, ...style }}
     >
       <SpritePet

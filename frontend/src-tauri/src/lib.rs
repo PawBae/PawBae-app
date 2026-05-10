@@ -61,6 +61,21 @@ fn drag_anchor() -> &'static Mutex<Option<(f64, f64)>> {
     DRAG_ANCHOR.get_or_init(|| Mutex::new(None))
 }
 
+// Stroll-mode toggles (Phase 2 pet physics).
+//
+// `STROLL_MODE_ENABLED` mirrors the user-visible global toggle in the
+// system-tray menu. The frontend persists the setting in
+// `settings.json::stroll_mode_enabled` and pushes it back to Rust via
+// `set_stroll_mode` on startup so the tray check-state stays in sync
+// across launches. Default is `true` so users who pick a physics-
+// enabled pet (e.g. shimeji-bola) see the effect immediately.
+static STROLL_MODE_ENABLED: AtomicBool = AtomicBool::new(true);
+// `THROW_TRACKING_ENABLED` gates the per-tick velocity sample collection
+// inside the macOS drag loop. The frontend toggles it on only when
+// stroll is active AND the selected pet declares physics, so we don't
+// spend cycles on the VecDeque push for legacy pets.
+static THROW_TRACKING_ENABLED: AtomicBool = AtomicBool::new(false);
+
 /// Per-host SSH backoff state.
 struct SshBackoffState {
     fail_count: u32,
@@ -107,7 +122,7 @@ fn ssh_backoff_reset(host_key: &str) {
 }
 
 use tauri::{
-    menu::{Menu, MenuItem},
+    menu::{CheckMenuItem, Menu, MenuItem},
     tray::TrayIconBuilder,
     Emitter, Manager, WebviewUrl, WebviewWindowBuilder,
 };
@@ -1070,23 +1085,41 @@ async fn close_ssh_master(ssh_host: &str, ssh_user: &str) -> Result<(), String> 
     Ok(())
 }
 
-fn tray_labels(lang: &str) -> (&'static str, &'static str, &'static str) {
+// Tray label tuple: (show, hide, stroll, quit). The `stroll` slot is
+// populated for every language but only inserted into the tray menu on
+// macOS — Phase 2 pet physics is currently macOS-only.
+fn tray_labels(lang: &str) -> (&'static str, &'static str, &'static str, &'static str) {
     match lang {
-        "zh" => ("显示", "隐藏", "退出"),
-        "ja" => ("表示", "非表示", "終了"),
-        "ko" => ("표시", "숨기기", "종료"),
-        "es" => ("Mostrar", "Ocultar", "Salir"),
-        "fr" => ("Afficher", "Masquer", "Quitter"),
-        _ => ("Show", "Hide", "Quit"),
+        "zh" => ("显示", "隐藏", "散步模式", "退出"),
+        "ja" => ("表示", "非表示", "散歩モード", "終了"),
+        "ko" => ("표시", "숨기기", "산책 모드", "종료"),
+        "es" => ("Mostrar", "Ocultar", "Modo paseo", "Salir"),
+        "fr" => ("Afficher", "Masquer", "Mode balade", "Quitter"),
+        _ => ("Show", "Hide", "Stroll Mode", "Quit"),
     }
 }
 
 #[tauri::command]
 fn update_tray_language(app: tauri::AppHandle, lang: String) -> Result<(), String> {
-    let (show_label, hide_label, quit_label) = tray_labels(&lang);
+    let (show_label, hide_label, stroll_label, quit_label) = tray_labels(&lang);
+    let _ = stroll_label; // Silence unused-warning on Windows.
     let show = MenuItem::with_id(&app, "show", show_label, true, None::<&str>).map_err(|e| e.to_string())?;
     let hide = MenuItem::with_id(&app, "hide", hide_label, true, None::<&str>).map_err(|e| e.to_string())?;
     let quit = MenuItem::with_id(&app, "quit", quit_label, true, None::<&str>).map_err(|e| e.to_string())?;
+    #[cfg(target_os = "macos")]
+    let menu = {
+        let stroll = CheckMenuItem::with_id(
+            &app,
+            "stroll",
+            stroll_label,
+            true,
+            STROLL_MODE_ENABLED.load(Ordering::SeqCst),
+            None::<&str>,
+        )
+        .map_err(|e| e.to_string())?;
+        Menu::with_items(&app, &[&show, &hide, &stroll, &quit]).map_err(|e| e.to_string())?
+    };
+    #[cfg(not(target_os = "macos"))]
     let menu = Menu::with_items(&app, &[&show, &hide, &quit]).map_err(|e| e.to_string())?;
     if let Some(tray) = app.tray_by_id("main") {
         tray.set_menu(Some(menu)).map_err(|e| e.to_string())?;
@@ -3797,6 +3830,31 @@ async fn set_efficiency_hover_tracking(app: tauri::AppHandle, active: bool) -> R
     Ok(())
 }
 
+/// Frontend pushes the persisted stroll-mode flag back to Rust at
+/// startup so the tray check-state matches what was last toggled.
+/// Also called when the user changes pet-physics availability (e.g.
+/// switches to a non-physics pet) — in that case the frontend disables
+/// throw tracking too.
+#[tauri::command]
+fn set_stroll_mode(_app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    STROLL_MODE_ENABLED.store(enabled, Ordering::SeqCst);
+    if !enabled {
+        THROW_TRACKING_ENABLED.store(false, Ordering::SeqCst);
+    }
+    Ok(())
+}
+
+/// Toggle drag-velocity sampling in the macOS NSEvent drag loop. The
+/// frontend turns this on whenever stroll-mode is enabled AND the
+/// selected pet declares physics. When off the drag loop skips the
+/// per-tick VecDeque push, so legacy pets pay no perf cost.
+#[tauri::command]
+fn set_throw_tracking(enabled: bool) -> Result<(), String> {
+    log::info!("[stroll] set_throw_tracking({})", enabled);
+    THROW_TRACKING_ENABLED.store(enabled, Ordering::SeqCst);
+    Ok(())
+}
+
 /// Background polling loop for efficiency-mode hover.
 /// Checks the cursor position against two regions:
 ///  - **Collapsed**: a wide strip around the notch (notch_off*2 + 200 px,
@@ -3822,6 +3880,24 @@ fn efficiency_hover_poll(app: tauri::AppHandle) {
     // Used only for run-left/right detection — measured between successive
     // poll iterations. Window translation itself is anchor-based and lives
     // in request_drag_apply (which reads the live cursor on main thread).
+
+    // Drag-throw velocity sampling buffer (Phase 2 pet physics).
+    // Holds a sliding window of (timestamp, dx, dy_topdown) entries while
+    // the user drags the mascot. On release we average the most recent
+    // ~80 ms of samples to derive an initial velocity for the falling
+    // animation. Disabled by default; enabled by the frontend through
+    // `set_throw_tracking` once the user picks a physics-capable pet
+    // and stroll-mode is on.
+    // `Instant` is already in scope from the function-top
+    // `use std::time::{Duration, Instant};`.
+    use std::collections::VecDeque;
+    let mut throw_samples: VecDeque<(Instant, f64, f64)> = VecDeque::with_capacity(32);
+    // 250ms is a wider window than the typical 80ms peak-velocity grab.
+    // Users instinctively settle the cursor for a beat before releasing,
+    // so a tighter window often averages mostly-zero samples.
+    const THROW_SAMPLE_CAP: usize = 24;
+    const THROW_AVG_WINDOW_MS: u128 = 250;
+    const MAX_THROW_SPEED: f64 = 30.0;
 
     while EFFICIENCY_HOVER_ACTIVE.load(Ordering::SeqCst) {
         let info = NOTCH_SCREEN_INFO.lock().ok().and_then(|g| *g);
@@ -3893,11 +3969,22 @@ fn efficiency_hover_poll(app: tauri::AppHandle) {
                         // up under the live cursor.
                         request_drag_apply(&app);
                         let dx = cursor.0 - last_cursor.0;
+                        // macOS NSEvent y axis is bottom-up; flip to
+                        // top-down so the throw velocity matches the
+                        // frontend physics convention.
+                        let dy_topdown = -(cursor.1 - last_cursor.1);
                         last_cursor = cursor;
                         let walk_dir = if dx > 0.5 { 1 } else if dx < -0.5 { -1 } else { last_walk_dir };
                         if walk_dir != last_walk_dir {
                             let _ = app.emit("mini-mascot-walk", walk_dir);
                             last_walk_dir = walk_dir;
+                        }
+                        if THROW_TRACKING_ENABLED.load(Ordering::SeqCst) {
+                            let now = Instant::now();
+                            throw_samples.push_back((now, dx, dy_topdown));
+                            while throw_samples.len() > THROW_SAMPLE_CAP {
+                                throw_samples.pop_front();
+                            }
                         }
                     } else {
                         // Drag finished. Clear anchor + walk dir and notify
@@ -3910,11 +3997,64 @@ fn efficiency_hover_poll(app: tauri::AppHandle) {
                             let _ = app.emit("mini-mascot-walk", 0i32);
                             last_walk_dir = 0;
                         }
+                        // Compute drag-release velocity from the most
+                        // recent ~80 ms of samples. Older samples are
+                        // dropped so a long pause before release doesn't
+                        // dilute the final velocity.
+                        if THROW_TRACKING_ENABLED.load(Ordering::SeqCst) && !throw_samples.is_empty() {
+                            let cutoff = Instant::now();
+                            // Average only over samples where the cursor
+                            // actually moved. Users typically pause for
+                            // ~50–150ms before releasing, so naively
+                            // averaging the last fixed window picks up
+                            // mostly zero samples and the throw lands
+                            // at zero velocity.
+                            let mut sum_dx = 0.0;
+                            let mut sum_dy = 0.0;
+                            let mut count = 0u32;
+                            let mut total_seen = 0u32;
+                            for (t, dx, dy) in throw_samples.iter().rev() {
+                                if cutoff.duration_since(*t).as_millis() > THROW_AVG_WINDOW_MS {
+                                    break;
+                                }
+                                total_seen += 1;
+                                if dx.abs() < 0.5 && dy.abs() < 0.5 {
+                                    continue;
+                                }
+                                sum_dx += *dx;
+                                sum_dy += *dy;
+                                count += 1;
+                            }
+                            if count > 0 {
+                                let avg_dx = sum_dx / count as f64;
+                                let avg_dy = sum_dy / count as f64;
+                                let vx = avg_dx.clamp(-MAX_THROW_SPEED, MAX_THROW_SPEED);
+                                let vy = avg_dy.clamp(-MAX_THROW_SPEED, MAX_THROW_SPEED);
+                                log::info!(
+                                    "[drag-throw] samples={}/{} avg_dx={:.2} avg_dy={:.2} → vx={:.2} vy={:.2}",
+                                    count, total_seen, avg_dx, avg_dy, vx, vy,
+                                );
+                                let _ = app.emit(
+                                    "mini-mascot-drag-throw",
+                                    serde_json::json!({ "vx": vx, "vy": vy }),
+                                );
+                            } else {
+                                log::info!(
+                                    "[drag-throw] all {} samples in {}ms window were near-zero",
+                                    total_seen, THROW_AVG_WINDOW_MS,
+                                );
+                            }
+                        }
+                        throw_samples.clear();
                         let _ = app.emit("mini-mascot-drag-end", ());
                     }
                 } else if over_mascot && left_pressed && !was_pressed {
                     drag_active = true;
                     last_cursor = cursor;
+                    // Reset the velocity sampling buffer; previous
+                    // samples (from the last drag) must not bleed into
+                    // the new throw.
+                    throw_samples.clear();
                     // Capture the cursor-to-origin offset at drag start so
                     // the main-thread task can place the window absolutely
                     // each frame instead of summing deltas.
@@ -3930,9 +4070,21 @@ fn efficiency_hover_poll(app: tauri::AppHandle) {
                         let _ = app.emit("mini-mascot-hover", false);
                         was_over_mascot = false;
                     }
+                    // Stroll-mode physics needs an explicit drag-start
+                    // signal so it can suspend the gravity tick while
+                    // the user holds the mascot. The existing
+                    // mini-mascot-walk event only fires on horizontal
+                    // motion, so a click-and-hold without lateral drag
+                    // would otherwise leave physics running underneath.
+                    log::info!(
+                        "[drag-start] cursor=({:.1},{:.1}) tracking={}",
+                        cursor.0, cursor.1, THROW_TRACKING_ENABLED.load(Ordering::SeqCst),
+                    );
+                    let _ = app.emit("mini-mascot-drag-start", ());
                 }
             } else if drag_active {
                 drag_active = false;
+                throw_samples.clear();
                 if let Ok(mut a) = drag_anchor().lock() {
                     *a = None;
                 }
@@ -11789,10 +11941,24 @@ pub fn run() {
                     else { "en".into() }
                 })
             };
-            let (show_label, hide_label, quit_label) = tray_labels(&initial_lang);
+            let (show_label, hide_label, stroll_label, quit_label) = tray_labels(&initial_lang);
+            let _ = stroll_label;
             let show = MenuItem::with_id(app, "show", show_label, true, None::<&str>)?;
             let hide = MenuItem::with_id(app, "hide", hide_label, true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", quit_label, true, None::<&str>)?;
+            #[cfg(target_os = "macos")]
+            let menu = {
+                let stroll = CheckMenuItem::with_id(
+                    app,
+                    "stroll",
+                    stroll_label,
+                    true,
+                    STROLL_MODE_ENABLED.load(Ordering::SeqCst),
+                    None::<&str>,
+                )?;
+                Menu::with_items(app, &[&show, &hide, &stroll, &quit])?
+            };
+            #[cfg(not(target_os = "macos"))]
             let menu = Menu::with_items(app, &[&show, &hide, &quit])?;
 
             // Use dedicated tray icon (logo-mini: white cat silhouette on transparent bg)
@@ -11827,6 +11993,22 @@ pub fn run() {
                             let _ = win.hide();
                         }
                     }
+                    #[cfg(target_os = "macos")]
+                    "stroll" => {
+                        // Toggle the global stroll-mode flag, persist it
+                        // through the frontend (which owns settings.json),
+                        // and broadcast the new value so Mini.tsx can flip
+                        // the physics loop on/off without a polling read.
+                        let prev = STROLL_MODE_ENABLED.load(Ordering::SeqCst);
+                        let next = !prev;
+                        STROLL_MODE_ENABLED.store(next, Ordering::SeqCst);
+                        // If the user disables stroll, also drop throw
+                        // tracking so we stop sampling drag velocities.
+                        if !next {
+                            THROW_TRACKING_ENABLED.store(false, Ordering::SeqCst);
+                        }
+                        let _ = app.emit("stroll-mode-changed", next);
+                    }
                     "quit" => {
                         app.exit(0);
                     }
@@ -11836,7 +12018,7 @@ pub fn run() {
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![get_status, send_chat, open_detail_panel, save_character_gif, delete_character_assets, delete_character_gif, get_agents, get_health, get_agent_metrics, interrupt_agent, scan_characters, get_agent_extra_info, open_mini, close_mini, set_mini_expanded, set_mini_size, set_efficiency_hover_tracking, resize_mini_height, move_mini_by, get_mini_origin, get_mini_monitor_rect, set_mini_origin, set_ime_mode, get_agent_sessions, get_session_preview, get_session_messages, get_active_sessions, proxy_post, play_sound, get_claude_sessions, get_claude_conversation, install_claude_hooks, install_cursor_hooks, remove_claude_session, resolve_claude_permission, get_claude_stats, open_url, activate_app, focus_cursor_terminal, check_ax_permission, request_ax_permission, jump_to_claude_terminal, check_for_update, run_update, close_ssh, read_local_file, list_backgrounds, save_background, get_background_data, exit_app, get_ssh_key_info, reset_ssh, get_ui_scale, list_custom_codex_pets, open_codex_pets_dir, import_codex_pet, pick_codex_pet_folder, reassert_floating, spawn_demo_mascot, close_demo_mascot, close_demo_mascots, debug_log, update_tray_language, set_pet_mode_window, set_pet_context_menu, set_pet_pomodoro_active, get_now_playing, get_system_idle_time])
+        .invoke_handler(tauri::generate_handler![get_status, send_chat, open_detail_panel, save_character_gif, delete_character_assets, delete_character_gif, get_agents, get_health, get_agent_metrics, interrupt_agent, scan_characters, get_agent_extra_info, open_mini, close_mini, set_mini_expanded, set_mini_size, set_efficiency_hover_tracking, resize_mini_height, move_mini_by, get_mini_origin, get_mini_monitor_rect, set_mini_origin, set_ime_mode, get_agent_sessions, get_session_preview, get_session_messages, get_active_sessions, proxy_post, play_sound, get_claude_sessions, get_claude_conversation, install_claude_hooks, install_cursor_hooks, remove_claude_session, resolve_claude_permission, get_claude_stats, open_url, activate_app, focus_cursor_terminal, check_ax_permission, request_ax_permission, jump_to_claude_terminal, check_for_update, run_update, close_ssh, read_local_file, list_backgrounds, save_background, get_background_data, exit_app, get_ssh_key_info, reset_ssh, get_ui_scale, list_custom_codex_pets, open_codex_pets_dir, import_codex_pet, pick_codex_pet_folder, reassert_floating, spawn_demo_mascot, close_demo_mascot, close_demo_mascots, debug_log, update_tray_language, set_pet_mode_window, set_pet_context_menu, set_pet_pomodoro_active, get_now_playing, get_system_idle_time, set_stroll_mode, set_throw_tracking])
         .manage(ActiveAgentPid { pid: Mutex::new(None) })
         .manage(ClaudeState { sessions: Arc::new(Mutex::new(HashMap::new())), pending_permissions: Arc::new(Mutex::new(HashMap::new())) })
         .run(tauri::generate_context!())

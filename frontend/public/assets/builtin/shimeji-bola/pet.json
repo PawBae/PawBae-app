@@ -1,0 +1,94 @@
+{
+  "id": "shimeji-bola",
+  "displayName": "芝麻球",
+  "description": "ShimejiEE 像素猫，移植自 group-finity (BSD/zlib 授权)。原作者 Yuki Yamada / 增强版作者 Kilkakon。",
+  "spritesheetPath": "spritesheet.webp",
+  "kind": "creature",
+  "schemaVersion": 2,
+  "atlas": {
+    "cellW": 128,
+    "cellH": 128,
+    "cols": 8,
+    "rows": 8
+  },
+  "animations": {
+    "idle": {
+      "row": 0,
+      "frames": 1,
+      "fps": 1,
+      "loopRestMs": 2000
+    },
+    "running": {
+      "row": 1,
+      "frames": 4,
+      "fps": 4
+    },
+    "run-left": {
+      "row": 1,
+      "frames": 4,
+      "fps": 8
+    },
+    "run-right": {
+      "row": 1,
+      "frames": 4,
+      "fps": 8,
+      "flipX": true
+    },
+    "review": {
+      "row": 2,
+      "frames": 8,
+      "fps": 12,
+      "loopRestMs": 800
+    },
+    "waiting": {
+      "row": 3,
+      "frames": 6,
+      "fps": 8,
+      "loopRestMs": 600
+    },
+    "grab-wall": {
+      "row": 4,
+      "frames": 1,
+      "fps": 1,
+      "loopRestMs": 0
+    },
+    "climb-wall": {
+      "row": 5,
+      "frames": 4,
+      "fps": 8
+    },
+    "climb-ceiling": {
+      "row": 6,
+      "frames": 4,
+      "fps": 8
+    },
+    "falling": {
+      "row": 7,
+      "frames": 1,
+      "fps": 1,
+      "offsetCol": 0
+    },
+    "jumping": {
+      "row": 7,
+      "frames": 1,
+      "fps": 1,
+      "offsetCol": 1
+    },
+    "bouncing": {
+      "row": 7,
+      "frames": 2,
+      "fps": 8,
+      "offsetCol": 2
+    }
+  },
+  "stateMap": {
+    "idle": "idle",
+    "working": "run-right",
+    "compacting": "review",
+    "waiting": "waiting"
+  },
+  "oneShot": [],
+  "physics": {
+    "enabled": true
+  }
+}

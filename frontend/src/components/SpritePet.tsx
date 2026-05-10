@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import {
-  ATLAS,
-  ANIMATION_ROWS,
   fpsFor,
   loopRestMsFor,
+  animationFor,
   type CodexPet,
   type CodexPetState,
 } from '../lib/codexPet'
@@ -11,31 +10,34 @@ import {
 interface SpritePetProps {
   pet: CodexPet
   state: CodexPetState
-  // Visual width in CSS pixels. Height is derived from the 192:208 cell ratio.
+  // Visual width in CSS pixels. Height is derived from the pet's
+  // declared cell aspect ratio (atlas.cellH / atlas.cellW).
   size: number
-  // Fired once jumping reaches its last frame so the parent can flip back
-  // to its previous resting state. No-op for looping states.
+  // Fired once a one-shot state reaches its last frame so the parent
+  // can flip back to its previous resting state. No-op for looping
+  // states.
   onOneShotEnd?: () => void
-  // When true, treat one-shot states (jumping) as looping. Used by hover
-  // interactions where the parent wants the animation to keep playing as
-  // long as the cursor is over the mascot.
+  // When true, treat one-shot states as looping. Used by hover
+  // interactions where the parent wants the animation to keep playing
+  // as long as the cursor is over the mascot.
   loop?: boolean
   className?: string
   style?: React.CSSProperties
 }
 
-// Render a single 192x208 cell from a hatch-pet style 8x9 atlas, advancing
-// frames at SPRITE_FPS via requestAnimationFrame. Looping states cycle
-// indefinitely; one-shot states (currently `jumping`) hold the last frame
-// and notify the parent via onOneShotEnd.
-const ONE_SHOT_STATES: ReadonlySet<CodexPetState> = new Set(['jumping'])
-
+// Render a single atlas cell, advancing frames at the pet's per-state
+// fps via requestAnimationFrame. Looping states cycle indefinitely;
+// one-shot states (default `jumping`, configurable per-pet via
+// `pet.oneShot`) hold the last frame and notify the parent via
+// onOneShotEnd. Pets that omit a row gracefully fall back to `idle`
+// instead of throwing.
 export function SpritePet({ pet, state, size, onOneShotEnd, loop, className, style }: SpritePetProps) {
   const [frameIndex, setFrameIndex] = useState(0)
   const stateRef = useRef(state)
   const loopRef = useRef(loop ?? false)
   const onOneShotEndRef = useRef(onOneShotEnd)
   const oneShotFiredRef = useRef(false)
+  const petRef = useRef(pet)
   // Timestamp until which the current looping cycle is "resting" on the
   // last frame. 0 means no rest in flight.
   const restUntilRef = useRef(0)
@@ -54,6 +56,10 @@ export function SpritePet({ pet, state, size, onOneShotEnd, loop, className, sty
   useEffect(() => {
     onOneShotEndRef.current = onOneShotEnd
   }, [onOneShotEnd])
+
+  useEffect(() => {
+    petRef.current = pet
+  }, [pet])
 
   useEffect(() => {
     let raf = 0
@@ -84,18 +90,19 @@ export function SpritePet({ pet, state, size, onOneShotEnd, loop, className, sty
       last = now
       acc += dt
       // Re-read the per-frame interval each iteration so per-state fps
-      // overrides (e.g. a slower idle loop) take effect immediately when
-      // the state changes mid-tick.
-      const frameMs = 1000 / fpsFor(stateRef.current)
+      // overrides take effect immediately when the state changes mid-tick.
+      const curPet = petRef.current
+      const frameMs = 1000 / fpsFor(curPet, stateRef.current)
       while (acc >= frameMs) {
         if (restUntilRef.current > 0) break
         acc -= frameMs
         const cur = stateRef.current
-        const row = ANIMATION_ROWS[cur]
+        const row = animationFor(curPet, cur) ?? animationFor(curPet, 'idle')
         if (!row) continue
         setFrameIndex((prev) => {
           const next = prev + 1
-          if (ONE_SHOT_STATES.has(cur) && !loopRef.current) {
+          const isOneShot = curPet.oneShot.has(cur)
+          if (isOneShot && !loopRef.current) {
             if (next >= row.frames) {
               if (!oneShotFiredRef.current) {
                 oneShotFiredRef.current = true
@@ -109,7 +116,7 @@ export function SpritePet({ pet, state, size, onOneShotEnd, loop, className, sty
           // Looping state: optionally pause on the last frame so the cycle
           // reads as a burst-then-rest rhythm instead of a continuous loop.
           if (next >= row.frames) {
-            const restMs = loopRestMsFor(cur)
+            const restMs = loopRestMsFor(curPet, cur)
             if (restMs > 0) {
               restUntilRef.current = now + restMs
               return row.frames - 1
@@ -128,16 +135,20 @@ export function SpritePet({ pet, state, size, onOneShotEnd, loop, className, sty
     }
   }, [])
 
-  const row = ANIMATION_ROWS[state]
+  // Resolve the row to render. Pets that don't declare the requested
+  // state fall back to idle to avoid blanks.
+  const row = animationFor(pet, state) ?? animationFor(pet, 'idle')
+  if (!row) return null
   const frame = Math.min(frameIndex, row.frames - 1)
-  const aspect = ATLAS.cellH / ATLAS.cellW
+  const offsetCol = row.offsetCol ?? 0
+  const aspect = pet.atlas.cellH / pet.atlas.cellW
   const renderW = size
   const renderH = size * aspect
-  const scale = renderW / ATLAS.cellW
-  const totalW = ATLAS.cellW * ATLAS.cols * scale
-  const totalH = ATLAS.cellH * ATLAS.rows * scale
-  const bgX = -frame * ATLAS.cellW * scale
-  const bgY = -row.row * ATLAS.cellH * scale
+  const scale = renderW / pet.atlas.cellW
+  const totalW = pet.atlas.cellW * pet.atlas.cols * scale
+  const totalH = pet.atlas.cellH * pet.atlas.rows * scale
+  const bgX = -(offsetCol + frame) * pet.atlas.cellW * scale
+  const bgY = -row.row * pet.atlas.cellH * scale
 
   return (
     <div
@@ -150,6 +161,7 @@ export function SpritePet({ pet, state, size, onOneShotEnd, loop, className, sty
         backgroundSize: `${totalW}px ${totalH}px`,
         backgroundPosition: `${bgX}px ${bgY}px`,
         imageRendering: 'pixelated',
+        transform: row.flipX ? 'scaleX(-1)' : undefined,
         ...style,
       }}
     />
