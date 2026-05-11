@@ -7530,7 +7530,7 @@ pub struct ClaudeSession {
     /// Number of sub-agents (Agent tool) still running in the background.
     /// Incremented on PreToolUse(Agent), decremented on SubagentStop.
     /// Sound only plays on Stop when this reaches 0 (all agents done).
-    #[serde(skip)]
+    #[serde(rename = "pendingAgents")]
     pub pending_agents: u32,
     /// Raw permission_suggestions JSON from the PermissionRequest hook event.
     #[serde(rename = "permissionSuggestions", skip_serializing_if = "Option::is_none")]
@@ -7539,6 +7539,9 @@ pub struct ClaudeSession {
     /// Shown in the efficiency-mode completion reminder popup.
     #[serde(rename = "lastResponse", skip_serializing_if = "Option::is_none")]
     pub last_response: Option<String>,
+    /// True when the last Stop-like event represented a failed/interrupted run.
+    #[serde(rename = "lastFailure")]
+    pub last_failure: bool,
     /// Whether this session's terminal tab is currently the active/focused tab.
     /// Set dynamically in `get_claude_sessions` — not persisted.
     #[serde(rename = "isActiveTab")]
@@ -11213,6 +11216,7 @@ fn process_claude_event(
                     pid: None,
                     pending_agents: 0,
                     last_response: None,
+                    last_failure: false,
                     is_active_tab: false,
                     source: source.clone(),
                     permission_suggestions: None,
@@ -11392,6 +11396,12 @@ fn process_claude_event(
                 // last_response so the completion popup never triggers.
                 if hook_event == "Stop" {
                     let interrupted = stop_event_was_interrupted(&event, &session.source, &claude_status);
+                    let failed_stop = interrupted
+                        || matches!(raw_hook_event.as_str(), "StopFailure" | "stopFailure")
+                        || event.get("failure").and_then(|v| v.as_bool()).unwrap_or(false)
+                        || event.get("failed").and_then(|v| v.as_bool()).unwrap_or(false)
+                        || event.get("error").is_some();
+                    session.last_failure = failed_stop;
                     // CC: check if the user is looking at this session's Ghostty tab
                     // Cursor: check if Cursor (or oc-claw) is the frontmost app.
                     // If a terminal ID is missing (older hooks / non-Ghostty),
@@ -11442,6 +11452,7 @@ fn process_claude_event(
                     stop_was_interrupted = interrupted;
                 } else if hook_event == "UserPromptSubmit" {
                     session.last_response = None;
+                    session.last_failure = false;
                     stop_was_interrupted = false;
                 } else {
                     stop_was_interrupted = false;

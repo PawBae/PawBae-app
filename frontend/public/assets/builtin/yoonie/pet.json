@@ -5,7 +5,7 @@
   "spritesheetPath": "spritesheet.webp",
   "kind": "creature",
   "schemaVersion": 2,
-  "atlas": { "cellW": 192, "cellH": 208, "cols": 8, "rows": 13 },
+  "atlas": { "cellW": 192, "cellH": 208, "cols": 8, "rows": 19 },
   "animations": {
     "idle":      { "row": 0, "frames": 6, "fps": 5,  "loopRestMs": 1500 },
     "running":   { "row": 1, "frames": 8, "fps": 10 },
@@ -18,16 +18,24 @@
     "happy":     { "row": 6, "frames": 6, "fps": 6,  "loopRestMs": 800 },
     "pounce":    { "row": 7, "frames": 6, "fps": 12 },
     "blink":     { "row": 8, "frames": 6, "fps": 4,  "loopRestMs": 2000 },
+    "thinking":  { "row": 8, "frames": 6, "fps": 4,  "loopRestMs": 1800 },
 
-    "grab-wall":            { "row": 9,  "frames": 1, "fps": 1 },
-    "grab-wall-flipped":    { "row": 9,  "frames": 1, "fps": 1,  "flipX": true },
-    "climb-wall":           { "row": 10, "frames": 6, "fps": 10 },
-    "climb-wall-flipped":   { "row": 10, "frames": 6, "fps": 10, "flipX": true },
+    "grab-wall":            { "row": 9,  "frames": 8, "fps": 5 },
+    "grab-wall-flipped":    { "row": 9,  "frames": 8, "fps": 5,  "flipX": true },
+    "climb-wall":           { "row": 10, "frames": 8, "fps": 10 },
+    "climb-wall-flipped":   { "row": 10, "frames": 8, "fps": 10, "flipX": true },
     "climb-ceiling":        { "row": 11, "frames": 6, "fps": 9 },
     "climb-ceiling-flipped":{ "row": 11, "frames": 6, "fps": 9,  "flipX": true },
     "falling":              { "row": 12, "frames": 2, "fps": 5,  "offsetCol": 0 },
     "jumping":              { "row": 12, "frames": 3, "fps": 9,  "offsetCol": 2 },
     "bouncing":             { "row": 12, "frames": 3, "fps": 10, "offsetCol": 5 },
+    "reading":              { "row": 13, "frames": 8, "fps": 7,  "loopRestMs": 400 },
+    "writing":              { "row": 14, "frames": 8, "fps": 9 },
+    "running-shell":        { "row": 15, "frames": 8, "fps": 10 },
+    "running-agent":        { "row": 16, "frames": 8, "fps": 8,  "loopRestMs": 250 },
+    "asking-user":          { "row": 17, "frames": 8, "fps": 6,  "loopRestMs": 700 },
+    "done-success":         { "row": 6,  "frames": 6, "fps": 8 },
+    "done-fail":            { "row": 18, "frames": 8, "fps": 8 },
     "waiting":              { "row": 5, "frames": 8, "fps": 8, "loopRestMs": 1500 }
   },
   "stateMap": {
@@ -36,7 +44,7 @@
     "compacting": "float",
     "waiting":    "hide"
   },
-  "oneShot": [],
+  "oneShot": ["done-success", "done-fail"],
   "physics": { "enabled": true },
   "displayScale": 0.95
 }

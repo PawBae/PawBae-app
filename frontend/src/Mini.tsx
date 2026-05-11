@@ -15,7 +15,6 @@ import { getStore, DEFAULT_CHAR, DEFAULT_CHAR_NAME, loadCharacters, loadOcConnec
 import type { AgentMetrics, OcConnection } from './lib/types'
 import { OnboardingModal } from './components/OnboardingModal'
 import { PetContextMenu, PomodoroOverlay } from './components/PetContextMenu'
-import { VoiceBubble } from './components/VoiceBubble'
 import {
   type AppMode, type PetData, type PetAction, type PomodoroState,
   loadAppMode, saveAppMode, loadPetData, savePetData, tickPetData,
@@ -117,6 +116,62 @@ const SESSION_SPRITE_DISPLAY_MULTIPLIER = 0.88
 type PetState = 'idle' | 'working' | 'compacting' | 'waiting'
 type ClaudeStatsSource = 'cc' | 'codex' | 'cursor'
 const TRANSIENT_PET_ACTIONS: PetAction[] = ['eat', 'headpat', 'dance', 'farewell', 'angry', 'spin', 'milktea', 'walkout']
+const READING_TOOL_NAMES = new Set(['read', 'beforereadfile', 'grep', 'glob', 'webfetch', 'websearch'])
+const WRITING_TOOL_NAMES = new Set(['write', 'edit', 'afterfileedit', 'notebookedit'])
+const SHELL_TOOL_NAMES = new Set(['bash', 'shell', 'beforeshellexecution'])
+const ASKING_TOOL_NAMES = new Set(['askuserquestion', 'askquestion'])
+
+function declaredPetState(pet: CodexPet | null | undefined, state: CodexPetState): CodexPetState | null {
+  return pet?.animations[state] ? state : null
+}
+
+function claudeSessionFailure(cs: any): boolean {
+  if (cs?.lastFailure === true) return true
+  const text = `${cs?.lastResponse ?? ''}\n${cs?.userPrompt ?? ''}`
+  return /\b(stopfailure|error|failed|failure|exception|panic)\b|\[request interrupted by user/i.test(text)
+}
+
+function toolStateForClaudeSession(cs: any): CodexPetState | null {
+  const tool = String(cs?.tool ?? '').toLowerCase()
+  const pendingAgents = Number(cs?.pendingAgents ?? cs?.pending_agents ?? 0)
+  if (pendingAgents > 0 || tool === 'agent') return 'running-agent'
+  if (cs?.status === 'waiting' || ASKING_TOOL_NAMES.has(tool)) return 'asking-user'
+  if (cs?.status === 'processing' && !tool) return 'thinking'
+  if (cs?.status !== 'tool_running') return null
+  if (READING_TOOL_NAMES.has(tool)) return 'reading'
+  if (WRITING_TOOL_NAMES.has(tool)) return 'writing'
+  if (SHELL_TOOL_NAMES.has(tool)) return 'running-shell'
+  return null
+}
+
+function sessionSpriteState(
+  pet: CodexPet | null | undefined,
+  sessions: any[],
+  completionSessionId: string | null,
+): CodexPetState | null {
+  const completionSession = completionSessionId
+    ? sessions.find((cs) => cs.sessionId === completionSessionId)
+    : null
+  if (completionSession?.lastResponse) {
+    const doneState = claudeSessionFailure(completionSession) ? 'done-fail' : 'done-success'
+    return declaredPetState(pet, doneState)
+  }
+
+  const now = Date.now()
+  const recentFailure = sessions.find((cs) =>
+    cs?.lastFailure === true
+    && cs?.status === 'stopped'
+    && typeof cs?.updatedAt === 'number'
+    && now - cs.updatedAt < 5000
+  )
+  if (recentFailure) return declaredPetState(pet, 'done-fail')
+
+  const priorities: CodexPetState[] = ['asking-user', 'running-agent', 'running-shell', 'writing', 'reading', 'thinking']
+  const candidates = sessions
+    .map(toolStateForClaudeSession)
+    .filter((state): state is CodexPetState => !!state && !!declaredPetState(pet, state))
+  return priorities.find((state) => candidates.includes(state)) ?? null
+}
 
 // Priority: higher number = harder to interrupt
 function petActionPriority(action: PetAction): number {
@@ -3716,13 +3771,14 @@ export default function Mini() {
   // animation key. When it's active we ignore walkDir/PetState because
   // the physics state machine knows the right key (idle/run-right/
   // climb-wall/falling/etc) for each frame.
+  const sessionDrivenSpriteState = sessionSpriteState(miniPet, claudeSessions, completionSessionId)
   const mainSpriteState: CodexPetState = strollEnabled
     ? physicsHandle.spriteName
     : walkDir === 1
       ? 'run-right'
       : walkDir === -1
         ? 'run-left'
-        : petStateToCodexState(miniPet, mainPetState)
+        : sessionDrivenSpriteState ?? petStateToCodexState(miniPet, mainPetState)
   // Broadcast the resolved mascot state so dev-mode demo windows can
   // mirror it. The main window owns the polling loops that derive
   // working / waiting / idle (claude sessions every 2s, agents every

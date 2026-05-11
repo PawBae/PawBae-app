@@ -215,15 +215,9 @@ function spriteNameFor(s: MutablePhysicsState): string {
       if (Math.abs(s.vx) < 0.01) return 'idle'
       return s.vx > 0 ? 'run-right' : 'run-left'
     case 'on_wall': {
-      // The grab-wall / climb-wall sprite is drawn with the cat body
-      // on the *left* side of the cell (artist's native frame). That
-      // hugs the LEFT wall correctly when the window is flush with
-      // the screen's left edge. On the RIGHT wall (facing=-1) we need
-      // to flip the sprite so the body sits on the right side of the
-      // cell and touches the screen's right edge — otherwise the cat
-      // would visually float far from the wall it's supposedly
-      // clinging to. The pet.json declares paired -flipped variants
-      // that point at the same atlas row with flipX:true.
+      // Yoonie's native grab-wall / climb-wall row faces right, with
+      // paws reaching toward a wall on the right side of the cell. Use
+      // the flipped variant on left borders so her paws touch that side.
       const flip = s.facing === -1 ? '-flipped' : ''
       if (s.ticksInState < 6 || Math.abs(s.vy) < 0.01) return 'grab-wall' + flip
       return 'climb-wall' + flip
@@ -545,6 +539,9 @@ function stepOnScreen(s: MutablePhysicsState, edge: EdgeState) {
       s.vx = 0
       // Climb upward by default; once we hit the ceiling, transition.
       if (s.vy === 0) s.vy = -CLIMB_SPEED
+      if (edge.onLeft || edge.onRight) {
+        s.facing = edge.onLeft ? -1 : 1
+      }
       if (edge.onTop) {
         s.state = 'on_ceiling'
         s.ticksInState = 0
@@ -588,6 +585,7 @@ function stepOnScreen(s: MutablePhysicsState, edge: EdgeState) {
         s.ticksInState = 0
         s.vx = 0
         s.vy = CLIMB_SPEED
+        s.facing = edge.onLeft ? -1 : 1
         return
       }
       // Voluntary detach.
@@ -715,7 +713,7 @@ function stepOnScreen(s: MutablePhysicsState, edge: EdgeState) {
           s.ticksInState = 0
           s.vx = 0
           s.vy = 0
-          s.facing = 1
+          s.facing = -1
           return
         }
       } else if (edge.onRight && s.vx > 0) {
@@ -727,7 +725,7 @@ function stepOnScreen(s: MutablePhysicsState, edge: EdgeState) {
           s.ticksInState = 0
           s.vx = 0
           s.vy = 0
-          s.facing = -1
+          s.facing = 1
           return
         }
       }
