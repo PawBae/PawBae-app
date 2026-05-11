@@ -4245,6 +4245,11 @@ export default function Mini() {
               })}
             </div>) : miniPet ? (
               <div
+                // data-physics-anchor lets edgeDetect.measureBottomFootOffsetCSS
+                // locate the rendered sprite via getBoundingClientRect, so the
+                // stroll-mode floor math accounts for any centering offset
+                // between this div and the surrounding mini window.
+                data-physics-anchor=""
                 style={{
                   position: 'relative',
                   width: collapsedMascotSize * MINI_SPRITE_DISPLAY_MULTIPLIER,

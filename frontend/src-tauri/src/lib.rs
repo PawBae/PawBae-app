@@ -3354,8 +3354,478 @@ unsafe fn get_notch_offset(screen: *mut objc2::runtime::AnyObject) -> f64 {
     80.0
 }
 
+/// Minimal CoreGraphics / CoreFoundation FFI for querying the live Dock
+/// window bounds. We deliberately avoid the heavyweight `core-graphics`
+/// crate — this is the only place that needs CGWindowList, and the
+/// surface is tiny.
+#[cfg(target_os = "macos")]
+mod cg_window {
+    use std::ffi::c_void;
+    use std::os::raw::c_char;
+
+    pub type CFTypeRef = *const c_void;
+    pub type CFArrayRef = *const c_void;
+    pub type CFDictionaryRef = *const c_void;
+    pub type CFStringRef = *const c_void;
+    pub type CFIndex = isize;
+
+    #[link(name = "CoreGraphics", kind = "framework")]
+    #[link(name = "CoreFoundation", kind = "framework")]
+    extern "C" {
+        pub fn CGWindowListCopyWindowInfo(option: u32, relative_to_window: u32) -> CFArrayRef;
+        pub fn CFArrayGetCount(arr: CFArrayRef) -> CFIndex;
+        pub fn CFArrayGetValueAtIndex(arr: CFArrayRef, idx: CFIndex) -> CFTypeRef;
+        pub fn CFDictionaryGetValue(d: CFDictionaryRef, key: CFTypeRef) -> CFTypeRef;
+        pub fn CFStringCreateWithCString(alloc: CFTypeRef, cstr: *const c_char, enc: u32) -> CFStringRef;
+        pub fn CFStringGetCString(s: CFStringRef, buf: *mut c_char, bufsz: CFIndex, enc: u32) -> bool;
+        pub fn CFStringGetLength(s: CFStringRef) -> CFIndex;
+        pub fn CFNumberGetValue(num: CFTypeRef, ty: i32, val: *mut c_void) -> bool;
+        pub fn CFRelease(cf: CFTypeRef);
+    }
+
+    pub const OPTION_ON_SCREEN_ONLY: u32 = 1 << 0;
+    pub const NULL_WINDOW_ID: u32 = 0;
+    pub const STRING_ENCODING_UTF8: u32 = 0x08000100;
+    pub const NUMBER_DOUBLE_TYPE: i32 = 13;
+    // CFNumberType for 32-bit signed integers — used to read
+    // kCGWindowLayer (declared as SInt32 in CoreGraphics).
+    pub const NUMBER_SINT32_TYPE: i32 = 9;
+}
+
+#[cfg(target_os = "macos")]
+unsafe fn cf_string_from(s: &str) -> cg_window::CFStringRef {
+    if let Ok(c) = std::ffi::CString::new(s) {
+        cg_window::CFStringCreateWithCString(
+            std::ptr::null(),
+            c.as_ptr(),
+            cg_window::STRING_ENCODING_UTF8,
+        )
+    } else {
+        std::ptr::null()
+    }
+}
+
+#[cfg(target_os = "macos")]
+unsafe fn cf_dict_get_double(dict: cg_window::CFDictionaryRef, key: &str) -> Option<f64> {
+    let key_cf = cf_string_from(key);
+    if key_cf.is_null() { return None; }
+    let val = cg_window::CFDictionaryGetValue(dict, key_cf);
+    cg_window::CFRelease(key_cf);
+    if val.is_null() { return None; }
+    let mut out: f64 = 0.0;
+    let ok = cg_window::CFNumberGetValue(
+        val,
+        cg_window::NUMBER_DOUBLE_TYPE,
+        &mut out as *mut f64 as *mut std::ffi::c_void,
+    );
+    if ok { Some(out) } else { None }
+}
+
+/// Read a top-level i32 value (such as kCGWindowLayer or kCGWindowAlpha
+/// rounded to integer). Returns None if the key is absent or the bridge
+/// fails.
+#[cfg(target_os = "macos")]
+unsafe fn cf_dict_get_i32(dict: cg_window::CFDictionaryRef, key: &str) -> Option<i32> {
+    let key_cf = cf_string_from(key);
+    if key_cf.is_null() { return None; }
+    let val = cg_window::CFDictionaryGetValue(dict, key_cf);
+    cg_window::CFRelease(key_cf);
+    if val.is_null() { return None; }
+    let mut out: i32 = 0;
+    let ok = cg_window::CFNumberGetValue(
+        val,
+        cg_window::NUMBER_SINT32_TYPE,
+        &mut out as *mut i32 as *mut std::ffi::c_void,
+    );
+    if ok { Some(out) } else { None }
+}
+
+#[cfg(target_os = "macos")]
+unsafe fn cf_dict_get_string(dict: cg_window::CFDictionaryRef, key: &str) -> Option<String> {
+    let key_cf = cf_string_from(key);
+    if key_cf.is_null() { return None; }
+    let val = cg_window::CFDictionaryGetValue(dict, key_cf);
+    cg_window::CFRelease(key_cf);
+    if val.is_null() { return None; }
+    let len = cg_window::CFStringGetLength(val);
+    if len <= 0 { return Some(String::new()); }
+    let bufsz = (len as usize) * 4 + 1; // UTF-8 worst case
+    let mut buf: Vec<i8> = vec![0; bufsz];
+    let ok = cg_window::CFStringGetCString(
+        val,
+        buf.as_mut_ptr(),
+        bufsz as cg_window::CFIndex,
+        cg_window::STRING_ENCODING_UTF8,
+    );
+    if !ok { return None; }
+    let cstr = std::ffi::CStr::from_ptr(buf.as_ptr());
+    Some(cstr.to_string_lossy().into_owned())
+}
+
+/// Compute the visible Dock strip's bounds in NS bottom-up logical
+/// coords. Returns `Some((x, y, w, h))` where `(x, y)` is the
+/// bottom-left of the Dock rect, or `None` when no Dock strip is on
+/// screen (auto-hide engaged, side-Dock that the rest of the pipeline
+/// treats as a wall, etc.).
+///
+/// We iterate every on-screen window from CGWindowList and pick the
+/// strip-shaped one owned by either the `Dock` process or the
+/// `Window Server` (the macOS WindowServer composes the Dock strip
+/// in some configurations, so the strip's `kCGWindowOwnerName` can be
+/// either). The first time this function runs after process start it
+/// also logs every on-screen window (`owner | layer | alpha | x,y,w,h`)
+/// — that lets us confirm on a real machine which row IS the Dock
+/// strip without guessing. Subsequent calls only log the picked
+/// candidate.
+// Currently unused: see `get_pet_floor_info` / `move_mini_by`. Kept
+// behind `#[allow(dead_code)]` so re-enabling Dock x-range detection
+// later (e.g. when an explicit Screen-Recording opt-in lands) is a
+// one-line change instead of a re-port of the CGWindowList scan.
+#[cfg(target_os = "macos")]
+#[allow(dead_code)]
+unsafe fn compute_dock_rect_macos() -> Option<(f64, f64, f64, f64)> {
+    use objc2::runtime::{AnyClass, AnyObject};
+    use objc2::msg_send;
+    use objc2_foundation::NSRect;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    static DUMPED_ONCE: AtomicBool = AtomicBool::new(false);
+    let dump_now = !DUMPED_ONCE.swap(true, Ordering::Relaxed);
+
+    let cls = AnyClass::get(c"NSScreen")?;
+    let main_screen: *mut AnyObject = msg_send![cls, mainScreen];
+    if main_screen.is_null() { return None; }
+    let mframe: NSRect = msg_send![&*main_screen, frame];
+    let main_w = mframe.size.width;
+    let main_h = mframe.size.height;
+
+    let list = cg_window::CGWindowListCopyWindowInfo(
+        cg_window::OPTION_ON_SCREEN_ONLY,
+        cg_window::NULL_WINDOW_ID,
+    );
+    if list.is_null() {
+        log::warn!("[dock] CGWindowListCopyWindowInfo returned NULL");
+        return None;
+    }
+    let count = cg_window::CFArrayGetCount(list);
+
+    // Filter strategy (no hardcoded layer numbers — those vary by
+    // macOS version; the diagnostic dump above lets us learn the
+    // actual value on this machine and tighten the filter later):
+    //   1. Owner must be "Dock" OR "Window Server" / "WindowServer"
+    //      (case-insensitive). Dock-strip ownership varies across
+    //      macOS versions.
+    //   2. Width AND height each >= 30 (sanity floor).
+    //   3. Reject wallpaper-sized backdrops: w >= 60% main_w AND
+    //      h >= 60% main_h. The Dock process renders desktop
+    //      backdrops which look wallpaper-shaped.
+    //   4. Prefer strip-shaped survivors (max/min aspect >= 3) —
+    //      the Dock is always long-thin (bottom: wide+short; side:
+    //      tall+narrow). Among strip-shaped survivors, pick the
+    //      one whose long side is largest.
+    //   5. If no strip survives, fall back to the largest
+    //      non-wallpaper survivor (atypical Dock configurations).
+    let mut best: Option<(f64, f64, f64, f64, i32, String)> = None; // x, y_cg, w, h, layer, owner
+    let mut best_strip_long_side: f64 = 0.0;
+    let mut fallback: Option<(f64, f64, f64, f64, i32, String)> = None;
+    let mut fallback_long_side: f64 = 0.0;
+    let mut candidate_count = 0usize;
+
+    for i in 0..count {
+        let dict = cg_window::CFArrayGetValueAtIndex(list, i) as cg_window::CFDictionaryRef;
+        if dict.is_null() { continue; }
+        let owner = cf_dict_get_string(dict, "kCGWindowOwnerName").unwrap_or_default();
+        let layer = cf_dict_get_i32(dict, "kCGWindowLayer").unwrap_or(0);
+        let alpha = cf_dict_get_double(dict, "kCGWindowAlpha").unwrap_or(0.0);
+        let bounds_key = cf_string_from("kCGWindowBounds");
+        if bounds_key.is_null() { continue; }
+        let bounds = cg_window::CFDictionaryGetValue(dict, bounds_key);
+        cg_window::CFRelease(bounds_key);
+        if bounds.is_null() { continue; }
+        let x = cf_dict_get_double(bounds, "X").unwrap_or(0.0);
+        let y_cg = cf_dict_get_double(bounds, "Y").unwrap_or(0.0);
+        let w = cf_dict_get_double(bounds, "Width").unwrap_or(0.0);
+        let h = cf_dict_get_double(bounds, "Height").unwrap_or(0.0);
+
+        // First-call diagnostic: dump everything visible so we can
+        // identify the Dock row by hand from real data.
+        if dump_now {
+            log::info!(
+                "[dock/dump] owner={:?} layer={} alpha={:.2} x={} y_cg={} w={} h={}",
+                owner, layer, alpha, x, y_cg, w, h,
+            );
+        }
+
+        // Owner gate — Dock-strip ownership has historically been
+        // either "Dock" or the Window Server depending on macOS
+        // version, so accept both. Case-insensitive comparison
+        // covers small naming variations like "Window Server" vs
+        // "WindowServer".
+        let owner_lower = owner.to_ascii_lowercase();
+        let is_dock_owner = owner_lower == "dock"
+            || owner_lower == "windowserver"
+            || owner_lower == "window server";
+        if !is_dock_owner { continue; }
+        if w < 30.0 || h < 30.0 { continue; }
+        let wallpaper_like = w >= main_w * 0.6 && h >= main_h * 0.6;
+        if wallpaper_like { continue; }
+        // Position gate — the Dock is always at a screen edge. On
+        // macOS bottom-up coords (`y_cg + h ≈ main_h` = bottom edge,
+        // `y_cg ≈ 0` = top edge of main screen). Reject the menu
+        // bar, which lives at `y_cg ≈ 0` and would otherwise pass
+        // the strip-shape filter and be mistaken for a Dock.
+        let touches_bottom = (y_cg + h - main_h).abs() < 2.0;
+        let touches_left = x.abs() < 2.0 && h > w; // tall strip at x≈0
+        let touches_right = (x + w - main_w).abs() < 2.0 && h > w;
+        if !(touches_bottom || touches_left || touches_right) { continue; }
+
+        candidate_count += 1;
+        let long_side = w.max(h);
+        let short_side = w.min(h);
+        let aspect = long_side / short_side.max(1.0);
+        let row = (x, y_cg, w, h, layer, owner.clone());
+        if aspect >= 3.0 {
+            if long_side > best_strip_long_side {
+                best_strip_long_side = long_side;
+                best = Some(row);
+            }
+        } else if long_side > fallback_long_side {
+            fallback_long_side = long_side;
+            fallback = Some(row);
+        }
+    }
+    cg_window::CFRelease(list);
+
+    let chosen = best.or(fallback);
+    // Per-tick selection log is debug-only — it would otherwise spam
+    // INFO at 2 Hz. The first-call window-table dump above is the
+    // INFO record we keep around to verify behavior on a real machine.
+    log::debug!(
+        "[dock] count={} dock_or_ws_candidates={} chosen={:?}",
+        count, candidate_count, chosen,
+    );
+    let (x, y_cg, w, h, _layer, _owner) = chosen?;
+    let ns_y = mframe.origin.y + mframe.size.height - y_cg - h;
+    Some((x, ns_y, w, h))
+}
+
+
+/// 500 ms TTL cache around `compute_dock_rect_macos`. Returns `None`
+/// when the Dock strip isn't visible to CGWindowList (the macOS 14.4+
+/// privacy gate hides cross-app windows from callers without Screen
+/// Recording permission). The frontend / `move_mini_by` clamp treat
+/// `None` as "Dock spans the full visibleFrame width" — the cat sits
+/// on top of the Dock as a full-width platform. No estimates, no
+/// guessing: either we have real data or we explicitly have nothing.
+#[cfg(target_os = "macos")]
+#[allow(dead_code)]
+fn get_cached_dock_rect_macos() -> Option<(f64, f64, f64, f64)> {
+    use std::time::{Duration, Instant};
+    static CACHE: std::sync::Mutex<Option<(Instant, Option<(f64, f64, f64, f64)>)>> =
+        std::sync::Mutex::new(None);
+    const TTL: Duration = Duration::from_millis(500);
+    let mut cache = CACHE.lock().ok()?;
+    if let Some((at, val)) = *cache {
+        if at.elapsed() < TTL { return val; }
+    }
+    let fresh = unsafe { compute_dock_rect_macos() };
+    *cache = Some((Instant::now(), fresh));
+    fresh
+}
+
+/// Sprite-content padding fractions for the current pet. These let the
+/// physics safety-net clamp in `move_mini_by` agree with the frontend
+/// edge-detection in `edgeDetect.ts`: both must subtract the same
+/// transparent-gap fraction from the visibleFrame so the *visible*
+/// character ends up flush with each screen edge (bottom in particular
+/// = the Dock top).
+///
+/// Defaults match the legacy hardcoded constants in `edgeDetect.ts`
+/// (top 0.40, sides 0.45, bottom 0.30) so this Mutex is safe to read
+/// before the frontend has pushed a measurement.
+///
+/// The frontend pushes the bottom fraction at physics-enable time, after
+/// alpha-scanning the pet's idle frame to find the actual transparent
+/// gap below the visible foot. Top / sides remain at the legacy
+/// defaults because the climb poses determine those edges, not the
+/// idle pose, and we currently only scan idle.
+#[derive(Clone, Copy)]
+struct SpritePadFracs {
+    top: f64,
+    right: f64,
+    bottom: f64,
+    left: f64,
+    /// Absolute CSS-pixel overrides per edge. When `Some`,
+    /// `move_mini_by` uses these directly instead of multiplying the
+    /// fraction by the window dimension. Set by the frontend after
+    /// alpha-scanning the relevant animation rows and DOM-measuring
+    /// the rendered sprite's distance from each window edge — the
+    /// fraction approach is wrong whenever the sprite div is
+    /// smaller than the window (centered, with empty pixels around
+    /// it), because cell-fraction × window-size doesn't account for
+    /// the centering offset.
+    top_px: Option<f64>,
+    right_px: Option<f64>,
+    bottom_px: Option<f64>,
+    left_px: Option<f64>,
+}
+
+static SPRITE_PAD: std::sync::Mutex<SpritePadFracs> = std::sync::Mutex::new(SpritePadFracs {
+    top: 0.40,
+    right: 0.45,
+    bottom: 0.30,
+    left: 0.45,
+    top_px: None,
+    right_px: None,
+    bottom_px: None,
+    left_px: None,
+});
+
+fn current_sprite_pad() -> SpritePadFracs {
+    SPRITE_PAD.lock().map(|g| *g).unwrap_or(SpritePadFracs {
+        top: 0.40,
+        right: 0.45,
+        bottom: 0.30,
+        left: 0.45,
+        top_px: None,
+        right_px: None,
+        bottom_px: None,
+        left_px: None,
+    })
+}
+
+/// Frontend pushes runtime-measured pad values here so the Rust
+/// safety-net clamp agrees with the frontend edge math. Any field can
+/// be `None` to leave that side at its current value.
+///
+/// The `*_px` fields are *absolute* CSS-pixel offsets between each
+/// visible sprite edge and the corresponding window edge. They are
+/// the preferred overrides when the frontend can measure them from
+/// the DOM. When set, they override the corresponding fraction in
+/// `move_mini_by`'s clamp.
+///
+/// `reset_px` clears every px override before applying the rest of
+/// the update — the frontend calls this on every physics-enable so
+/// the previous pet's measurements don't leak into the new pet's
+/// first physics tick.
+#[tauri::command]
+async fn set_sprite_pad_fractions(
+    top: Option<f64>,
+    right: Option<f64>,
+    bottom: Option<f64>,
+    left: Option<f64>,
+    top_px: Option<f64>,
+    right_px: Option<f64>,
+    bottom_px: Option<f64>,
+    left_px: Option<f64>,
+    reset_px: Option<bool>,
+) -> Result<(), String> {
+    let mut g = SPRITE_PAD.lock().map_err(|e| e.to_string())?;
+    if reset_px.unwrap_or(false) {
+        g.top_px = None;
+        g.right_px = None;
+        g.bottom_px = None;
+        g.left_px = None;
+    }
+    // Clamp each fraction to a sane range. A frac < 0 would lift the
+    // window past the floor; a frac > 0.95 indicates a measurement
+    // failure (essentially empty sprite). Silently ignore bad values
+    // so a noisy frontend can't move the cat off-screen.
+    if let Some(v) = top    { if v.is_finite() && v >= 0.0 && v <= 0.95 { g.top    = v; } }
+    if let Some(v) = right  { if v.is_finite() && v >= 0.0 && v <= 0.95 { g.right  = v; } }
+    if let Some(v) = bottom { if v.is_finite() && v >= 0.0 && v <= 0.95 { g.bottom = v; } }
+    if let Some(v) = left   { if v.is_finite() && v >= 0.0 && v <= 0.95 { g.left   = v; } }
+    // Absolute CSS pixels. Reject NaN / negative / insanely large
+    // values so a buggy frontend can't push the cat off-screen.
+    let validate_px = |v: f64| -> Option<f64> {
+        if v.is_finite() && v >= 0.0 && v <= 1000.0 { Some(v) } else { None }
+    };
+    if let Some(v) = top_px    { if let Some(px) = validate_px(v) { g.top_px    = Some(px); } }
+    if let Some(v) = right_px  { if let Some(px) = validate_px(v) { g.right_px  = Some(px); } }
+    if let Some(v) = bottom_px { if let Some(px) = validate_px(v) { g.bottom_px = Some(px); } }
+    if let Some(v) = left_px   { if let Some(px) = validate_px(v) { g.left_px   = Some(px); } }
+    Ok(())
+}
+
+/// Pet-physics floor info, packed for one IPC roundtrip per cache TTL.
+/// Y values are in macOS bottom-up logical pixels.
+#[derive(serde::Serialize)]
+struct PetFloorInfo {
+    /// Floor Y when the mascot's center-x is inside `dock_x_range`. This
+    /// is the top of the Dock (== `visibleFrame.origin.y`).
+    on_dock_y: f64,
+    /// Floor Y when the mascot's center-x is outside the Dock x-range.
+    /// This is the actual bottom of the screen (`screen.frame.origin.y`).
+    off_dock_y: f64,
+    /// Horizontal extent of the Dock window in screen coords, or None
+    /// when no Dock is on screen (auto-hide engaged, no Dock, etc.).
+    dock_x_range: Option<(f64, f64)>,
+}
+
+#[tauri::command]
+async fn get_pet_floor_info(app: tauri::AppHandle) -> Result<PetFloorInfo, String> {
+    let win = app.get_webview_window("mini").ok_or("mini window not found")?;
+    #[cfg(target_os = "macos")]
+    {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let win_clone = win.clone();
+        app.run_on_main_thread(move || {
+            use objc2::runtime::{AnyClass, AnyObject};
+            use objc2::msg_send;
+            use objc2_foundation::NSRect;
+            if let Ok(ns_win) = win_clone.ns_window() {
+                let obj = unsafe { &*(ns_win as *mut AnyObject) };
+                let screen: *mut AnyObject = unsafe { msg_send![obj, screen] };
+                let (frame, visible): (Option<NSRect>, Option<NSRect>) = unsafe {
+                    if screen.is_null() {
+                        match AnyClass::get(c"NSScreen") {
+                            Some(cls) => {
+                                let main: *mut AnyObject = msg_send![cls, mainScreen];
+                                if main.is_null() { (None, None) } else {
+                                    (
+                                        Some(msg_send![&*main, frame]),
+                                        Some(msg_send![&*main, visibleFrame]),
+                                    )
+                                }
+                            }
+                            None => (None, None),
+                        }
+                    } else {
+                        (
+                            Some(msg_send![&*screen, frame]),
+                            Some(msg_send![&*screen, visibleFrame]),
+                        )
+                    }
+                };
+                // Intentionally do NOT call CGWindowList here: that surface
+                // is the path that triggers a Screen Recording permission
+                // prompt on recent macOS versions, and we want the pet to
+                // work zero-permission. Frontend treats `dock_x_range:
+                // None` as "the entire visibleFrame width is the platform"
+                // — the pet still sits on `visibleFrame.origin.y` (= top
+                // of Dock) because that's what NSScreen gives us for free.
+                let dock: Option<(f64, f64, f64, f64)> = None;
+                let _ = tx.send((frame, visible, dock));
+            }
+        }).map_err(|e| e.to_string())?;
+        if let Ok((frame, visible, dock)) = rx.recv_timeout(std::time::Duration::from_secs(1)) {
+            let off_dock_y = frame.map(|f| f.origin.y).unwrap_or(0.0);
+            let on_dock_y = visible.map(|v| v.origin.y).unwrap_or(off_dock_y);
+            let dock_x_range = dock.map(|(x, _, w, _)| (x, x + w));
+            return Ok(PetFloorInfo { on_dock_y, off_dock_y, dock_x_range });
+        }
+    }
+    #[allow(unreachable_code)]
+    Ok(PetFloorInfo { on_dock_y: 0.0, off_dock_y: 0.0, dock_x_range: None })
+}
+
 /// Move the mini window by a delta (dx, dy in CSS/logical points).
 /// dy is in screen coordinates (positive = downward), converted to macOS (positive = upward).
+///
+/// On macOS the resulting origin is clamped to the screen's `visibleFrame`
+/// (menu-bar / Dock / notch excluded). This is the authoritative safety
+/// net for the pet physics loop: even at terminal velocity or during a
+/// hard drag-throw, the window can never end up past a wall.
 #[tauri::command]
 async fn move_mini_by(app: tauri::AppHandle, dx: f64, dy: f64) -> Result<(), String> {
     let win = app.get_webview_window("mini").ok_or("mini window not found")?;
@@ -3363,14 +3833,103 @@ async fn move_mini_by(app: tauri::AppHandle, dx: f64, dy: f64) -> Result<(), Str
     {
         let win_clone = win.clone();
         app.run_on_main_thread(move || {
-            use objc2::runtime::AnyObject;
+            use objc2::runtime::{AnyClass, AnyObject};
             use objc2::msg_send;
             use objc2_foundation::{NSRect, NSPoint, NSSize};
             if let Ok(ns_win) = win_clone.ns_window() {
                 let obj = unsafe { &*(ns_win as *mut AnyObject) };
                 let frame: NSRect = unsafe { msg_send![obj, frame] };
+
+                // Fetch both visibleFrame and full frame from the same
+                // screen the window lives on (with mainScreen fallback).
+                // visibleFrame is the on-Dock floor; frame.origin.y is
+                // the off-Dock floor (actual screen bottom).
+                let (visible_frame, screen_frame): (Option<NSRect>, Option<NSRect>) = unsafe {
+                    let screen: *mut AnyObject = msg_send![obj, screen];
+                    if screen.is_null() {
+                        match AnyClass::get(c"NSScreen") {
+                            Some(cls) => {
+                                let main_screen: *mut AnyObject = msg_send![cls, mainScreen];
+                                if main_screen.is_null() {
+                                    (None, None)
+                                } else {
+                                    (
+                                        Some(msg_send![&*main_screen, visibleFrame]),
+                                        Some(msg_send![&*main_screen, frame]),
+                                    )
+                                }
+                            }
+                            None => (None, None),
+                        }
+                    } else {
+                        (
+                            Some(msg_send![&*screen, visibleFrame]),
+                            Some(msg_send![&*screen, frame]),
+                        )
+                    }
+                };
+                // Intentionally NOT calling CGWindowList here: that's the
+                // surface that risks a Screen Recording permission prompt
+                // on recent macOS. We treat the whole visibleFrame width
+                // as the platform — `over_dock` becomes unconditionally
+                // true below.
+                let dock_rect: Option<(f64, f64, f64, f64)> = None;
+
+                // Bottom-up Cocoa coords: dy>0 means visually-down, which
+                // is a *decrease* in origin.y.
+                let target_x = frame.origin.x + dx;
+                let target_y = frame.origin.y - dy;
+                let (clamped_x, clamped_y) = if let (Some(vf), Some(sf)) = (visible_frame, screen_frame) {
+                    // Sprite-content padding. Each edge prefers the
+                    // absolute CSS-pixel override pushed by the frontend
+                    // after alpha-scanning the pet's atlas and
+                    // DOM-measuring the rendered sprite layout; falls
+                    // back to (fraction × window dimension) when the
+                    // frontend hasn't pushed a value for that edge
+                    // (e.g. a floor-only pet has no climb-ceiling row,
+                    // so top_px stays None and the top fraction wins).
+                    // The fraction-of-window-size formula is incorrect
+                    // when the sprite div doesn't fill the window
+                    // (centered, with empty pixels around) — only an
+                    // absolute pixel value captures that offset.
+                    let pad = current_sprite_pad();
+                    let pad_bottom = pad.bottom_px.unwrap_or(frame.size.height * pad.bottom);
+                    let pad_top    = pad.top_px.unwrap_or(frame.size.height * pad.top);
+                    let pad_left   = pad.left_px.unwrap_or(frame.size.width * pad.left);
+                    let pad_right  = pad.right_px.unwrap_or(frame.size.width * pad.right);
+
+                    // X: bounded by visibleFrame (so side Docks act as
+                    // walls too). Walls and ceiling use visibleFrame; the
+                    // *floor* is what becomes piecewise.
+                    let min_x = vf.origin.x - pad_left;
+                    let max_x = vf.origin.x + vf.size.width - frame.size.width + pad_right;
+                    let cx = if max_x < min_x { target_x } else { target_x.clamp(min_x, max_x) };
+
+                    // Piecewise floor: when the window's center-x is
+                    // inside the Dock's horizontal extent, the floor is
+                    // the top of the Dock (visibleFrame.y). When the
+                    // pet walks off the side of the Dock the floor
+                    // drops to the actual screen bottom (frame.y).
+                    // Safety fallback: if Dock detection fails (returns
+                    // None), treat the entire visibleFrame width as a
+                    // platform so the pet still sits on the Dock area
+                    // instead of plummeting past it.
+                    let center_x = cx + frame.size.width / 2.0;
+                    let over_dock = match dock_rect {
+                        Some((dx0, _, dw, _)) => center_x >= dx0 && center_x <= dx0 + dw,
+                        None => true,
+                    };
+                    let floor_y = if over_dock { vf.origin.y } else { sf.origin.y };
+                    let min_y = floor_y - pad_bottom;
+                    let max_y = vf.origin.y + vf.size.height - frame.size.height + pad_top;
+                    let cy = if max_y < min_y { target_y } else { target_y.clamp(min_y, max_y) };
+                    (cx, cy)
+                } else {
+                    (target_x, target_y)
+                };
+
                 let new_frame = NSRect::new(
-                    NSPoint::new(frame.origin.x + dx, frame.origin.y - dy),
+                    NSPoint::new(clamped_x, clamped_y),
                     NSSize::new(frame.size.width, frame.size.height),
                 );
                 unsafe {
@@ -3382,10 +3941,14 @@ async fn move_mini_by(app: tauri::AppHandle, dx: f64, dy: f64) -> Result<(), Str
                 // Keep the pet-context restore frame in sync when dragging
                 // while the context menu is open, so closing restores to the
                 // new position instead of the stale pre-drag position.
+                // Use the *clamped* delta so a wall-hit doesn't desync the
+                // restore frame from the real window position.
+                let actual_dx = clamped_x - frame.origin.x;
+                let actual_dy_top_down = frame.origin.y - clamped_y;
                 if let Ok(mut saved) = PET_MENU_RESTORE_FRAME.lock() {
                     if let Some(ref mut s) = *saved {
-                        s.0 += dx;
-                        s.1 -= dy; // macOS: screen y is bottom-up, dy is top-down
+                        s.0 += actual_dx;
+                        s.1 -= actual_dy_top_down;
                     }
                 }
             }
@@ -3441,8 +4004,15 @@ async fn get_mini_origin(app: tauri::AppHandle) -> Result<(f64, f64), String> {
 }
 
 /// Return the monitor rect (x, y, w, h) in logical pixels for the monitor
-/// the mini window currently lives on.  Used by the front-end to detect
-/// screen edges correctly on multi-monitor setups.
+/// the mini window currently lives on. Used by the front-end pet physics
+/// and walk/peek/menu logic to detect screen edges on multi-monitor setups.
+///
+/// On macOS this returns `NSScreen.visibleFrame` — the rect excluding the
+/// menu bar, the notch's reserved strip, and the Dock (regardless of
+/// Dock position or auto-hide). That way the pet's floor sits on top of
+/// the Dock, its ceiling hugs the menu bar, and side Docks act as walls.
+/// On Windows the full monitor rect is still returned (taskbar handling
+/// is a planned follow-up).
 #[tauri::command]
 async fn get_mini_monitor_rect(app: tauri::AppHandle) -> Result<(f64, f64, f64, f64), String> {
     let win = app.get_webview_window("mini").ok_or("mini not found")?;
@@ -3456,6 +4026,9 @@ async fn get_mini_monitor_rect(app: tauri::AppHandle) -> Result<(f64, f64, f64, 
             use objc2_foundation::NSRect;
             if let Ok(ns_win) = win_clone.ns_window() {
                 let obj = unsafe { &*(ns_win as *mut AnyObject) };
+                // visibleFrame excludes menu bar + Dock so physics edge
+                // detection treats the top of the Dock as the floor and
+                // the bottom of the menu bar as the ceiling automatically.
                 let screen_frame: NSRect = unsafe {
                     let screen: *mut AnyObject = msg_send![obj, screen];
                     if screen.is_null() {
@@ -3467,9 +4040,9 @@ async fn get_mini_monitor_rect(app: tauri::AppHandle) -> Result<(f64, f64, f64, 
                         if main_screen.is_null() {
                             return;
                         }
-                        msg_send![&*main_screen, frame]
+                        msg_send![&*main_screen, visibleFrame]
                     } else {
-                        msg_send![&*screen, frame]
+                        msg_send![&*screen, visibleFrame]
                     }
                 };
                 let _ = tx.send((
@@ -12065,7 +12638,7 @@ pub fn run() {
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![get_status, send_chat, open_detail_panel, save_character_gif, delete_character_assets, delete_character_gif, get_agents, get_health, get_agent_metrics, interrupt_agent, scan_characters, get_agent_extra_info, open_mini, close_mini, set_mini_expanded, set_mini_size, set_efficiency_hover_tracking, resize_mini_height, move_mini_by, get_mini_origin, get_mini_monitor_rect, set_mini_origin, set_ime_mode, get_agent_sessions, get_session_preview, get_session_messages, get_active_sessions, proxy_post, play_sound, get_claude_sessions, get_claude_conversation, install_claude_hooks, install_cursor_hooks, remove_claude_session, resolve_claude_permission, get_claude_stats, open_url, activate_app, focus_cursor_terminal, check_ax_permission, request_ax_permission, jump_to_claude_terminal, check_for_update, run_update, close_ssh, read_local_file, list_backgrounds, save_background, get_background_data, exit_app, get_ssh_key_info, reset_ssh, get_ui_scale, list_custom_codex_pets, open_codex_pets_dir, import_codex_pet, pick_codex_pet_folder, reassert_floating, spawn_demo_mascot, close_demo_mascot, close_demo_mascots, debug_log, update_tray_language, set_pet_mode_window, set_pet_context_menu, set_pet_pomodoro_active, get_now_playing, get_system_idle_time, set_stroll_mode, set_throw_tracking, voice_toggle, voice_is_recording])
+        .invoke_handler(tauri::generate_handler![get_status, send_chat, open_detail_panel, save_character_gif, delete_character_assets, delete_character_gif, get_agents, get_health, get_agent_metrics, interrupt_agent, scan_characters, get_agent_extra_info, open_mini, close_mini, set_mini_expanded, set_mini_size, set_efficiency_hover_tracking, resize_mini_height, move_mini_by, get_mini_origin, get_mini_monitor_rect, get_pet_floor_info, set_sprite_pad_fractions, set_mini_origin, set_ime_mode, get_agent_sessions, get_session_preview, get_session_messages, get_active_sessions, proxy_post, play_sound, get_claude_sessions, get_claude_conversation, install_claude_hooks, install_cursor_hooks, remove_claude_session, resolve_claude_permission, get_claude_stats, open_url, activate_app, focus_cursor_terminal, check_ax_permission, request_ax_permission, jump_to_claude_terminal, check_for_update, run_update, close_ssh, read_local_file, list_backgrounds, save_background, get_background_data, exit_app, get_ssh_key_info, reset_ssh, get_ui_scale, list_custom_codex_pets, open_codex_pets_dir, import_codex_pet, pick_codex_pet_folder, reassert_floating, spawn_demo_mascot, close_demo_mascot, close_demo_mascots, debug_log, update_tray_language, set_pet_mode_window, set_pet_context_menu, set_pet_pomodoro_active, get_now_playing, get_system_idle_time, set_stroll_mode, set_throw_tracking, voice_toggle, voice_is_recording])
         .manage(ActiveAgentPid { pid: Mutex::new(None) })
         .manage(ClaudeState { sessions: Arc::new(Mutex::new(HashMap::new())), pending_permissions: Arc::new(Mutex::new(HashMap::new())) })
         .run(tauri::generate_context!())

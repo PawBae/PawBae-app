@@ -14,7 +14,15 @@
 import { useEffect, useRef, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import type { CodexPet } from './codexPet'
-import { detectEdges, invalidateMonitorCache, type EdgeState } from './edgeDetect'
+import {
+  detectEdges,
+  invalidateMonitorCache,
+  invalidateFloorCache,
+  measureSpriteAnchorsCSS,
+  setRuntimeSpritePadCSS,
+  resetRuntimeSpritePadCSS,
+  type EdgeState,
+} from './edgeDetect'
 
 export type PhysicsState =
   | 'on_floor'
@@ -84,6 +92,14 @@ interface MutablePhysicsState {
   // mascot keeps walking the same way after a bounce instead of
   // randomly flipping each tick.
   lastFloorDir: -1 | 1
+  // Ticks spent walking on the floor since the last rest. Used to
+  // gate the rest-dwell trigger so the cat doesn't immediately
+  // re-enter rest after just having rested.
+  floorWalkTicks: number
+  // Remaining ticks of the current idle-rest dwell. >0 means the
+  // cat is sitting still in `idle` pose on the floor; 0 means it's
+  // walking (or eligible to start walking).
+  restTicksRemaining: number
 }
 
 function initialState(): MutablePhysicsState {
@@ -100,8 +116,20 @@ function initialState(): MutablePhysicsState {
     bounceTicksRemaining: 0,
     ticksInState: 0,
     lastFloorDir: 1,
+    floorWalkTicks: 0,
+    restTicksRemaining: 0,
   }
 }
+
+// Rest-dwell tuning. The cat walks for at least ~1 second of ticks
+// before becoming eligible to rest, then a small per-tick probability
+// kicks off a 1-4 second pause in `idle` pose. Result: on the Dock the
+// cat is in `idle` (flush feet) most of the time, with brief walking
+// bursts that produce the per-pose anchor offset.
+const FLOOR_WALK_MIN_TICKS_BEFORE_REST = 33   // ~1 s at 30 ms/tick
+const FLOOR_REST_TRIGGER_PROB_PER_TICK = 0.005 // ~average 1 trigger per 200 ticks (~6 s)
+const FLOOR_REST_MIN_TICKS = 33   // 1 s minimum dwell
+const FLOOR_REST_MAX_EXTRA_TICKS = 100 // up to ~3 s extra (4 s total max)
 
 // Map a (state, vx, facing) tuple to the animation key the sprite
 // renderer should display. Names line up with the Phase-2 atlas rows
@@ -113,13 +141,26 @@ function spriteNameFor(s: MutablePhysicsState): string {
     case 'on_floor':
       if (Math.abs(s.vx) < 0.01) return 'idle'
       return s.vx > 0 ? 'run-right' : 'run-left'
-    case 'on_wall':
-      // Hold a static grab-wall pose for the first ~6 ticks (180 ms)
-      // so the transition reads as "grabbed → started climbing".
-      if (s.ticksInState < 6 || Math.abs(s.vy) < 0.01) return 'grab-wall'
-      return 'climb-wall'
-    case 'on_ceiling':
-      return 'climb-ceiling'
+    case 'on_wall': {
+      // The grab-wall / climb-wall sprite is drawn with the cat body
+      // on the *left* side of the cell (artist's native frame). That
+      // hugs the LEFT wall correctly when the window is flush with
+      // the screen's left edge. On the RIGHT wall (facing=-1) we need
+      // to flip the sprite so the body sits on the right side of the
+      // cell and touches the screen's right edge — otherwise the cat
+      // would visually float far from the wall it's supposedly
+      // clinging to. The pet.json declares paired -flipped variants
+      // that point at the same atlas row with flipX:true.
+      const flip = s.facing === -1 ? '-flipped' : ''
+      if (s.ticksInState < 6 || Math.abs(s.vy) < 0.01) return 'grab-wall' + flip
+      return 'climb-wall' + flip
+    }
+    case 'on_ceiling': {
+      // On the ceiling the cat crawls in vx direction; mirror when
+      // moving rightward so head/tail orient consistently with the
+      // wall states.
+      return s.vx > 0 ? 'climb-ceiling-flipped' : 'climb-ceiling'
+    }
     case 'falling':
       return 'falling'
     case 'jumping':
@@ -140,11 +181,40 @@ function step(s: MutablePhysicsState, edge: EdgeState) {
   s.ticksInState += 1
   switch (s.state) {
     case 'on_floor': {
+      // Reset walk/rest counters on the first tick of a fresh on_floor
+      // visit (ticksInState was just incremented to 1 at top of step).
+      // This makes the rest-dwell timing reset cleanly each time the
+      // cat lands from a wall/ceiling/fall, instead of inheriting stale
+      // counters from a previous on_floor session.
+      if (s.ticksInState === 1) {
+        s.floorWalkTicks = 0
+        s.restTicksRemaining = 0
+      }
+      // If the floor disappeared under the pet (walked off the side of
+      // the macOS Dock platform), start falling. The next tick of
+      // gravity will carry it toward the actual screen bottom; horizontal
+      // momentum from the walk is preserved for natural arc.
+      if (!edge.onBottom) {
+        s.state = 'falling'
+        s.ticksInState = 0
+        // Don't zero vx — the walk direction becomes the fall direction.
+        return
+      }
+      s.vy = 0
+      // Idle-rest dwell: while the cat has rest ticks remaining, sit
+      // still in `idle` pose (vx=0). spriteNameFor maps `on_floor` with
+      // |vx|<0.01 to `idle`, so this directly renders the flush-feet
+      // resting pose instead of the constantly-bobbing running cycle.
+      if (s.restTicksRemaining > 0) {
+        s.restTicksRemaining -= 1
+        s.vx = 0
+        s.facing = s.lastFloorDir
+        return
+      }
       // Aim to walk in `lastFloorDir`. Preserve any leftover horizontal
       // momentum from a recent throw so the cat skids instead of
       // instantly clamping to WALK_SPEED — feels more physical and
       // matches the "drag direction = throw direction" expectation.
-      s.vy = 0
       const skidding = Math.abs(s.vx) > WALK_SPEED * 1.5
       if (skidding) {
         s.vx *= 1 - RESISTANCE_X * 2
@@ -152,6 +222,20 @@ function step(s: MutablePhysicsState, edge: EdgeState) {
         s.vx = WALK_SPEED * s.lastFloorDir
       }
       s.facing = s.vx >= 0 ? 1 : -1
+      // Once we've been walking for the minimum time, roll the dice
+      // each tick for a rest dwell. Tuned so the cat rests on average
+      // every ~6 seconds for 1-4 seconds.
+      s.floorWalkTicks += 1
+      if (
+        s.floorWalkTicks > FLOOR_WALK_MIN_TICKS_BEFORE_REST
+        && Math.random() < FLOOR_REST_TRIGGER_PROB_PER_TICK
+      ) {
+        s.restTicksRemaining =
+          FLOOR_REST_MIN_TICKS + Math.floor(Math.random() * FLOOR_REST_MAX_EXTRA_TICKS)
+        s.floorWalkTicks = 0
+        s.vx = 0
+        return
+      }
       if (edge.onLeft && s.vx < 0) {
         s.state = 'on_wall'
         s.ticksInState = 0
@@ -232,6 +316,51 @@ function step(s: MutablePhysicsState, edge: EdgeState) {
       // Apply gravity and air resistance.
       s.vy = Math.min(s.vy + GRAVITY, TERMINAL_VY)
       s.vx *= 1 - RESISTANCE_X
+      // Side collision while falling.
+      //   Hard hit (|vx| ≥ 1) → bounce inward with damping, keep falling.
+      //                        Fall through (no early return) so a corner
+      //                        hit can also bounce off the floor/ceiling
+      //                        in the same tick.
+      //   Soft contact         → grab the wall and start climbing.
+      if (edge.onLeft && s.vx < 0) {
+        if (Math.abs(s.vx) >= 1) {
+          s.vx = Math.abs(s.vx) * BOUNCE_DAMPING
+          s.facing = 1
+        } else {
+          s.state = 'on_wall'
+          s.ticksInState = 0
+          s.vx = 0
+          s.vy = 0
+          s.facing = 1
+          return
+        }
+      } else if (edge.onRight && s.vx > 0) {
+        if (Math.abs(s.vx) >= 1) {
+          s.vx = -Math.abs(s.vx) * BOUNCE_DAMPING
+          s.facing = -1
+        } else {
+          s.state = 'on_wall'
+          s.ticksInState = 0
+          s.vx = 0
+          s.vy = 0
+          s.facing = -1
+          return
+        }
+      }
+      // Ceiling collision (only when moving upward — physics vy is
+      // top-down, so vy < 0 means rising). Hard hit bounces back down;
+      // soft contact mounts the ceiling and crawls in current vx dir.
+      if (edge.onTop && s.vy < 0) {
+        if (Math.abs(s.vy) >= 1) {
+          s.vy = Math.abs(s.vy) * BOUNCE_DAMPING
+        } else {
+          s.state = 'on_ceiling'
+          s.ticksInState = 0
+          s.vy = 0
+          s.vx = s.vx >= 0 ? CLIMB_SPEED : -CLIMB_SPEED
+          return
+        }
+      }
       // Bottom collision → bounce.
       if (edge.onBottom) {
         s.state = 'bouncing'
@@ -244,23 +373,6 @@ function step(s: MutablePhysicsState, edge: EdgeState) {
           s.state = 'on_floor'
           s.lastFloorDir = s.vx >= 0 ? 1 : -1
         }
-        return
-      }
-      // Side collision while falling → grab the wall.
-      if (edge.onLeft && s.vx < 0) {
-        s.state = 'on_wall'
-        s.ticksInState = 0
-        s.vx = 0
-        s.vy = 0
-        s.facing = 1
-        return
-      }
-      if (edge.onRight && s.vx > 0) {
-        s.state = 'on_wall'
-        s.ticksInState = 0
-        s.vx = 0
-        s.vy = 0
-        s.facing = -1
         return
       }
       s.facing = s.vx >= 0 ? 1 : -1
@@ -387,10 +499,73 @@ export function usePhysicsLoop(opts: PhysicsOptions): PhysicsHandle {
     }
 
     const interval = setInterval(tick, TICK_MS)
-    // Refresh the cached monitor rect on enable so the very first tick
-    // doesn't run with a stale value from before the user dragged the
-    // mascot to a new screen.
+    // Refresh the cached monitor + floor rects on enable so the very
+    // first tick doesn't run with a stale value from before the user
+    // dragged the mascot to a new screen or changed Dock layout.
     invalidateMonitorCache()
+    invalidateFloorCache()
+
+    // Measure the absolute CSS-pixel offset between the rendered
+    // sprite's visible edges and the surrounding window edges, for
+    // all four sides. The physics loop subtracts each from the
+    // corresponding visibleFrame edge so the visible character sits
+    // flush with each screen edge (Dock top, menubar, side walls).
+    //
+    // The measurement combines alpha scans of every relevant
+    // animation row with a DOM read of the rendered sprite's
+    // bounding rect — both are needed because a fraction-of-window
+    // formula misses (a) per-pose foot/head/side reach differences
+    // and (b) any centering offset between the sprite div and the
+    // surrounding window.
+    //
+    // Reset overrides first so a stale measurement from the previous
+    // pet doesn't leak into the new pet's first physics tick. The
+    // DOM anchor (`[data-physics-anchor]`) may not be in the tree
+    // yet on the first attempt (effect fires before React commits);
+    // retry with 100 ms backoff for up to ~2 s, then give up — the
+    // hardcoded fraction fallback in `spritePadFor` still works.
+    //
+    // Push the result to Rust so `move_mini_by`'s safety-net clamp
+    // agrees with the frontend edge detection. If they disagree the
+    // clamp fights physics and the pet jitters at the boundaries.
+    resetRuntimeSpritePadCSS()
+    invoke('set_sprite_pad_fractions', { resetPx: true }).catch(() => {})
+
+    const petForMeasure = opts.pet
+    if (petForMeasure) {
+      let attempt = 0
+      const tryMeasure = async () => {
+        if (cancelled) return
+        const anchors = await measureSpriteAnchorsCSS(petForMeasure)
+        if (cancelled) return
+        if (anchors === null) {
+          attempt += 1
+          if (attempt >= 20) return // ~2 s of retries with 100 ms gap
+          setTimeout(tryMeasure, 100)
+          return
+        }
+        setRuntimeSpritePadCSS(anchors)
+        // Only push the px fields that were actually measured. Fields
+        // left out keep their reset (None) state in Rust, which falls
+        // back to the fraction defaults — identical to what the
+        // frontend uses for the same null field. So the two sides
+        // stay in sync regardless of which animations the pet
+        // declares.
+        const payload: Record<string, number | boolean> = { resetPx: true }
+        if (anchors.topPx !== null)    payload.topPx    = anchors.topPx
+        if (anchors.rightPx !== null)  payload.rightPx  = anchors.rightPx
+        if (anchors.bottomPx !== null) payload.bottomPx = anchors.bottomPx
+        if (anchors.leftPx !== null)   payload.leftPx   = anchors.leftPx
+        invoke('set_sprite_pad_fractions', payload).catch(() => {
+          // Older Rust builds may not have the px fields; the
+          // frontend override is still effective for visible landing
+          // even if the safety-clamp disagrees by a couple of px.
+        })
+      }
+      // requestAnimationFrame defers past the React commit of the
+      // mascot so the very first attempt usually succeeds.
+      requestAnimationFrame(() => { void tryMeasure() })
+    }
 
     return () => {
       cancelled = true

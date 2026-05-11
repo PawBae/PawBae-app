@@ -52,15 +52,34 @@
       "fps": 1,
       "loopRestMs": 0
     },
+    "grab-wall-flipped": {
+      "row": 4,
+      "frames": 1,
+      "fps": 1,
+      "loopRestMs": 0,
+      "flipX": true
+    },
     "climb-wall": {
       "row": 5,
       "frames": 4,
       "fps": 8
     },
+    "climb-wall-flipped": {
+      "row": 5,
+      "frames": 4,
+      "fps": 8,
+      "flipX": true
+    },
     "climb-ceiling": {
       "row": 6,
       "frames": 4,
       "fps": 8
+    },
+    "climb-ceiling-flipped": {
+      "row": 6,
+      "frames": 4,
+      "fps": 8,
+      "flipX": true
     },
     "falling": {
       "row": 7,
