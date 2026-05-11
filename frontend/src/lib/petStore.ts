@@ -24,6 +24,7 @@ export type PetAction =
   | 'rest'     // idle when no user activity for 5min
   | 'peek'     // peeking from screen edge
   | 'walkout'  // walking out from screen edge after peek
+  | 'listen'   // pet is attentively listening to voice input / editing prompt
 
 export interface FoodItem {
   id: string

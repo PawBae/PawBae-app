@@ -50,6 +50,13 @@ static PET_CONTEXT_MENU_OPEN: AtomicBool = AtomicBool::new(false);
 /// stop button receives clicks (it sits in the centered hitbox's bottom
 /// inset region and would otherwise pass through to whatever is behind).
 static PET_POMODORO_ACTIVE: AtomicBool = AtomicBool::new(false);
+/// Whether the voice-input editable card is open. When true the poll thread
+/// keeps the entire pet-mode window interactive so the user can click into
+/// the textarea above the mascot (which would otherwise pass through to the
+/// desktop). Set via `set_pet_voice_editing` from the frontend when entering
+/// the edit-after-recording state, and cleared when the card is dismissed
+/// (submit, Esc, click-outside, or error).
+static PET_VOICE_EDITING: AtomicBool = AtomicBool::new(false);
 
 /// Coalesces drag-apply tasks so we never queue more than one
 /// setFrameOrigin: call on the main thread at a time. The poll thread
@@ -6004,6 +6011,7 @@ async fn set_pet_mode_window(
         PET_PASSTHROUGH_ACTIVE.store(false, Ordering::SeqCst);
         PET_CONTEXT_MENU_OPEN.store(false, Ordering::SeqCst);
         PET_POMODORO_ACTIVE.store(false, Ordering::SeqCst);
+        PET_VOICE_EDITING.store(false, Ordering::SeqCst);
 
         // Shrink back to collapsed mascot size and re-enable mouse events.
         #[cfg(target_os = "macos")]
@@ -6059,6 +6067,16 @@ async fn set_pet_mode_window(
 #[tauri::command]
 async fn set_pet_pomodoro_active(active: bool) -> Result<(), String> {
     PET_POMODORO_ACTIVE.store(active, Ordering::SeqCst);
+    Ok(())
+}
+
+/// Tell the pet-mode pass-through poll whether the voice editable card is
+/// open. While true, the whole pet-mode window accepts clicks so the user can
+/// focus and type into the textarea even though it sits outside the mascot
+/// hitbox. The frontend must always clear this when the card closes.
+#[tauri::command]
+async fn set_pet_voice_editing(active: bool) -> Result<(), String> {
+    PET_VOICE_EDITING.store(active, Ordering::SeqCst);
     Ok(())
 }
 
@@ -6246,9 +6264,10 @@ fn pet_passthrough_poll(app: tauri::AppHandle, mascot_scale: f64, large_mascot_s
     while PET_PASSTHROUGH_ACTIVE.load(Ordering::SeqCst) {
         let menu_open = PET_CONTEXT_MENU_OPEN.load(Ordering::SeqCst);
         let pomodoro_active = PET_POMODORO_ACTIVE.load(Ordering::SeqCst);
+        let voice_editing = PET_VOICE_EDITING.load(Ordering::SeqCst);
         let frame = MINI_WINDOW_FRAME.lock().ok().and_then(|g| *g);
 
-        let should_be_interactive = if menu_open || pomodoro_active {
+        let should_be_interactive = if menu_open || pomodoro_active || voice_editing {
             true
         } else if let Some((fx, fy, fw, _fh)) = frame {
             let cursor = macos_cursor_position();
@@ -6340,8 +6359,9 @@ fn pet_passthrough_poll_windows(app: tauri::AppHandle, mascot_scale: f64, large_
     while PET_PASSTHROUGH_ACTIVE.load(Ordering::SeqCst) {
         let menu_open = PET_CONTEXT_MENU_OPEN.load(Ordering::SeqCst);
         let pomodoro_active = PET_POMODORO_ACTIVE.load(Ordering::SeqCst);
+        let voice_editing = PET_VOICE_EDITING.load(Ordering::SeqCst);
 
-        let should_be_interactive = if menu_open || pomodoro_active {
+        let should_be_interactive = if menu_open || pomodoro_active || voice_editing {
             true
         } else {
             // Read cursor position and window geometry in physical pixels.
@@ -12807,7 +12827,7 @@ pub fn run() {
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![get_status, send_chat, open_detail_panel, save_character_gif, delete_character_assets, delete_character_gif, get_agents, get_health, get_agent_metrics, interrupt_agent, scan_characters, get_agent_extra_info, open_mini, close_mini, set_mini_expanded, set_mini_size, set_efficiency_hover_tracking, resize_mini_height, move_mini_by, get_mini_origin, get_mini_monitor_rect, get_pet_floor_info, get_frontmost_app_window, set_sprite_pad_fractions, set_mini_origin, set_ime_mode, get_agent_sessions, get_session_preview, get_session_messages, get_active_sessions, proxy_post, play_sound, get_claude_sessions, get_claude_conversation, install_claude_hooks, install_cursor_hooks, remove_claude_session, resolve_claude_permission, get_claude_stats, open_url, activate_app, focus_cursor_terminal, check_ax_permission, request_ax_permission, jump_to_claude_terminal, check_for_update, run_update, close_ssh, read_local_file, list_backgrounds, save_background, get_background_data, exit_app, get_ssh_key_info, reset_ssh, get_ui_scale, list_custom_codex_pets, open_codex_pets_dir, import_codex_pet, pick_codex_pet_folder, reassert_floating, spawn_demo_mascot, close_demo_mascot, close_demo_mascots, debug_log, update_tray_language, set_pet_mode_window, set_pet_context_menu, set_pet_pomodoro_active, get_now_playing, get_system_idle_time, set_stroll_mode, set_throw_tracking, voice_toggle, voice_is_recording])
+        .invoke_handler(tauri::generate_handler![get_status, send_chat, open_detail_panel, save_character_gif, delete_character_assets, delete_character_gif, get_agents, get_health, get_agent_metrics, interrupt_agent, scan_characters, get_agent_extra_info, open_mini, close_mini, set_mini_expanded, set_mini_size, set_efficiency_hover_tracking, resize_mini_height, move_mini_by, get_mini_origin, get_mini_monitor_rect, get_pet_floor_info, get_frontmost_app_window, set_sprite_pad_fractions, set_mini_origin, set_ime_mode, get_agent_sessions, get_session_preview, get_session_messages, get_active_sessions, proxy_post, play_sound, get_claude_sessions, get_claude_conversation, install_claude_hooks, install_cursor_hooks, remove_claude_session, resolve_claude_permission, get_claude_stats, open_url, activate_app, focus_cursor_terminal, check_ax_permission, request_ax_permission, jump_to_claude_terminal, check_for_update, run_update, close_ssh, read_local_file, list_backgrounds, save_background, get_background_data, exit_app, get_ssh_key_info, reset_ssh, get_ui_scale, list_custom_codex_pets, open_codex_pets_dir, import_codex_pet, pick_codex_pet_folder, reassert_floating, spawn_demo_mascot, close_demo_mascot, close_demo_mascots, debug_log, update_tray_language, set_pet_mode_window, set_pet_context_menu, set_pet_pomodoro_active, set_pet_voice_editing, get_now_playing, get_system_idle_time, set_stroll_mode, set_throw_tracking, voice_toggle, voice_is_recording])
         .manage(ActiveAgentPid { pid: Mutex::new(None) })
         .manage(ClaudeState { sessions: Arc::new(Mutex::new(HashMap::new())), pending_permissions: Arc::new(Mutex::new(HashMap::new())) })
         .run(tauri::generate_context!())

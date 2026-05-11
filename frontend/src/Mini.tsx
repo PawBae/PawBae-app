@@ -123,6 +123,11 @@ function petActionPriority(action: PetAction): number {
   switch (action) {
     case 'grasp': return 100
     case 'study': case 'work': return 90
+    // `listen` sits above peek/hungry so the idle-timeout and idle-auto loops
+    // can't yank the pet out of the listening pose while the user is editing
+    // a voice prompt, but still below `work` so an active OpenClaw session
+    // triggered by the same voice flow can take over after submission.
+    case 'listen': return 80
     case 'peek': case 'walkout': return 75
     case 'hungry': return 70
     case 'watch': return 50
@@ -288,6 +293,10 @@ const PET_ACTION_VIDEO_MAP: Record<PetAction, string> = {
   rest: 'rest',
   peek: 'peek',
   walkout: 'walkout',
+  // Reuse `peek` as the attentive "listening" pose since no dedicated sit/listen
+  // asset exists yet. Falls back to `idle` via getLargeVideoPetMode if the
+  // character has no peek video.
+  listen: 'peek',
 }
 
 function getLargeVideoPetMode(char: CharacterMeta | undefined, petAction: PetAction, fallbackLargeActions?: Record<string, string>): string | undefined {
@@ -682,12 +691,37 @@ export default function Mini() {
   const petBaseWinWRef = useRef<number | null>(null)
   useEffect(() => { petBaseWinWRef.current = petBaseWinW }, [petBaseWinW])
 
-  // Voice input state (pet mode only)
+  // Voice input state. Lives in both pet and efficiency modes — when the
+  // user finishes speaking, the bubble morphs into an editable card so they
+  // can confirm/edit before submitting to the currently-selected OpenClaw
+  // agent via `send_chat`.
   const [voiceRecording, setVoiceRecording] = useState(false)
   const [voiceText, setVoiceText] = useState('')
+  const voiceTextRef = useRef('')
+  useEffect(() => { voiceTextRef.current = voiceText }, [voiceText])
   const [voiceError, setVoiceError] = useState<string | undefined>()
   const [voiceBubbleVisible, setVoiceBubbleVisible] = useState(false)
   const voiceFadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // State machine for the voice flow:
+  //   idle       — nothing happening
+  //   recording  — mic open, partial transcripts streaming in
+  //   editing    — recording stopped, transcript shown in an editable card
+  //   submitting — user pressed Enter; awaiting openclaw subprocess
+  type VoiceMode = 'idle' | 'recording' | 'editing' | 'submitting'
+  const [voiceMode, setVoiceMode] = useState<VoiceMode>('idle')
+  const voiceModeRef = useRef<VoiceMode>('idle')
+  useEffect(() => { voiceModeRef.current = voiceMode }, [voiceMode])
+  // Separate editable buffer so partial transcripts arriving late don't
+  // clobber a user edit. Seeded from voiceText when entering `editing`.
+  const [voiceDraft, setVoiceDraft] = useState('')
+  const voiceTextareaRef = useRef<HTMLTextAreaElement | null>(null)
+  // Refs mirroring agents + selection so the (mount-bound) voice listeners
+  // and submit handler can read the latest values without re-binding.
+  // (`appModeRef` already exists higher up — reuse it.)
+  const agentsRef = useRef<AgentInfo[]>([])
+  useEffect(() => { agentsRef.current = agents }, [agents])
+  const selectedAgentIdRef = useRef<string | null>(null)
+  useEffect(() => { selectedAgentIdRef.current = selectedAgentId }, [selectedAgentId])
 
   // Food rain effect (lives outside context menu so it persists after menu closes)
   interface FoodRainDrop { id: number; emoji: string; x: number; delay: number; duration: number; size: number }
@@ -1602,7 +1636,138 @@ export default function Mini() {
     }
   }, [])
 
-  // Voice input event listeners (pet mode push-to-talk)
+  // Helper: switch the pet to the listening pose iff nothing higher-priority
+  // is currently running. Priority is bounded so the listen action cannot
+  // steal control away from `work`/`study`/`grasp`.
+  const enterListenPose = () => {
+    if (petActionPriority(currentPetActionRef.current) > petActionPriority('listen')) return
+    setCurrentPetAction('listen')
+    currentPetActionRef.current = 'listen'
+  }
+  // Helper: only clear `listen` — don't touch any other current action.
+  const clearListenPose = () => {
+    if (currentPetActionRef.current === 'listen') {
+      setCurrentPetAction('idle')
+      currentPetActionRef.current = 'idle'
+    }
+  }
+  // Helper: toggle the pet-mode passthrough override so the editable card
+  // (which sits outside the mascot hitbox) actually receives clicks.
+  const setVoicePassthroughOverride = (active: boolean) => {
+    if (appModeRef.current !== 'pet') return
+    invoke('set_pet_voice_editing', { active }).catch(() => {})
+  }
+  // Helper: enter the editing state with the given seed text. Cancels the
+  // post-recording fade timer so the editable card doesn't vanish under
+  // the user.
+  const enterEditing = (seed: string) => {
+    if (voiceFadeTimerRef.current) {
+      clearTimeout(voiceFadeTimerRef.current)
+      voiceFadeTimerRef.current = null
+    }
+    setVoiceDraft(seed)
+    setVoiceMode('editing')
+    voiceModeRef.current = 'editing'
+    setVoiceBubbleVisible(true)
+    enterListenPose()
+    setVoicePassthroughOverride(true)
+    // Focus + caret-to-end on the next paint.
+    requestAnimationFrame(() => {
+      const el = voiceTextareaRef.current
+      if (el) {
+        el.focus()
+        const len = el.value.length
+        el.setSelectionRange(len, len)
+      }
+    })
+  }
+  // Helper: dismiss the voice flow (Esc, click-outside, empty submit, error).
+  const cancelVoice = () => {
+    if (voiceFadeTimerRef.current) {
+      clearTimeout(voiceFadeTimerRef.current)
+      voiceFadeTimerRef.current = null
+    }
+    setVoiceDraft('')
+    setVoiceText('')
+    setVoiceBubbleVisible(false)
+    setVoiceError(undefined)
+    setVoiceMode('idle')
+    voiceModeRef.current = 'idle'
+    clearListenPose()
+    setVoicePassthroughOverride(false)
+    // Stop the mic if it's still hot (e.g. user pressed Esc while recording).
+    invoke<boolean>('voice_is_recording')
+      .then((rec) => { if (rec) invoke('voice_toggle').catch(() => {}) })
+      .catch(() => {})
+  }
+  // Helper: submit the (possibly edited) prompt to the currently-selected
+  // OpenClaw agent. Falls back to the first agent in the list. Flips the
+  // pet to `work` for the duration of the openclaw subprocess and back to
+  // idle when it completes (success or failure).
+  const submitVoicePrompt = async (text: string) => {
+    const trimmed = text.trim()
+    if (!trimmed) { cancelVoice(); return }
+    let targetId: string | null = selectedAgentIdRef.current
+    if (!targetId) {
+      const first = agentsRef.current[0]
+      targetId = first?.id ?? null
+    }
+    if (!targetId) {
+      setVoiceError('No OpenClaw agent available')
+      setVoiceMode('idle'); voiceModeRef.current = 'idle'
+      clearListenPose()
+      setVoicePassthroughOverride(false)
+      setVoiceBubbleVisible(true)
+      if (voiceFadeTimerRef.current) clearTimeout(voiceFadeTimerRef.current)
+      voiceFadeTimerRef.current = setTimeout(() => {
+        setVoiceBubbleVisible(false)
+        setVoiceError(undefined)
+      }, 3000)
+      return
+    }
+    const realId = agentRealIdMapRef.current.get(targetId) || targetId
+
+    setVoiceMode('submitting'); voiceModeRef.current = 'submitting'
+    // Transition the pet from "listening" to "working" while openclaw runs.
+    setCurrentPetAction('work'); currentPetActionRef.current = 'work'
+    // The editable card is no longer needed; let the panel/session view show
+    // ongoing progress and the reply.
+    setVoiceBubbleVisible(false)
+    setVoiceText('')
+    setVoiceDraft('')
+    setVoicePassthroughOverride(false)
+
+    try {
+      await invoke('send_chat', { message: trimmed, agentId: realId })
+    } catch (e) {
+      console.warn('[voice] send_chat failed:', e)
+      setVoiceError(String(e))
+      setVoiceBubbleVisible(true)
+      if (voiceFadeTimerRef.current) clearTimeout(voiceFadeTimerRef.current)
+      voiceFadeTimerRef.current = setTimeout(() => {
+        setVoiceBubbleVisible(false)
+        setVoiceError(undefined)
+      }, 3000)
+    } finally {
+      setVoiceMode('idle'); voiceModeRef.current = 'idle'
+      // Drop work → idle (don't touch higher-priority actions if anything
+      // else escalated in the meantime).
+      if (currentPetActionRef.current === 'work') {
+        setCurrentPetAction('idle')
+        currentPetActionRef.current = 'idle'
+      }
+    }
+  }
+
+  // Voice input event listeners (push-to-talk via Ctrl+Shift+V).
+  // Wires the streaming Rust speech recognizer into the state machine:
+  //   voice-status recording=true  → enter `recording`, show bubble
+  //   voice-transcript is_final=true (non-empty) → enter `editing`
+  //   voice-status recording=false + non-empty text → enter `editing`
+  //   voice-status recording=false + empty text   → fade back to `idle`
+  // The two stop paths (status vs transcript) converge on enterEditing so
+  // whichever event arrives first wins; idempotency is handled by the
+  // voiceModeRef guard.
   useEffect(() => {
     const p1 = listen<{ recording: boolean; error?: string }>('voice-status', (ev) => {
       console.warn('[voice-status]', ev.payload)
@@ -1610,33 +1775,71 @@ export default function Mini() {
       setVoiceError(ev.payload.error)
       if (ev.payload.error) {
         setVoiceBubbleVisible(true)
+        setVoiceMode('idle'); voiceModeRef.current = 'idle'
+        clearListenPose()
+        setVoicePassthroughOverride(false)
         if (voiceFadeTimerRef.current) clearTimeout(voiceFadeTimerRef.current)
         voiceFadeTimerRef.current = setTimeout(() => {
           setVoiceBubbleVisible(false)
           setVoiceError(undefined)
         }, 3000)
       } else if (ev.payload.recording) {
-        setVoiceText('')
+        setVoiceText(''); voiceTextRef.current = ''
+        setVoiceDraft('')
         setVoiceError(undefined)
         setVoiceBubbleVisible(true)
+        setVoiceMode('recording'); voiceModeRef.current = 'recording'
         if (voiceFadeTimerRef.current) clearTimeout(voiceFadeTimerRef.current)
+        enterListenPose()
+        // No passthrough override here yet — recording-only bubble is
+        // read-only, so it can stay outside the hitbox safely.
       } else {
-        voiceFadeTimerRef.current = setTimeout(() => {
-          setVoiceBubbleVisible(false)
-          setVoiceText('')
-        }, 2000)
+        // Recording stopped. If we have a transcript, go straight to editing.
+        if (voiceModeRef.current === 'recording' && voiceTextRef.current.trim()) {
+          enterEditing(voiceTextRef.current)
+        } else if (voiceModeRef.current === 'recording') {
+          // Empty transcript — just fade out and reset.
+          setVoiceMode('idle'); voiceModeRef.current = 'idle'
+          clearListenPose()
+          if (voiceFadeTimerRef.current) clearTimeout(voiceFadeTimerRef.current)
+          voiceFadeTimerRef.current = setTimeout(() => {
+            setVoiceBubbleVisible(false)
+            setVoiceText('')
+          }, 2000)
+        }
+        // If we're already in `editing` / `submitting`, do nothing — the
+        // status=false event is just a late mic-shutdown notification.
       }
     })
     const p2 = listen<{ text: string; is_final: boolean }>('voice-transcript', (ev) => {
       console.warn('[voice-transcript]', ev.payload)
-      // Ignore empty final results from cancellation
+      // Ignore empty final results from cancellation.
       if (ev.payload.is_final && !ev.payload.text) return
       setVoiceText(ev.payload.text)
+      voiceTextRef.current = ev.payload.text
+      // Promote into the editable card on a final transcript whenever we're
+      // not already past that point. This handles both event orderings:
+      //   (a) status=false fires first → we set mode to `idle` + scheduled a
+      //       fade; the late final transcript should still bring up the card.
+      //   (b) transcript is_final=true fires first → we're still `recording`;
+      //       enterEditing wins the race and the later status=false event
+      //       sees mode==='editing' and no-ops.
+      // Skip if already editing/submitting so we don't clobber a user edit.
+      if (
+        ev.payload.is_final &&
+        voiceModeRef.current !== 'editing' &&
+        voiceModeRef.current !== 'submitting'
+      ) {
+        enterEditing(ev.payload.text)
+      }
     })
     return () => {
       p1.then(fn => fn())
       p2.then(fn => fn())
       if (voiceFadeTimerRef.current) clearTimeout(voiceFadeTimerRef.current)
+      // Safety: clear the passthrough override on unmount so we never leave
+      // pet mode stuck-interactive after a hot reload.
+      invoke('set_pet_voice_editing', { active: false }).catch(() => {})
     }
   }, [])
 
@@ -4046,7 +4249,12 @@ export default function Mini() {
         userSelect: 'none',
       }}
     >
-      {/* Voice input bubble */}
+      {/* Voice input bubble. In `recording` mode this is a read-only
+          transcript display (passthrough). In `editing` mode it morphs into
+          an editable textarea with Enter↵/Esc hints, and the inner card
+          enables pointer events so it can be focused. The pet-mode window's
+          native passthrough is overridden by `set_pet_voice_editing` while
+          editing so the textarea actually receives clicks. */}
       {voiceBubbleVisible && (
         <div style={{
           position: 'absolute',
@@ -4055,22 +4263,83 @@ export default function Mini() {
           width: '100%',
           display: 'flex',
           justifyContent: 'center',
+          // Wrapper stays passthrough so empty space around the card doesn't
+          // steal clicks from the mascot or the desktop in pet mode.
           pointerEvents: 'none',
           zIndex: 99999,
         }}>
           <div style={{
             background: voiceError ? '#e74c3c' : '#F5A623',
             borderRadius: 14,
-            padding: '6px 12px',
+            padding: voiceMode === 'editing' ? '8px 12px' : '6px 12px',
             color: '#fff',
             fontSize: 12,
             fontWeight: 500,
             textAlign: 'center',
             boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
-            maxWidth: '90%',
+            maxWidth: voiceMode === 'editing' ? 360 : '90%',
+            minWidth: voiceMode === 'editing' ? 220 : undefined,
             lineHeight: 1.4,
+            // Only the editable card is interactive — recording-mode bubble
+            // stays passthrough.
+            pointerEvents: voiceMode === 'editing' ? 'auto' : 'none',
+          }}
+          // Click on the bubble while editing focuses the textarea so the
+          // user can keep typing after a click outside it.
+          onMouseDown={(e) => {
+            if (voiceMode !== 'editing') return
+            if (e.target !== voiceTextareaRef.current) {
+              voiceTextareaRef.current?.focus()
+            }
           }}>
-            {voiceError || voiceText || (voiceRecording ? '...' : '')}
+            {voiceError ? (
+              voiceError
+            ) : voiceMode === 'editing' ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <textarea
+                  ref={voiceTextareaRef}
+                  value={voiceDraft}
+                  onChange={(e) => setVoiceDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    // Enter (without shift) submits; Shift+Enter inserts a
+                    // newline so multi-line prompts are still possible.
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault()
+                      submitVoicePrompt(voiceDraft)
+                    } else if (e.key === 'Escape') {
+                      e.preventDefault()
+                      cancelVoice()
+                    }
+                  }}
+                  // Prevent the global Ctrl+Shift+V hotkey from also being
+                  // intercepted by the textarea's default keymap.
+                  rows={Math.min(4, Math.max(1, voiceDraft.split('\n').length))}
+                  placeholder=""
+                  style={{
+                    background: 'rgba(255,255,255,0.22)',
+                    border: 'none',
+                    outline: 'none',
+                    color: '#fff',
+                    fontSize: 13,
+                    fontWeight: 500,
+                    padding: '6px 10px',
+                    borderRadius: 8,
+                    width: '100%',
+                    minWidth: 200,
+                    resize: 'none',
+                    fontFamily: 'inherit',
+                    lineHeight: 1.4,
+                  }}
+                />
+                <div style={{ fontSize: 10, opacity: 0.85, textAlign: 'center' }}>
+                  Enter ↵ send · Esc cancel
+                </div>
+              </div>
+            ) : voiceMode === 'submitting' ? (
+              'Sending…'
+            ) : (
+              voiceText || (voiceRecording ? '...' : '')
+            )}
           </div>
         </div>
       )}
