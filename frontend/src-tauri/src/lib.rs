@@ -3892,9 +3892,9 @@ struct SpritePadFracs {
 
 static SPRITE_PAD: std::sync::Mutex<SpritePadFracs> = std::sync::Mutex::new(SpritePadFracs {
     top: 0.40,
-    right: 0.10,
+    right: 0.45,
     bottom: 0.30,
-    left: 0.10,
+    left: 0.45,
     top_px: None,
     right_px: None,
     bottom_px: None,
@@ -3904,9 +3904,9 @@ static SPRITE_PAD: std::sync::Mutex<SpritePadFracs> = std::sync::Mutex::new(Spri
 fn current_sprite_pad() -> SpritePadFracs {
     SPRITE_PAD.lock().map(|g| *g).unwrap_or(SpritePadFracs {
         top: 0.40,
-        right: 0.10,
+        right: 0.45,
         bottom: 0.30,
-        left: 0.10,
+        left: 0.45,
         top_px: None,
         right_px: None,
         bottom_px: None,

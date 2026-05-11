@@ -110,14 +110,13 @@ const EDGE_TOLERANCE = 4
 // second physics pet ships, lift them into pet.json.physics.bbox.
 const SPRITE_PAD_BOTTOM_FRAC = 0.30
 const SPRITE_PAD_TOP_FRAC = 0.40
-// Side pads — conservative fallback used only before the runtime
-// alpha-scan measurement completes (~2 s after physics enable).
-// Must be tight enough that no visible sprite extends past the
-// screen edge at any animation state. Previously 0.45, which was
-// tuned for wall sprites but let walking sprites overshoot. 0.10
-// keeps the cat slightly inside the edge until measurement refines.
-const SPRITE_PAD_LEFT_FRAC = 0.10
-const SPRITE_PAD_RIGHT_FRAC = 0.10
+// Side pads — fallback fractions used before the runtime alpha-scan
+// measurement completes (~2 s after physics enable). Tuned for wall
+// sprites so the Rust safety-net clamp allows wall-climbing sprites
+// to reach the screen edge. The frontend physics tick applies a
+// tighter per-tick cap for non-wall states once measurement is ready.
+const SPRITE_PAD_LEFT_FRAC = 0.45
+const SPRITE_PAD_RIGHT_FRAC = 0.45
 
 export interface SpritePad {
   top: number
@@ -186,6 +185,16 @@ export function resetRuntimeSpritePadCSS() {
   runtimeSpritePad.rightPx = null
   runtimeSpritePad.bottomPx = null
   runtimeSpritePad.leftPx = null
+  cachedTightSidePad = null
+}
+
+// Tight side pad — the smallest side gap across ALL animation rows.
+// Used by the physics tick to cap horizontal movement in non-wall
+// states so no sprite escapes the screen edge.
+let cachedTightSidePad: { leftPx: number; rightPx: number } | null = null
+
+export function getTightSidePad() {
+  return cachedTightSidePad
 }
 
 // Resolve the sprite content padding in *window pixels* for a mascot of
@@ -353,37 +362,43 @@ export async function measureSpriteAnchorsCSS(
     ? gapTop + minTop * yScale
     : null
 
-  // Sides — scan ALL animation rows and use the global minimum
-  // leftmost opaque pixel. This ensures the clamp is tight enough
-  // that NO sprite (walking, climbing, falling, idle) extends past
-  // the screen edge. Previously only wall rows were scanned, which
-  // gave a loose pad when the wall sprite's body was centered in the
-  // cell (e.g. shimeji-bola minLeft=48) while the walking sprite
-  // extended closer to the cell edge (minLeft≈20), letting the
-  // walking sprite overshoot by ~20 CSS px.
-  //
-  // The flipX convention still applies: on the right wall the sprite
-  // is mirrored, so its rightmost reach in the rendered frame equals
-  // the leftmost reach in the unflipped cell. Using the global
-  // minimum `minLeft` across all rows covers both sides.
+  // Wall-sprite side pad (loose) — used for edge detection and Rust
+  // clamp so wall/ceiling sprites sit flush with the screen edge.
+  let wallMinLeft = cellW
+  let anyWallScanned = false
+  for (const row of wallRows) {
+    const bbox = await getBBox(row)
+    if (!bbox) continue
+    anyWallScanned = true
+    if (bbox.left < wallMinLeft) wallMinLeft = bbox.left
+  }
+  const wallSideCSS = anyWallScanned ? Math.max(0, wallMinLeft) * xScale : -1
+  const leftPx = anyWallScanned ? gapLeft + wallSideCSS : null
+  const rightPx = anyWallScanned ? gapRight + wallSideCSS : null
+
+  // Tight side pad (all rows) — the physics tick uses this to cap
+  // horizontal movement in non-wall states so no sprite escapes.
   const allRows = new Set<number>([...floorRows, ...ceilingRows, ...wallRows])
   for (const a of Object.values(pet.animations)) {
     allRows.add(a.row)
   }
-  let minLeft = cellW
-  let anySideScanned = false
+  let tightMinLeft = cellW
+  let anyTightScanned = false
   for (const row of allRows) {
     const bbox = await getBBox(row)
     if (!bbox) continue
-    anySideScanned = true
-    if (bbox.left < minLeft) minLeft = bbox.left
+    anyTightScanned = true
+    if (bbox.left < tightMinLeft) tightMinLeft = bbox.left
     const rightEdgeMirror = cellW - 1 - bbox.right
-    if (rightEdgeMirror < minLeft) minLeft = rightEdgeMirror
+    if (rightEdgeMirror < tightMinLeft) tightMinLeft = rightEdgeMirror
   }
-  const sideCellPad = anySideScanned ? Math.max(0, minLeft) : -1
-  const sideCSS = sideCellPad >= 0 ? sideCellPad * xScale : -1
-  const leftPx = anySideScanned ? gapLeft + sideCSS : null
-  const rightPx = anySideScanned ? gapRight + sideCSS : null
+  if (anyTightScanned) {
+    const tightCSS = Math.max(0, tightMinLeft) * xScale
+    cachedTightSidePad = {
+      leftPx: gapLeft + tightCSS,
+      rightPx: gapRight + tightCSS,
+    }
+  }
 
   return { topPx, rightPx, bottomPx, leftPx }
 }
