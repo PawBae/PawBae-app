@@ -48,6 +48,50 @@ export interface EdgeState {
   onRight: boolean
   onTop: boolean
   onBottom: boolean
+  // Frontmost app window (Finder, Safari, …) the pet can interact with
+  // as a second world. `null` when no qualifying window is on-screen
+  // (everything minimized, only utility panels visible, …) or when the
+  // physics loop is on a non-macOS platform.
+  activeWindow: ActiveWindowEdge | null
+}
+
+/// Frontmost-window surface info — mirror of the screen-edge fields,
+/// but anchored to a single app window's rect. The geometry treats the
+/// window's top edge as a *floor* (the pet stands on the title bar),
+/// the window's left/right verticals as *walls* (the pet grabs them
+/// like screen edges), and the window's bottom edge as a *ceiling* (the
+/// pet hangs upside-down from underneath).
+export interface ActiveWindowEdge {
+  /// Cocoa bottom-left window rect, in the same coord frame as
+  /// `EdgeState.mascot`.
+  rect: { x: number; y: number; width: number; height: number }
+  /// Stable CGWindowID; the physics loop watches this to detect
+  /// "the window I was sitting on disappeared".
+  windowId: number
+  /// e.g. "Finder", "Safari" — purely informational for now.
+  ownerName: string
+  ownerPid: number
+  /// Visible sprite foot is resting on the window's top edge from above.
+  /// This is the "sit on title bar" condition.
+  onTopOfWindow: boolean
+  /// Visible sprite right side is flush with the window's left vertical
+  /// (pet sits to the left of the window, body touching its left edge).
+  onLeftOfWindow: boolean
+  /// Visible sprite left side is flush with the window's right vertical.
+  onRightOfWindow: boolean
+  /// Visible sprite head is resting against the window's bottom edge
+  /// from below (pet hangs upside-down from underneath).
+  onBottomOfWindow: boolean
+  /// Visible body's horizontal span overlaps the window's horizontal
+  /// range. Required to validate "stand on top" — if the pet has walked
+  /// off the side of the title bar, this goes false even when
+  /// `onTopOfWindow` is true at the y level, and the pet should fall.
+  withinHorizontalRange: boolean
+  /// Visible body's vertical span overlaps the window's vertical range.
+  /// Required to validate side-grab — if the pet is too far above or
+  /// below the window, side proximity alone doesn't mean it's gripping
+  /// a wall (it would be floating in air).
+  withinVerticalRange: boolean
 }
 
 const EDGE_TOLERANCE = 4
@@ -487,6 +531,48 @@ export function invalidateMonitorCache() {
   cachedMonitor = null
 }
 
+// Active foreground app window — used to give the pet a second world to
+// interact with (Shimeji-style). The Rust side caches at 50 ms; we
+// mirror that here so two ticks within the same TTL share a single
+// decode. `null` means no qualifying window right now (everything
+// minimized, only utility windows visible) or non-macOS platform.
+interface AppWindowInfoRaw {
+  window_id: number
+  owner_name: string
+  owner_pid: number
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+let cachedActiveWindow: { value: AppWindowInfoRaw | null; expiresAt: number } | null = null
+const ACTIVE_WINDOW_CACHE_MS = 50
+
+export async function getActiveAppWindow(force = false): Promise<AppWindowInfoRaw | null> {
+  const now = performance.now()
+  if (!force && cachedActiveWindow && cachedActiveWindow.expiresAt > now) {
+    return cachedActiveWindow.value
+  }
+  if (!isMacOS) {
+    cachedActiveWindow = { value: null, expiresAt: now + ACTIVE_WINDOW_CACHE_MS }
+    return null
+  }
+  try {
+    const raw = await invoke<AppWindowInfoRaw | null>('get_frontmost_app_window')
+    cachedActiveWindow = { value: raw, expiresAt: now + ACTIVE_WINDOW_CACHE_MS }
+    return raw
+  } catch {
+    // IPC error during shutdown / window-not-ready — treat as "no window".
+    cachedActiveWindow = { value: null, expiresAt: now + ACTIVE_WINDOW_CACHE_MS }
+    return null
+  }
+}
+
+export function invalidateActiveWindowCache() {
+  cachedActiveWindow = null
+}
+
 // Read the mascot's current screen-frame origin and outer size.
 export async function getMascotRect(): Promise<MascotRect> {
   const win = getCurrentWebviewWindow()
@@ -511,10 +597,16 @@ export async function detectEdges(forceMonitorRefresh = false): Promise<EdgeStat
   // the Dock's actual horizontal extent: the pet stands on top of the
   // Dock where it exists and falls to the actual screen bottom off
   // either end of the Dock.
-  const [monitor, mascot, floor] = await Promise.all([
+  //
+  // We also fetch the frontmost app window in parallel — used by the
+  // physics loop to give the pet a second world to climb on. Rust caches
+  // at 50 ms so most ticks hit the cache, but the IPC always happens
+  // (the round-trip is cheap relative to the physics tick budget).
+  const [monitor, mascot, floor, activeWindowRaw] = await Promise.all([
     getMonitorRect(forceMonitorRefresh),
     getMascotRect(),
     isMacOS ? getFloorInfo(forceMonitorRefresh) : Promise.resolve(null as PetFloorInfo | null),
+    isMacOS ? getActiveAppWindow(forceMonitorRefresh) : Promise.resolve(null as AppWindowInfoRaw | null),
   ])
 
   // Virtually extend the monitor rect outward by the sprite-content
@@ -565,5 +657,85 @@ export async function detectEdges(forceMonitorRefresh = false): Promise<EdgeStat
         - (mascot.y + mascot.height) <= EDGE_TOLERANCE
   }
 
-  return { monitor, mascot, onLeft, onRight, onTop, onBottom }
+  // Compute the active-window surface flags. The pet treats the window
+  // as a second world: its top edge is a floor (pet sits on the title
+  // bar), its sides are walls, and its bottom edge is a ceiling.
+  //
+  // Geometry mirrors the screen edges: each "on*OfWindow" answers "is
+  // the *visible character* (after sprite padding) flush with this
+  // edge of the window?". We reuse the same `pad` and `EDGE_TOLERANCE`
+  // so a cat that sits flush on the Dock also sits flush on a Finder
+  // title bar.
+  //
+  // Skip windows that are *behind* the screen Dock area or *under* the
+  // menu bar (top edge inside the menu-bar zone): standing on them
+  // would clip the cat through OS chrome. Use `monitor.height +
+  // monitor.y` as the menu-bar lower boundary on macOS and skip if the
+  // window's top edge is past that (i.e. clipped behind the menu bar).
+  let activeWindow: ActiveWindowEdge | null = null
+  if (isMacOS && activeWindowRaw) {
+    const w = activeWindowRaw
+    const winLeft = w.x
+    const winRight = w.x + w.width
+    const winBottom = w.y
+    const winTop = w.y + w.height
+
+    // Visible sprite edges in mascot-window-origin frame.
+    const spriteFootY = mascot.y + pad.bottom               // cocoa-y of foot
+    const spriteHeadY = mascot.y + mascot.height - pad.top  // cocoa-y of head
+    const spriteLeftX = mascot.x + pad.left
+    const spriteRightX = mascot.x + mascot.width - pad.right
+
+    // "On top of window" — sprite foot is at window's top edge from above.
+    // The pet must also be horizontally within the window's footprint;
+    // otherwise it's hovering past the title bar and should fall.
+    const onTopOfWindow = Math.abs(spriteFootY - winTop) <= EDGE_TOLERANCE
+    // Permissive overlap (>= / <=, no EDGE_TOLERANCE buffer) so the
+    // pet can stand on the title bar all the way to the corner. With a
+    // strict buffer the moment the pet climbed up a side and hit the
+    // corner it would immediately re-detach because its body was just
+    // at the threshold, not 4 px inside.
+    const withinHorizontalRange =
+      spriteRightX >= winLeft
+      && spriteLeftX <= winRight
+    const withinVerticalRange =
+      spriteHeadY >= winBottom
+      && spriteFootY <= winTop
+
+    // Pet on window's LEFT side: visible body's right edge touches the
+    // window's left vertical from outside. Pet's body is *to the left*
+    // of the window, facing right (toward the window's interior).
+    const onLeftOfWindow = Math.abs(spriteRightX - winLeft) <= EDGE_TOLERANCE
+    // Pet on window's RIGHT side: visible body's left edge touches the
+    // window's right vertical. Pet sits to the *right* of the window.
+    const onRightOfWindow = Math.abs(spriteLeftX - winRight) <= EDGE_TOLERANCE
+
+    // Pet hanging upside-down from window's bottom: sprite head touches
+    // window's bottom edge from below.
+    const onBottomOfWindow = Math.abs(spriteHeadY - winBottom) <= EDGE_TOLERANCE
+
+    // Drop windows whose top edge would clip the cat into the menu
+    // bar. visibleFrame.y + visibleFrame.height = top of visibleFrame
+    // (i.e. bottom of menu bar) on macOS. If the window's title bar is
+    // above that, standing on it puts the cat behind the menu bar.
+    const menuBarBottomY = monitor.y + monitor.height
+    const clipsMenuBar = winTop > menuBarBottomY - EDGE_TOLERANCE
+
+    if (!clipsMenuBar) {
+      activeWindow = {
+        rect: { x: w.x, y: w.y, width: w.width, height: w.height },
+        windowId: w.window_id,
+        ownerName: w.owner_name,
+        ownerPid: w.owner_pid,
+        onTopOfWindow,
+        onLeftOfWindow,
+        onRightOfWindow,
+        onBottomOfWindow,
+        withinHorizontalRange,
+        withinVerticalRange,
+      }
+    }
+  }
+
+  return { monitor, mascot, onLeft, onRight, onTop, onBottom, activeWindow }
 }

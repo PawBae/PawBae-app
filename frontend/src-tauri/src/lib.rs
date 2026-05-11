@@ -3633,6 +3633,175 @@ fn get_cached_dock_rect_macos() -> Option<(f64, f64, f64, f64)> {
     fresh
 }
 
+/// Rect of the frontmost on-screen app window in Cocoa bottom-left
+/// coords (same frame as `get_mini_origin`), used by the pet physics
+/// loop to treat that window as a second world (Shimeji-style "active
+/// IE"). The pet can climb its sides, sit on its top edge, hang from
+/// its bottom edge, and ride along when the user drags it.
+#[derive(serde::Serialize, Clone, Debug)]
+struct AppWindowInfo {
+    /// Stable CGWindowID for the window's lifetime — the physics loop
+    /// uses this to detect "the window I was sitting on disappeared".
+    window_id: u32,
+    /// Process owning the window ("Finder", "Safari", "Cursor", …).
+    owner_name: String,
+    /// Owning process pid — already filtered against our own pid in
+    /// Rust so the frontend can ignore this and just trust the rect.
+    owner_pid: i32,
+    /// Bottom-left x in main-screen Cocoa coords.
+    x: f64,
+    /// Bottom-left y in main-screen Cocoa coords.
+    y: f64,
+    /// Logical points.
+    width: f64,
+    /// Logical points.
+    height: f64,
+}
+
+/// Pick the topmost normal app window from CGWindowList, excluding the
+/// mascot's own windows. Returns `None` when no qualifying window is
+/// visible (everything minimized to Dock, only utility panels open, …).
+///
+/// Filtering pipeline matches Shimeji's "interactable window" concept:
+/// `layer == 0` keeps normal app windows (rejecting menu bar items,
+/// floating palettes, Spotlight, the Dock itself); `alpha >= 0.5` skips
+/// fading/transitioning windows; a minimum size threshold drops
+/// tooltips, popovers and completion menus that would be silly
+/// platforms for a cat.
+///
+/// CGWindowList returns windows in z-order front-to-back, so the first
+/// passing entry is the topmost — exactly what we want.
+#[cfg(target_os = "macos")]
+unsafe fn compute_frontmost_app_window_macos() -> Option<AppWindowInfo> {
+    use objc2::runtime::{AnyClass, AnyObject};
+    use objc2::msg_send;
+    use objc2_foundation::NSRect;
+
+    // Main-screen frame is needed to flip CGWindowList's top-down y to
+    // Cocoa bottom-up y. Multi-display refinement is deferred — the
+    // mascot itself is currently main-screen-centric per `get_pet_floor_info`.
+    let cls = AnyClass::get(c"NSScreen")?;
+    let main: *mut AnyObject = msg_send![cls, mainScreen];
+    if main.is_null() { return None; }
+    let mframe: NSRect = msg_send![&*main, frame];
+    let main_h = mframe.size.height;
+    let main_origin_y = mframe.origin.y;
+
+    let our_pid = std::process::id() as i32;
+
+    let list = cg_window::CGWindowListCopyWindowInfo(
+        cg_window::OPTION_ON_SCREEN_ONLY,
+        cg_window::NULL_WINDOW_ID,
+    );
+    if list.is_null() { return None; }
+    let count = cg_window::CFArrayGetCount(list);
+
+    let mut best: Option<AppWindowInfo> = None;
+    for i in 0..count {
+        let dict = cg_window::CFArrayGetValueAtIndex(list, i) as cg_window::CFDictionaryRef;
+        if dict.is_null() { continue; }
+
+        let layer = cf_dict_get_i32(dict, "kCGWindowLayer").unwrap_or(99);
+        if layer != 0 { continue; }
+        let alpha = cf_dict_get_double(dict, "kCGWindowAlpha").unwrap_or(0.0);
+        if alpha < 0.5 { continue; }
+        let owner_pid = cf_dict_get_i32(dict, "kCGWindowOwnerPID").unwrap_or(0);
+        if owner_pid == our_pid { continue; }
+        let owner = cf_dict_get_string(dict, "kCGWindowOwnerName").unwrap_or_default();
+        let owner_lower = owner.to_ascii_lowercase();
+        if owner_lower == "dock"
+            || owner_lower == "windowserver"
+            || owner_lower == "window server" { continue; }
+
+        let bounds_key = cf_string_from("kCGWindowBounds");
+        if bounds_key.is_null() { continue; }
+        let bounds = cg_window::CFDictionaryGetValue(dict, bounds_key);
+        cg_window::CFRelease(bounds_key);
+        if bounds.is_null() { continue; }
+        let x = cf_dict_get_double(bounds, "X").unwrap_or(0.0);
+        let y_cg = cf_dict_get_double(bounds, "Y").unwrap_or(0.0);
+        let w = cf_dict_get_double(bounds, "Width").unwrap_or(0.0);
+        let h = cf_dict_get_double(bounds, "Height").unwrap_or(0.0);
+        // Tooltips, popovers and completion menus are too small to be
+        // useful platforms; also skip degenerate w/h <= 0.
+        if w < 200.0 || h < 120.0 { continue; }
+
+        let window_id = cf_dict_get_i32(dict, "kCGWindowNumber").unwrap_or(0) as u32;
+        let ns_y = main_origin_y + main_h - y_cg - h;
+
+        best = Some(AppWindowInfo {
+            window_id,
+            owner_name: owner,
+            owner_pid,
+            x,
+            y: ns_y,
+            width: w,
+            height: h,
+        });
+        break; // z-order front-to-back: first match wins.
+    }
+    cg_window::CFRelease(list);
+    best
+}
+
+/// 50 ms TTL cache around the frontmost-window scan. Keeps 30 ms physics
+/// ticks cheap — at most ~20 actual CGWindowList scans/sec regardless
+/// of tick rate.
+#[cfg(target_os = "macos")]
+mod frontmost_app_window_cache {
+    use super::AppWindowInfo;
+    use std::sync::Mutex;
+    use std::time::{Duration, Instant};
+
+    static CACHE: Mutex<Option<(Instant, Option<AppWindowInfo>)>> = Mutex::new(None);
+    const TTL: Duration = Duration::from_millis(50);
+
+    /// Returns `Some(val)` when a fresh value is cached; `None` when the
+    /// caller should run a fresh scan.
+    pub fn try_fresh() -> Option<Option<AppWindowInfo>> {
+        let cache = CACHE.lock().ok()?;
+        let (at, val) = cache.as_ref()?;
+        if at.elapsed() < TTL { Some(val.clone()) } else { None }
+    }
+
+    pub fn store(val: Option<AppWindowInfo>) {
+        if let Ok(mut c) = CACHE.lock() {
+            *c = Some((Instant::now(), val));
+        }
+    }
+}
+
+#[tauri::command]
+async fn get_frontmost_app_window(
+    #[allow(unused_variables)] app: tauri::AppHandle,
+) -> Result<Option<AppWindowInfo>, String> {
+    #[cfg(target_os = "macos")]
+    {
+        if let Some(cached) = frontmost_app_window_cache::try_fresh() {
+            return Ok(cached);
+        }
+        // NSScreen reads are safest on the main thread; CGWindowList
+        // itself is thread-safe but we batch with the screen read so a
+        // single main-thread hop covers both.
+        let (tx, rx) = std::sync::mpsc::channel();
+        app.run_on_main_thread(move || {
+            let result = unsafe { compute_frontmost_app_window_macos() };
+            frontmost_app_window_cache::store(result.clone());
+            let _ = tx.send(result);
+        }).map_err(|e| e.to_string())?;
+        match rx.recv_timeout(std::time::Duration::from_millis(200)) {
+            Ok(v) => Ok(v),
+            // Timeout — treat as "no window right now". Better to skip
+            // a tick than block the physics loop.
+            Err(_) => Ok(None),
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Ok(None)
+    }
+}
+
 /// Sprite-content padding fractions for the current pet. These let the
 /// physics safety-net clamp in `move_mini_by` agree with the frontend
 /// edge-detection in `edgeDetect.ts`: both must subtract the same
@@ -12638,7 +12807,7 @@ pub fn run() {
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![get_status, send_chat, open_detail_panel, save_character_gif, delete_character_assets, delete_character_gif, get_agents, get_health, get_agent_metrics, interrupt_agent, scan_characters, get_agent_extra_info, open_mini, close_mini, set_mini_expanded, set_mini_size, set_efficiency_hover_tracking, resize_mini_height, move_mini_by, get_mini_origin, get_mini_monitor_rect, get_pet_floor_info, set_sprite_pad_fractions, set_mini_origin, set_ime_mode, get_agent_sessions, get_session_preview, get_session_messages, get_active_sessions, proxy_post, play_sound, get_claude_sessions, get_claude_conversation, install_claude_hooks, install_cursor_hooks, remove_claude_session, resolve_claude_permission, get_claude_stats, open_url, activate_app, focus_cursor_terminal, check_ax_permission, request_ax_permission, jump_to_claude_terminal, check_for_update, run_update, close_ssh, read_local_file, list_backgrounds, save_background, get_background_data, exit_app, get_ssh_key_info, reset_ssh, get_ui_scale, list_custom_codex_pets, open_codex_pets_dir, import_codex_pet, pick_codex_pet_folder, reassert_floating, spawn_demo_mascot, close_demo_mascot, close_demo_mascots, debug_log, update_tray_language, set_pet_mode_window, set_pet_context_menu, set_pet_pomodoro_active, get_now_playing, get_system_idle_time, set_stroll_mode, set_throw_tracking, voice_toggle, voice_is_recording])
+        .invoke_handler(tauri::generate_handler![get_status, send_chat, open_detail_panel, save_character_gif, delete_character_assets, delete_character_gif, get_agents, get_health, get_agent_metrics, interrupt_agent, scan_characters, get_agent_extra_info, open_mini, close_mini, set_mini_expanded, set_mini_size, set_efficiency_hover_tracking, resize_mini_height, move_mini_by, get_mini_origin, get_mini_monitor_rect, get_pet_floor_info, get_frontmost_app_window, set_sprite_pad_fractions, set_mini_origin, set_ime_mode, get_agent_sessions, get_session_preview, get_session_messages, get_active_sessions, proxy_post, play_sound, get_claude_sessions, get_claude_conversation, install_claude_hooks, install_cursor_hooks, remove_claude_session, resolve_claude_permission, get_claude_stats, open_url, activate_app, focus_cursor_terminal, check_ax_permission, request_ax_permission, jump_to_claude_terminal, check_for_update, run_update, close_ssh, read_local_file, list_backgrounds, save_background, get_background_data, exit_app, get_ssh_key_info, reset_ssh, get_ui_scale, list_custom_codex_pets, open_codex_pets_dir, import_codex_pet, pick_codex_pet_folder, reassert_floating, spawn_demo_mascot, close_demo_mascot, close_demo_mascots, debug_log, update_tray_language, set_pet_mode_window, set_pet_context_menu, set_pet_pomodoro_active, get_now_playing, get_system_idle_time, set_stroll_mode, set_throw_tracking, voice_toggle, voice_is_recording])
         .manage(ActiveAgentPid { pid: Mutex::new(None) })
         .manage(ClaudeState { sessions: Arc::new(Mutex::new(HashMap::new())), pending_permissions: Arc::new(Mutex::new(HashMap::new())) })
         .run(tauri::generate_context!())
