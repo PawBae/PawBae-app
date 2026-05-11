@@ -109,20 +109,15 @@ const EDGE_TOLERANCE = 4
 // These values are intentionally per-physics-pet defaults; once a
 // second physics pet ships, lift them into pet.json.physics.bbox.
 const SPRITE_PAD_BOTTOM_FRAC = 0.30
-// Top pad — pushed to 0.40. The climb-ceiling sprite anchors the
-// cat's head much deeper into the cell than estimated; the gap was
-// still visible at 0.18 per user. If 0.40 now makes the cat clip
-// past the menu bar (head disappears behind it), dial back toward
-// 0.30. If still a gap, push to 0.50.
 const SPRITE_PAD_TOP_FRAC = 0.40
-// Side pads — symmetric at 0.45 for shimeji-bola: the grab-wall /
-// climb-wall body is significantly inset on whichever side the cat
-// is rendered. With the per-side flipped variants the rendering is
-// mirror-symmetric, so left and right need the same overshoot to
-// reach the screen edge. If the cat now clips past either edge,
-// dial both back toward 0.40.
-const SPRITE_PAD_LEFT_FRAC = 0.45
-const SPRITE_PAD_RIGHT_FRAC = 0.45
+// Side pads — conservative fallback used only before the runtime
+// alpha-scan measurement completes (~2 s after physics enable).
+// Must be tight enough that no visible sprite extends past the
+// screen edge at any animation state. Previously 0.45, which was
+// tuned for wall sprites but let walking sprites overshoot. 0.10
+// keeps the cat slightly inside the edge until measurement refines.
+const SPRITE_PAD_LEFT_FRAC = 0.10
+const SPRITE_PAD_RIGHT_FRAC = 0.10
 
 export interface SpritePad {
   top: number
@@ -358,39 +353,37 @@ export async function measureSpriteAnchorsCSS(
     ? gapTop + minTop * yScale
     : null
 
-  // Sides — bounding box across wall rows. For the `spriteNameFor`
-  // flipX convention (no flip on left wall, CSS scaleX(-1) on right
-  // wall — see petPhysics.ts), both walls' padding derives from the
-  // *leftmost* opaque pixel of the unflipped wall sprite:
+  // Sides — scan ALL animation rows and use the global minimum
+  // leftmost opaque pixel. This ensures the clamp is tight enough
+  // that NO sprite (walking, climbing, falling, idle) extends past
+  // the screen edge. Previously only wall rows were scanned, which
+  // gave a loose pad when the wall sprite's body was centered in the
+  // cell (e.g. shimeji-bola minLeft=48) while the walking sprite
+  // extended closer to the cell edge (minLeft≈20), letting the
+  // walking sprite overshoot by ~20 CSS px.
   //
-  //   On LEFT wall (no flip): cat's leftmost-in-render = minLeftmostX
-  //     → padLeft = gap + minLeftmostX × xScale puts that pixel at vf.left.
-  //
-  //   On RIGHT wall (with flip): the cat's wall-touching pixel in the
-  //     flipped render comes from the same unflipped cell-x =
-  //     minLeftmostX (its rendered right edge after mirroring).
-  //     → padRight = gap + minLeftmostX × xScale puts that pixel at vf.right.
-  //
-  // So padLeft == padRight == gap + minLeftmostX × xScale, regardless
-  // of where the cat sits in the cell (left-anchored, centered like
-  // shimeji-bola where minLeft=48, or right-anchored). The earlier
-  // `min(minLeft, cellW-1-maxRight)` heuristic was over-engineering
-  // for an asymmetric-rendering case that doesn't actually exist with
-  // the current renderer — and broke centered sprites by under-padding
-  // by exactly the asymmetry (e.g. 14.8 CSS px gap from wall to hand
-  // for shimeji-bola).
+  // The flipX convention still applies: on the right wall the sprite
+  // is mirrored, so its rightmost reach in the rendered frame equals
+  // the leftmost reach in the unflipped cell. Using the global
+  // minimum `minLeft` across all rows covers both sides.
+  const allRows = new Set<number>([...floorRows, ...ceilingRows, ...wallRows])
+  for (const a of Object.values(pet.animations)) {
+    allRows.add(a.row)
+  }
   let minLeft = cellW
-  let anyWallScanned = false
-  for (const row of wallRows) {
+  let anySideScanned = false
+  for (const row of allRows) {
     const bbox = await getBBox(row)
     if (!bbox) continue
-    anyWallScanned = true
+    anySideScanned = true
     if (bbox.left < minLeft) minLeft = bbox.left
+    const rightEdgeMirror = cellW - 1 - bbox.right
+    if (rightEdgeMirror < minLeft) minLeft = rightEdgeMirror
   }
-  const sideCellPad = anyWallScanned ? Math.max(0, minLeft) : -1
+  const sideCellPad = anySideScanned ? Math.max(0, minLeft) : -1
   const sideCSS = sideCellPad >= 0 ? sideCellPad * xScale : -1
-  const leftPx = anyWallScanned ? gapLeft + sideCSS : null
-  const rightPx = anyWallScanned ? gapRight + sideCSS : null
+  const leftPx = anySideScanned ? gapLeft + sideCSS : null
+  const rightPx = anySideScanned ? gapRight + sideCSS : null
 
   return { topPx, rightPx, bottomPx, leftPx }
 }

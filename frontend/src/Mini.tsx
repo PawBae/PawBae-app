@@ -1410,6 +1410,7 @@ export default function Mini() {
       // Reposition window, then update React state, then fade in
       await invoke('set_mini_expanded', { expanded: false, position: mascotPositionRef.current, efficiency: true, mascotScale: mascotScaleRef.current, largeMascot: true, largeMascotScale: largeMascotScaleRef.current }).catch(() => {})
       await invoke('set_pet_mode_window', { active: true, mascotScale: mascotScaleRef.current, largeMascotScale: largeMascotScaleRef.current }).catch(() => {})
+      invoke('set_sprite_pad_fractions', { topPx: 0, rightPx: 0, bottomPx: 0, leftPx: 0 }).catch(() => {})
       setAppMode(mode)
       setShowOnboarding(false)
       setLargeMascot(true)
@@ -1447,8 +1448,8 @@ export default function Mini() {
       if (settingsModeRef.current || settingsTransitioningRef.current) {
         return
       }
-      // Leaving pet mode (not from settings): stop the pass-through poll first.
       await invoke('set_pet_mode_window', { active: false, mascotScale: mascotScaleRef.current, largeMascotScale: largeMascotScaleRef.current }).catch(() => {})
+      invoke('set_sprite_pad_fractions', { resetPx: true }).catch(() => {})
       // Restore window back to collapsed mascot size
       try {
         await invoke('set_mini_size', { restore: true, position: mascotPositionRef.current, mascotScale: mascotScaleRef.current, largeMascot: largeMascotRef.current, largeMascotScale: largeMascotScaleRef.current })
@@ -1832,6 +1833,7 @@ export default function Mini() {
             mascotScale: initialMascotScale,
             largeMascotScale: initialLargeMascotScale,
           }).catch(() => {})
+          invoke('set_sprite_pad_fractions', { topPx: 0, rightPx: 0, bottomPx: 0, leftPx: 0 }).catch(() => {})
         } else {
           invoke('set_pet_mode_window', {
             active: false,
@@ -3308,6 +3310,7 @@ export default function Mini() {
         if (wasSettings && appModeRef.current === 'pet' && largeMascotRef.current) {
           await invoke('set_mini_expanded', { expanded: false, position: mascotPositionRef.current, efficiency: true, mascotScale: mascotScaleRef.current, largeMascot: true, largeMascotScale: largeMascotScaleRef.current }).catch(() => {})
           await invoke('set_pet_mode_window', { active: true, mascotScale: mascotScaleRef.current, largeMascotScale: largeMascotScaleRef.current }).catch(() => {})
+          invoke('set_sprite_pad_fractions', { topPx: 0, rightPx: 0, bottomPx: 0, leftPx: 0 }).catch(() => {})
           if (petOriginBeforeSettingsRef.current) {
             const [x, y] = petOriginBeforeSettingsRef.current
             await invoke('set_mini_origin', { x, y }).catch(() => {})
@@ -3556,9 +3559,9 @@ export default function Mini() {
       expandedRef.current = false
       expandedWindowModeRef.current = null
       if (appModeRef.current === 'pet' && largeMascotRef.current) {
-        // Pet mode: restore pet-sized window directly, skip syncExpandedWindowLayout
         await invoke('set_mini_expanded', { expanded: false, position: mascotPositionRef.current, efficiency: true, mascotScale: mascotScaleRef.current, largeMascot: true, largeMascotScale: largeMascotScaleRef.current }).catch(() => {})
         await invoke('set_pet_mode_window', { active: true, mascotScale: mascotScaleRef.current, largeMascotScale: largeMascotScaleRef.current }).catch(() => {})
+        invoke('set_sprite_pad_fractions', { topPx: 0, rightPx: 0, bottomPx: 0, leftPx: 0 }).catch(() => {})
         // Restore exact window position saved before entering settings
         if (petOriginBeforeSettingsRef.current) {
           const [x, y] = petOriginBeforeSettingsRef.current
