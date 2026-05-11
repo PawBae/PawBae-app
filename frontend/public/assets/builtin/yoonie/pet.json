@@ -5,7 +5,7 @@
   "spritesheetPath": "spritesheet.webp",
   "kind": "creature",
   "schemaVersion": 2,
-  "atlas": { "cellW": 192, "cellH": 208, "cols": 8, "rows": 9 },
+  "atlas": { "cellW": 192, "cellH": 208, "cols": 8, "rows": 13 },
   "animations": {
     "idle":      { "row": 0, "frames": 6, "fps": 5,  "loopRestMs": 1500 },
     "running":   { "row": 1, "frames": 8, "fps": 10 },
@@ -19,15 +19,15 @@
     "pounce":    { "row": 7, "frames": 6, "fps": 12 },
     "blink":     { "row": 8, "frames": 6, "fps": 4,  "loopRestMs": 2000 },
 
-    "grab-wall":            { "row": 5, "frames": 1, "fps": 1 },
-    "grab-wall-flipped":    { "row": 5, "frames": 1, "fps": 1, "flipX": true },
-    "climb-wall":           { "row": 1, "frames": 8, "fps": 10 },
-    "climb-wall-flipped":   { "row": 1, "frames": 8, "fps": 10, "flipX": true },
-    "climb-ceiling":        { "row": 4, "frames": 5, "fps": 8 },
-    "climb-ceiling-flipped":{ "row": 4, "frames": 5, "fps": 8, "flipX": true },
-    "falling":              { "row": 4, "frames": 5, "fps": 8 },
-    "jumping":              { "row": 7, "frames": 6, "fps": 12 },
-    "bouncing":             { "row": 7, "frames": 6, "fps": 12 },
+    "grab-wall":            { "row": 9,  "frames": 1, "fps": 1 },
+    "grab-wall-flipped":    { "row": 9,  "frames": 1, "fps": 1,  "flipX": true },
+    "climb-wall":           { "row": 10, "frames": 6, "fps": 10 },
+    "climb-wall-flipped":   { "row": 10, "frames": 6, "fps": 10, "flipX": true },
+    "climb-ceiling":        { "row": 11, "frames": 6, "fps": 9 },
+    "climb-ceiling-flipped":{ "row": 11, "frames": 6, "fps": 9,  "flipX": true },
+    "falling":              { "row": 12, "frames": 2, "fps": 5,  "offsetCol": 0 },
+    "jumping":              { "row": 12, "frames": 3, "fps": 9,  "offsetCol": 2 },
+    "bouncing":             { "row": 12, "frames": 3, "fps": 10, "offsetCol": 5 },
     "waiting":              { "row": 5, "frames": 8, "fps": 8, "loopRestMs": 1500 }
   },
   "stateMap": {
