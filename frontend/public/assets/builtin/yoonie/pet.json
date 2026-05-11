@@ -9,15 +9,26 @@
   "animations": {
     "idle":      { "row": 0, "frames": 6, "fps": 5,  "loopRestMs": 1500 },
     "running":   { "row": 1, "frames": 8, "fps": 10 },
-    "run-left":  { "row": 1, "frames": 8, "fps": 10 },
-    "run-right": { "row": 1, "frames": 8, "fps": 10, "flipX": true },
+    "run-left":  { "row": 1, "frames": 8, "fps": 10, "flipX": true },
+    "run-right": { "row": 1, "frames": 8, "fps": 10 },
     "dash":      { "row": 2, "frames": 8, "fps": 14, "flipX": true },
     "hold":      { "row": 3, "frames": 4, "fps": 4,  "loopRestMs": 1200 },
     "float":     { "row": 4, "frames": 5, "fps": 8,  "loopRestMs": 400 },
     "hide":      { "row": 5, "frames": 8, "fps": 8,  "loopRestMs": 1500 },
     "happy":     { "row": 6, "frames": 6, "fps": 6,  "loopRestMs": 800 },
     "pounce":    { "row": 7, "frames": 6, "fps": 12 },
-    "blink":     { "row": 8, "frames": 6, "fps": 4,  "loopRestMs": 2000 }
+    "blink":     { "row": 8, "frames": 6, "fps": 4,  "loopRestMs": 2000 },
+
+    "grab-wall":            { "row": 5, "frames": 1, "fps": 1 },
+    "grab-wall-flipped":    { "row": 5, "frames": 1, "fps": 1, "flipX": true },
+    "climb-wall":           { "row": 1, "frames": 8, "fps": 10 },
+    "climb-wall-flipped":   { "row": 1, "frames": 8, "fps": 10, "flipX": true },
+    "climb-ceiling":        { "row": 4, "frames": 5, "fps": 8 },
+    "climb-ceiling-flipped":{ "row": 4, "frames": 5, "fps": 8, "flipX": true },
+    "falling":              { "row": 4, "frames": 5, "fps": 8 },
+    "jumping":              { "row": 7, "frames": 6, "fps": 12 },
+    "bouncing":             { "row": 7, "frames": 6, "fps": 12 },
+    "waiting":              { "row": 5, "frames": 8, "fps": 8, "loopRestMs": 1500 }
   },
   "stateMap": {
     "idle":       "idle",
@@ -26,5 +37,6 @@
     "waiting":    "hide"
   },
   "oneShot": [],
-  "physics": { "enabled": true }
+  "physics": { "enabled": true },
+  "displayScale": 0.95
 }

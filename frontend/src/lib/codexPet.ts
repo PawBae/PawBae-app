@@ -49,6 +49,13 @@ export interface AnimationRow {
   // animations are packed into a single row (e.g. shimeji-bola row 7
   // bundles falling/jumping/bouncing).
   offsetCol?: number
+  // Optional per-animation visual scale. Applied via CSS transform with
+  // transform-origin: bottom center, so the pet's feet stay anchored
+  // while the body scales up/down. Useful when a pose's bounding box is
+  // smaller than the idle pose and the pet would otherwise appear to
+  // shrink mid-animation (e.g. Yoonie's running row is ~9% shorter than
+  // her idle row).
+  displayScale?: number
 }
 
 export interface PhysicsSpec {
@@ -75,6 +82,11 @@ export interface CodexPet {
   // contract.
   oneShot: Set<string>
   physics?: PhysicsSpec
+  // Optional uniform scale applied to the rendered sprite (both width
+  // and height). Lets a pet whose character art fills more of its atlas
+  // cell render visually smaller, so different packs read as the same
+  // on-screen size. Defaults to 1.
+  displayScale?: number
 }
 
 // Default hatch-pet atlas (legacy 192×208 cells, 8 cols × 9 rows). Used
@@ -206,6 +218,7 @@ interface RawPetMeta {
   stateMap?: Partial<Record<MiniPetSourceState, string>>
   oneShot?: string[]
   physics?: PhysicsSpec
+  displayScale?: number
 }
 
 interface PetsManifest {
@@ -240,6 +253,7 @@ function resolvePet(meta: RawPetMeta, fallbackId: string, spritesheetUrl: string
         loopRestMs: v.loopRestMs,
         flipX: v.flipX,
         offsetCol: v.offsetCol,
+        displayScale: v.displayScale,
       }
     }
   } else {
@@ -268,6 +282,7 @@ function resolvePet(meta: RawPetMeta, fallbackId: string, spritesheetUrl: string
     stateMap,
     oneShot,
     physics: meta.physics,
+    displayScale: meta.displayScale,
   }
 }
 
