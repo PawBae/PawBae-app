@@ -22,7 +22,6 @@ import {
   measureSpriteAnchorsCSS,
   setRuntimeSpritePadCSS,
   resetRuntimeSpritePadCSS,
-  getTightSidePad,
   type EdgeState,
 } from './edgeDetect'
 
@@ -910,32 +909,9 @@ export function usePhysicsLoop(opts: PhysicsOptions): PhysicsHandle {
           s.lastWindowH = edge.activeWindow.rect.height
         }
 
-        // In non-wall/ceiling states, cap dx so the visible sprite
-        // never extends past the screen edge. The Rust clamp uses the
-        // wall-sprite pad (loose) so wall sprites reach the edge, but
-        // walking/falling sprites are narrower and would overshoot.
-        // The tight pad covers the widest sprite across ALL rows.
-        if (
-          s.state !== 'on_wall'
-          && s.state !== 'on_ceiling'
-          && s.surface === 'screen'
-        ) {
-          const tight = getTightSidePad()
-          if (tight) {
-            const m = edge.monitor
-            const w = edge.mascot
-            // macOS: positive x = rightward in both Cocoa and move_mini_by
-            const tightMinX = m.x - tight.leftPx
-            const tightMaxX = m.x + m.width - w.width + tight.rightPx
-            if (tightMaxX >= tightMinX) {
-              const newX = w.x + dx
-              if (newX < tightMinX) dx = tightMinX - w.x
-              else if (newX > tightMaxX) dx = tightMaxX - w.x
-            }
-          }
-        }
-
         if (dx !== 0 || dy !== 0) {
+          // detectEdges returns OS-native frame coords; move_mini_by
+          // expects top-down dy on every platform.
           await invoke('move_mini_by', { dx, dy })
         }
       } catch {

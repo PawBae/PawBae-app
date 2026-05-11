@@ -3028,7 +3028,7 @@ async fn open_mini(app: tauri::AppHandle) -> Result<(), String> {
                         let behavior: usize = (1 << 0) | (1 << 4) | (1 << 8) | (1 << 6);
                         let _: () = msg_send![obj, setCollectionBehavior: behavior];
                     }
-                    let screen_info: Option<(f64, f64, f64, f64, f64, f64)> = unsafe {
+                    let screen_info: Option<(f64, f64, f64, f64, f64)> = unsafe {
                         let cls = match AnyClass::get(c"NSScreen") {
                             Some(c) => c,
                             None => return,
@@ -3041,10 +3041,9 @@ async fn open_mini(app: tauri::AppHandle) -> Result<(), String> {
                         if screen.is_null() { return; }
                         let frame: NSRect = msg_send![&*screen, frame];
                         let notch_off = get_notch_offset(screen);
-                        let menu_bar_h = get_menu_bar_height(screen);
-                        Some((frame.origin.x, frame.origin.y, frame.size.width, frame.size.height, notch_off, menu_bar_h))
+                        Some((frame.origin.x, frame.origin.y, frame.size.width, frame.size.height, notch_off))
                     };
-                    if let Some((sx, sy, sw, sh, notch_off, menu_bar_h)) = screen_info {
+                    if let Some((sx, sy, sw, sh, notch_off)) = screen_info {
                         let (win_w, win_h) = MINI_WINDOW_FRAME
                             .lock()
                             .ok()
@@ -3052,10 +3051,12 @@ async fn open_mini(app: tauri::AppHandle) -> Result<(), String> {
                             .map(|(_, _, w, h)| (w, h))
                             .unwrap_or_else(|| collapsed_mascot_window_size(1.0));
                         let x = sx + sw / 2.0 + notch_off;
-                        let y = sy + sh - win_h - menu_bar_h;
+                        // Pull the window down by MASCOT_TOP_INSET so it
+                        // does not sit under the menu bar / notch on launch.
+                        let y = sy + sh - win_h - MASCOT_TOP_INSET;
                         log::info!(
-                            "[mini-pos] open_mini(existing,mac) target frame x={:.1} y={:.1} w={:.1} h={:.1} menu_bar={:.1} screen=({:.1},{:.1},{:.1},{:.1}) notch_off={:.1}",
-                            x, y, win_w, win_h, menu_bar_h, sx, sy, sw, sh, notch_off
+                            "[mini-pos] open_mini(existing,mac) target frame x={:.1} y={:.1} w={:.1} h={:.1} inset={:.1} screen=({:.1},{:.1},{:.1},{:.1}) notch_off={:.1}",
+                            x, y, win_w, win_h, MASCOT_TOP_INSET, sx, sy, sw, sh, notch_off
                         );
                         let frame = NSRect::new(NSPoint::new(x, y), NSSize::new(win_w, win_h));
                         unsafe {
@@ -3068,7 +3069,7 @@ async fn open_mini(app: tauri::AppHandle) -> Result<(), String> {
         }
         #[cfg(target_os = "windows")]
         {
-            let wa_top = get_work_area(&win).map(|(_, wy, _, _)| wy).unwrap_or(0.0);
+            // Reposition to top-center (simulating macOS notch position), DPI-aware
             if let Ok(Some(monitor)) = win.primary_monitor() {
                 let scale = monitor.scale_factor();
                 let sw = monitor.size().width as f64 / scale;
@@ -3086,9 +3087,9 @@ async fn open_mini(app: tauri::AppHandle) -> Result<(), String> {
                 let _ = win.set_size(tauri::LogicalSize::new(win_w, win_h));
                 log::info!(
                     "[mini-pos] open_mini(existing,win) target pos x={:.1} y={:.1} w={:.1} h={:.1} ui={:.2} notch_off={:.1}",
-                    x, wa_top, win_w, win_h, ui, notch_off
+                    x, 0.0, win_w, win_h, ui, notch_off
                 );
-                let _ = win.set_position(tauri::LogicalPosition::new(x, wa_top));
+                let _ = win.set_position(tauri::LogicalPosition::new(x, 0.0));
             }
             if !FULLSCREEN_HIDING.load(std::sync::atomic::Ordering::SeqCst) {
                 win.show().map_err(|e| e.to_string())?;
@@ -3131,7 +3132,7 @@ async fn open_mini(app: tauri::AppHandle) -> Result<(), String> {
                     let _: () = msg_send![obj, setCollectionBehavior: behavior];
                 }
 
-                let screen_info: Option<(f64, f64, f64, f64, f64, f64)> = unsafe {
+                let screen_info: Option<(f64, f64, f64, f64, f64)> = unsafe {
                     let cls = match AnyClass::get(c"NSScreen") {
                         Some(c) => c,
                         None => return,
@@ -3144,17 +3145,18 @@ async fn open_mini(app: tauri::AppHandle) -> Result<(), String> {
                     if screen.is_null() { return; }
                     let frame: NSRect = msg_send![&*screen, frame];
                     let notch_off = get_notch_offset(screen);
-                    let menu_bar_h = get_menu_bar_height(screen);
-                    Some((frame.origin.x, frame.origin.y, frame.size.width, frame.size.height, notch_off, menu_bar_h))
+                    Some((frame.origin.x, frame.origin.y, frame.size.width, frame.size.height, notch_off))
                 };
 
-                if let Some((sx, sy, sw, sh, notch_off, menu_bar_h)) = screen_info {
+                if let Some((sx, sy, sw, sh, notch_off)) = screen_info {
                     let (win_w, win_h) = collapsed_mascot_window_size(1.0);
                     let x = sx + sw / 2.0 + notch_off;
-                    let y = sy + sh - win_h - menu_bar_h;
+                    // Pull the window down by MASCOT_TOP_INSET so the sprite
+                    // is fully visible below the menu bar / notch on launch.
+                    let y = sy + sh - win_h - MASCOT_TOP_INSET;
                     log::info!(
-                        "[mini-pos] open_mini(new,mac) target frame x={:.1} y={:.1} w={:.1} h={:.1} menu_bar={:.1} screen=({:.1},{:.1},{:.1},{:.1}) notch_off={:.1}",
-                        x, y, win_w, win_h, menu_bar_h, sx, sy, sw, sh, notch_off
+                        "[mini-pos] open_mini(new,mac) target frame x={:.1} y={:.1} w={:.1} h={:.1} inset={:.1} screen=({:.1},{:.1},{:.1},{:.1}) notch_off={:.1}",
+                        x, y, win_w, win_h, MASCOT_TOP_INSET, sx, sy, sw, sh, notch_off
                     );
                     let frame = NSRect::new(
                         NSPoint::new(x, y),
@@ -3174,7 +3176,7 @@ async fn open_mini(app: tauri::AppHandle) -> Result<(), String> {
 
     #[cfg(target_os = "windows")]
     {
-        let wa_top = get_work_area(&win).map(|(_, wy, _, _)| wy).unwrap_or(0.0);
+        // On Windows: position at top-center (simulating macOS notch position), DPI-aware
         if let Ok(Some(monitor)) = win.primary_monitor() {
             let scale = monitor.scale_factor();
             let sw = monitor.size().width as f64 / scale;
@@ -3187,9 +3189,9 @@ async fn open_mini(app: tauri::AppHandle) -> Result<(), String> {
             let _ = win.set_size(tauri::LogicalSize::new(win_w, win_h));
             log::info!(
                 "[mini-pos] open_mini(new,win) target pos x={:.1} y={:.1} w={:.1} h={:.1} ui={:.2} notch_off={:.1}",
-                x, wa_top, win_w, win_h, ui, notch_off
+                x, 0.0, win_w, win_h, ui, notch_off
             );
-            let _ = win.set_position(tauri::LogicalPosition::new(x, wa_top));
+            let _ = win.set_position(tauri::LogicalPosition::new(x, 0.0));
         }
         if !FULLSCREEN_HIDING.load(std::sync::atomic::Ordering::SeqCst) {
             let _ = win.show();
@@ -3222,10 +3224,11 @@ fn collapsed_x(sx: f64, sw: f64, win_w: f64, position: &str, notch_offset: f64) 
 // at the bottom/right edges of the OS-level mascot window.
 const COLLAPSED_MASCOT_BASE_W: f64 = 96.0;
 const COLLAPSED_MASCOT_BASE_H: f64 = 96.0;
-// Fallback vertical inset when the system API query fails. Only used as a
-// last resort — prefer `get_menu_bar_height()` (macOS) or work-area math
-// (Windows) to get the real value from the OS.
-const MASCOT_TOP_INSET_FALLBACK: f64 = 120.0;
+// Vertical inset applied to the default mascot position so the sprite is
+// always rendered below the macOS menu bar / notch (or the equivalent top
+// chrome on Windows). Covers both notched (~38pt) and non-notched (~24pt)
+// menu bars with extra breathing room.
+const MASCOT_TOP_INSET: f64 = 120.0;
 const MASCOT_SCALE_MIN: f64 = 1.0;
 const MASCOT_SCALE_MAX: f64 = 3.0;
 const LARGE_MASCOT_SIZE_MULTIPLIER: f64 = 3.0;
@@ -3258,35 +3261,6 @@ fn win_ui_scale(monitor: &tauri::Monitor) -> f64 {
     let scale = monitor.scale_factor();
     let logical_h = monitor.size().height as f64 / scale;
     (logical_h / 1080.0).max(1.0)
-}
-
-/// Query the work area (excludes taskbar) for the monitor that owns the
-/// given window. Returns `(x, y, width, height)` in logical pixels, or
-/// `None` when the query fails.
-#[cfg(target_os = "windows")]
-fn get_work_area(win: &tauri::WebviewWindow) -> Option<(f64, f64, f64, f64)> {
-    use windows::Win32::Graphics::Gdi::{
-        MonitorFromWindow, GetMonitorInfoW, MONITORINFO, MONITOR_DEFAULTTONEAREST,
-    };
-    let hwnd = win.hwnd().ok()?;
-    let scale = win.scale_factor().unwrap_or(1.0);
-    unsafe {
-        let monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
-        let mut mi = MONITORINFO {
-            cbSize: std::mem::size_of::<MONITORINFO>() as u32,
-            ..Default::default()
-        };
-        if !GetMonitorInfoW(monitor, &mut mi).as_bool() {
-            return None;
-        }
-        let wa = mi.rcWork;
-        Some((
-            wa.left as f64 / scale,
-            wa.top as f64 / scale,
-            (wa.right - wa.left) as f64 / scale,
-            (wa.bottom - wa.top) as f64 / scale,
-        ))
-    }
 }
 
 /// Returns the HMONITOR of the fullscreen foreground window, or None if the
@@ -3378,31 +3352,6 @@ unsafe fn get_notch_offset(screen: *mut objc2::runtime::AnyObject) -> f64 {
         }
     }
     80.0
-}
-
-/// Compute the menu bar height (in logical points) from NSScreen's `frame`
-/// vs `visibleFrame`. On notched Macs this includes the notch's vertical
-/// extent; on non-notched Macs it's the standard ~24pt menu bar.
-/// Falls back to `MASCOT_TOP_INSET_FALLBACK` when the screen pointer is
-/// null or the computed value is implausible.
-#[cfg(target_os = "macos")]
-unsafe fn get_menu_bar_height(screen: *mut objc2::runtime::AnyObject) -> f64 {
-    use objc2::msg_send;
-    use objc2_foundation::NSRect;
-
-    if screen.is_null() { return MASCOT_TOP_INSET_FALLBACK; }
-    let frame: NSRect = msg_send![&*screen, frame];
-    let visible: NSRect = msg_send![&*screen, visibleFrame];
-    // menu bar height = (frame top) - (visibleFrame top)
-    //                 = (frame.y + frame.h) - (visible.y + visible.h)
-    let frame_top = frame.origin.y + frame.size.height;
-    let visible_top = visible.origin.y + visible.size.height;
-    let h = frame_top - visible_top;
-    if h.is_finite() && h > 0.0 && h < frame.size.height {
-        h
-    } else {
-        MASCOT_TOP_INSET_FALLBACK
-    }
 }
 
 /// Minimal CoreGraphics / CoreFoundation FFI for querying the live Dock
@@ -4231,8 +4180,8 @@ async fn get_mini_origin(app: tauri::AppHandle) -> Result<(f64, f64), String> {
 /// menu bar, the notch's reserved strip, and the Dock (regardless of
 /// Dock position or auto-hide). That way the pet's floor sits on top of
 /// the Dock, its ceiling hugs the menu bar, and side Docks act as walls.
-/// On Windows this returns `MONITORINFO.rcWork` — the work area excluding
-/// the taskbar (regardless of taskbar position or auto-hide).
+/// On Windows the full monitor rect is still returned (taskbar handling
+/// is a planned follow-up).
 #[tauri::command]
 async fn get_mini_monitor_rect(app: tauri::AppHandle) -> Result<(f64, f64, f64, f64), String> {
     let win = app.get_webview_window("mini").ok_or("mini not found")?;
@@ -4279,9 +4228,6 @@ async fn get_mini_monitor_rect(app: tauri::AppHandle) -> Result<(f64, f64, f64, 
     }
     #[cfg(target_os = "windows")]
     {
-        if let Some(wa) = get_work_area(&win) {
-            return Ok(wa);
-        }
         if let Ok(Some(monitor)) = win.current_monitor() {
             let pos = monitor.position();
             let size = monitor.size();
@@ -4328,7 +4274,7 @@ async fn set_mini_origin(
                 let obj = unsafe { &*(ns_win as *mut AnyObject) };
                 let frame: NSRect = unsafe { msg_send![obj, frame] };
                 let (clamped_x, clamped_y) = if confine {
-                    let (screen_frame, menu_bar_h): (NSRect, f64) = unsafe {
+                    let screen_frame: NSRect = unsafe {
                         let screen: *mut AnyObject = msg_send![obj, screen];
                         if screen.is_null() {
                             let cls = match AnyClass::get(c"NSScreen") {
@@ -4339,15 +4285,18 @@ async fn set_mini_origin(
                             if main_screen.is_null() {
                                 return;
                             }
-                            (msg_send![&*main_screen, frame], get_menu_bar_height(main_screen))
+                            msg_send![&*main_screen, frame]
                         } else {
-                            (msg_send![&*screen, frame], get_menu_bar_height(screen))
+                            msg_send![&*screen, frame]
                         }
                     };
                     let min_x = screen_frame.origin.x;
                     let max_x = (screen_frame.origin.x + screen_frame.size.width - frame.size.width).max(min_x);
                     let min_y = screen_frame.origin.y;
-                    let max_y = (screen_frame.origin.y + screen_frame.size.height - frame.size.height - menu_bar_h).max(min_y);
+                    // Keep collapsed mascot windows below top chrome. This also
+                    // prevents stale persisted positions from parking the window
+                    // under the notch/menu bar after startup.
+                    let max_y = (screen_frame.origin.y + screen_frame.size.height - frame.size.height - MASCOT_TOP_INSET).max(min_y);
                     let cx = x.max(min_x).min(max_x);
                     let cy = y.max(min_y).min(max_y);
                     log::info!(
@@ -4385,18 +4334,22 @@ async fn set_mini_origin(
             let _ = win.set_position(tauri::LogicalPosition::new(x, y));
             return Ok(());
         }
-        if let Some((wa_x, wa_y, wa_w, wa_h)) = get_work_area(&win) {
+        if let Ok(Some(monitor)) = win.current_monitor() {
+            let scale = monitor.scale_factor();
+            let mp = monitor.position();
+            let mx = mp.x as f64 / scale;
+            let my = mp.y as f64 / scale;
+            let sw = monitor.size().width as f64 / scale;
+            let sh = monitor.size().height as f64 / scale;
+            let ui = win_ui_scale(&monitor);
             let (ww, wh) = win
                 .outer_size()
-                .and_then(|s| {
-                    let sc = win.scale_factor().unwrap_or(1.0);
-                    Ok((s.width as f64 / sc, s.height as f64 / sc))
-                })
+                .map(|s| (s.width as f64 / scale, s.height as f64 / scale))
                 .unwrap_or((0.0, 0.0));
-            let min_x = wa_x;
-            let max_x = (wa_x + wa_w - ww).max(min_x);
-            let min_y = wa_y;
-            let max_y = (wa_y + wa_h - wh).max(min_y);
+            let min_x = mx;
+            let max_x = (mx + sw - ww).max(min_x);
+            let min_y = my + (MASCOT_TOP_INSET * ui).round();
+            let max_y = (my + sh - wh).max(min_y);
             let clamped_x = x.max(min_x).min(max_x);
             let clamped_y = y.max(min_y).min(max_y);
             log::info!(
@@ -4406,10 +4359,10 @@ async fn set_mini_origin(
             let _ = win.set_position(tauri::LogicalPosition::new(clamped_x, clamped_y));
         } else {
             log::info!(
-                "[mini-pos] set_mini_origin(win,fallback) apply x={:.1} y={:.1} (with fallback inset)",
-                x, y + MASCOT_TOP_INSET_FALLBACK
+                "[mini-pos] set_mini_origin(win,fallback) apply x={:.1} y={:.1} (with inset)",
+                x, y + MASCOT_TOP_INSET
             );
-            let _ = win.set_position(tauri::LogicalPosition::new(x, y + MASCOT_TOP_INSET_FALLBACK));
+            let _ = win.set_position(tauri::LogicalPosition::new(x, y + MASCOT_TOP_INSET));
         }
     }
     Ok(())
@@ -4446,7 +4399,7 @@ async fn set_mini_expanded(app: tauri::AppHandle, expanded: bool, position: Opti
             if let Ok(ns_win) = win_clone.ns_window() {
                 let obj = unsafe { &*(ns_win as *mut AnyObject) };
 
-                let screen_info: Option<(f64, f64, f64, f64, f64, f64)> = unsafe {
+                let screen_info: Option<(f64, f64, f64, f64, f64)> = unsafe {
                     let screen: *mut AnyObject = msg_send![obj, screen];
                     if screen.is_null() {
                         let cls = match AnyClass::get(c"NSScreen") {
@@ -4457,17 +4410,15 @@ async fn set_mini_expanded(app: tauri::AppHandle, expanded: bool, position: Opti
                         if main_screen.is_null() { return; }
                         let sf: NSRect = msg_send![&*main_screen, frame];
                         let notch_off = get_notch_offset(main_screen);
-                        let menu_bar_h = get_menu_bar_height(main_screen);
-                        Some((sf.origin.x, sf.origin.y, sf.size.width, sf.size.height, notch_off, menu_bar_h))
+                        Some((sf.origin.x, sf.origin.y, sf.size.width, sf.size.height, notch_off))
                     } else {
                         let sf: NSRect = msg_send![&*screen, frame];
                         let notch_off = get_notch_offset(screen);
-                        let menu_bar_h = get_menu_bar_height(screen);
-                        Some((sf.origin.x, sf.origin.y, sf.size.width, sf.size.height, notch_off, menu_bar_h))
+                        Some((sf.origin.x, sf.origin.y, sf.size.width, sf.size.height, notch_off))
                     }
                 };
 
-                if let Some((sx, sy, sw, sh, notch_off, menu_bar_h)) = screen_info {
+                if let Some((sx, sy, sw, sh, notch_off)) = screen_info {
                     // Cache screen geometry for the efficiency hover poll thread.
                     if let Ok(mut info) = NOTCH_SCREEN_INFO.lock() {
                         *info = Some((sx, sy, sw, sh, notch_off));
@@ -4481,6 +4432,10 @@ async fn set_mini_expanded(app: tauri::AppHandle, expanded: bool, position: Opti
                         let win_w = if efficiency.unwrap_or(false) { 600.0 } else { 500.0 };
                         let win_h = max_height.unwrap_or(350.0).max(200.0).min(500.0);
                         let x = sx + (sw - win_w) / 2.0;
+                        // Expanded panel hugs the top of the screen (its window
+                        // level is high enough to draw over the menu bar). The
+                        // MASCOT_TOP_INSET only applies to the collapsed mascot
+                        // so it stays clear of the notch.
                         let y = sy + sh - win_h;
                         log::info!(
                             "[mini-pos] set_mini_expanded(mac,expanded) frame x={:.1} y={:.1} w={:.1} h={:.1}",
@@ -4512,11 +4467,11 @@ async fn set_mini_expanded(app: tauri::AppHandle, expanded: bool, position: Opti
                         } else {
                             (
                                 collapsed_x(sx, sw, win_w, &pos, notch_off),
-                                sy + sh - win_h - menu_bar_h,
+                                sy + sh - win_h - MASCOT_TOP_INSET,
                             )
                         };
                         if !large_mascot.unwrap_or(false) {
-                            let max_y = sy + sh - win_h - menu_bar_h;
+                            let max_y = sy + sh - win_h - MASCOT_TOP_INSET;
                             if y > max_y { y = max_y; }
                         }
                         log::info!(
@@ -4581,10 +4536,9 @@ async fn set_mini_expanded(app: tauri::AppHandle, expanded: bool, position: Opti
                         let y = my + sh - win_h - margin;
                         let _ = win.set_position(tauri::LogicalPosition::new(x, y));
                     } else {
-                        let wa_top = get_work_area(&win).map(|(_, wy, _, _)| wy).unwrap_or(my);
                         let notch_off = (80.0 * ui).round();
                         let x = mx + if pos == "left" { sw / 2.0 - notch_off - win_w } else { sw / 2.0 + notch_off };
-                        let y = wa_top;
+                        let y = my + (MASCOT_TOP_INSET * ui).round();
                         log::info!(
                             "[mini-pos] set_mini_expanded(win,collapsed) frame x={:.1} y={:.1} w={:.1} h={:.1} keep_position={}",
                             x, y, win_w, win_h, keep_position.unwrap_or(false)
@@ -5059,8 +5013,8 @@ async fn resize_mini_height(app: tauri::AppHandle, height: f64, max_height: Opti
                 let cur: NSRect = unsafe { msg_send![obj, frame] };
                 let capped_h = h.min((sf.size.height * 0.75).max(200.0));
                 // Top-aligned to the screen, matching the expanded panel's
-                // initial placement in `set_mini_expanded`. No menu-bar inset
-                // here — that only applies to the collapsed mascot.
+                // initial placement in `set_mini_expanded`. No MASCOT_TOP_INSET
+                // here — that inset only applies to the collapsed mascot.
                 let new_y = sf.origin.y + sf.size.height - capped_h;
                 let new_frame = NSRect::new(
                     NSPoint::new(cur.origin.x, new_y),
@@ -6505,7 +6459,7 @@ async fn set_mini_size(
             if let Ok(ns_win) = win_clone.ns_window() {
                 let obj = unsafe { &*(ns_win as *mut AnyObject) };
 
-                let screen_info: Option<(f64, f64, f64, f64, f64, f64)> = unsafe {
+                let screen_info: Option<(f64, f64, f64, f64, f64)> = unsafe {
                     let screen: *mut AnyObject = msg_send![obj, screen];
                     if screen.is_null() {
                         let cls = match AnyClass::get(c"NSScreen") {
@@ -6516,17 +6470,15 @@ async fn set_mini_size(
                         if main_screen.is_null() { return; }
                         let sf: NSRect = msg_send![&*main_screen, frame];
                         let notch_off = get_notch_offset(main_screen);
-                        let menu_bar_h = get_menu_bar_height(main_screen);
-                        Some((sf.origin.x, sf.origin.y, sf.size.width, sf.size.height, notch_off, menu_bar_h))
+                        Some((sf.origin.x, sf.origin.y, sf.size.width, sf.size.height, notch_off))
                     } else {
                         let sf: NSRect = msg_send![&*screen, frame];
                         let notch_off = get_notch_offset(screen);
-                        let menu_bar_h = get_menu_bar_height(screen);
-                        Some((sf.origin.x, sf.origin.y, sf.size.width, sf.size.height, notch_off, menu_bar_h))
+                        Some((sf.origin.x, sf.origin.y, sf.size.width, sf.size.height, notch_off))
                     }
                 };
 
-                if let Some((sx, sy, sw, sh, notch_off, menu_bar_h)) = screen_info {
+                if let Some((sx, sy, sw, sh, notch_off)) = screen_info {
                     // Keep the hover poll's screen geometry cache fresh even when
                     // the mini window is temporarily resized into settings/update mode.
                     if let Ok(mut info) = NOTCH_SCREEN_INFO.lock() {
@@ -6636,7 +6588,7 @@ async fn set_mini_size(
                         } else {
                             (
                                 collapsed_x(sx, sw, win_w, &pos, notch_off),
-                                sy + sh - win_h - menu_bar_h,
+                                sy + sh - win_h - MASCOT_TOP_INSET,
                             )
                         };
                         let frame = NSRect::new(NSPoint::new(x, y), NSSize::new(win_w, win_h));
@@ -6706,10 +6658,12 @@ async fn set_mini_size(
                     let y = my + sh - win_h - margin;
                     let _ = win.set_position(tauri::LogicalPosition::new(x, y));
                 } else {
-                    let wa_top = get_work_area(&win).map(|(_, wy, _, _)| wy).unwrap_or(my);
                     let notch_off = (80.0 * ui).round();
                     let x = mx + if pos == "left" { sw / 2.0 - notch_off - win_w } else { sw / 2.0 + notch_off };
-                    let _ = win.set_position(tauri::LogicalPosition::new(x, wa_top));
+                    let _ = win.set_position(tauri::LogicalPosition::new(
+                        x,
+                        my + (MASCOT_TOP_INSET * ui).round(),
+                    ));
                 }
             } else {
                 let win_w = (sw * 0.85).round();
@@ -8701,7 +8655,9 @@ async fn spawn_demo_mascot(app: tauri::AppHandle, pet_id: String) -> Result<Stri
             if let Ok(demo_ns) = win_clone.ns_window() {
                 let demo_obj = unsafe { &*(demo_ns as *mut AnyObject) };
 
-                let screen_info: Option<(NSRect, f64)> = unsafe {
+                // Pull the active screen frame from NSScreen so we can
+                // anchor relative to the visible area rather than guessing.
+                let screen_frame: Option<NSRect> = unsafe {
                     AnyClass::get(c"NSScreen").and_then(|cls| {
                         let screens: *mut AnyObject = msg_send![cls, screens];
                         if screens.is_null() {
@@ -8716,14 +8672,16 @@ async fn spawn_demo_mascot(app: tauri::AppHandle, pet_id: String) -> Result<Stri
                             return None;
                         }
                         let frame: NSRect = msg_send![&*screen, frame];
-                        let mbh = get_menu_bar_height(screen);
-                        Some((frame, mbh))
+                        Some(frame)
                     })
                 };
-                let Some((sf, menu_bar_h)) = screen_info else { return };
+                let Some(sf) = screen_frame else { return };
 
+                // Right-aligned baseline anchor: ~120pt below the menu
+                // bar on the right edge, then step left by one mascot
+                // width per spawn.
                 let baseline_x = sf.origin.x + sf.size.width - DEMO_STEP_W * 2.0;
-                let baseline_y = sf.origin.y + sf.size.height - DEMO_STEP_W - menu_bar_h;
+                let baseline_y = sf.origin.y + sf.size.height - DEMO_STEP_W - MASCOT_TOP_INSET;
                 let x = baseline_x - (n as f64) * DEMO_STEP_W;
                 let new_origin = NSPoint::new(x.max(sf.origin.x), baseline_y);
                 let new_frame = NSRect::new(new_origin, NSSize::new(DEMO_STEP_W, DEMO_STEP_W));
@@ -8740,15 +8698,14 @@ async fn spawn_demo_mascot(app: tauri::AppHandle, pet_id: String) -> Result<Stri
     }
     #[cfg(target_os = "windows")]
     {
-        let wa_top = get_work_area(&win).map(|(_, wy, _, _)| wy);
         if let Ok(Some(monitor)) = win.current_monitor() {
             let scale = monitor.scale_factor();
             let mp = monitor.position();
             let mx = mp.x as f64 / scale;
-            let my = wa_top.unwrap_or(mp.y as f64 / scale);
+            let my = mp.y as f64 / scale;
             let sw = monitor.size().width as f64 / scale;
             let baseline_x = mx + sw - DEMO_STEP_W * 2.0;
-            let baseline_y = my;
+            let baseline_y = my + MASCOT_TOP_INSET;
             let x = (baseline_x - (n as f64) * DEMO_STEP_W).max(mx);
             let _ = win.set_position(tauri::LogicalPosition::new(x, baseline_y));
         }
@@ -12616,7 +12573,7 @@ pub fn run() {
                             let _: () = msg_send![obj, setAcceptsMouseMovedEvents: true];
                         }
 
-                        let screen_info: Option<(f64, f64, f64, f64, f64, f64)> = unsafe {
+                        let screen_info: Option<(f64, f64, f64, f64, f64)> = unsafe {
                             let cls = match AnyClass::get(c"NSScreen") {
                                 Some(c) => c,
                                 None => return,
@@ -12629,14 +12586,13 @@ pub fn run() {
                             if screen.is_null() { return; }
                             let sf: NSRect = msg_send![&*screen, frame];
                             let notch_off = get_notch_offset(screen);
-                            let menu_bar_h = get_menu_bar_height(screen);
-                            Some((sf.origin.x, sf.origin.y, sf.size.width, sf.size.height, notch_off, menu_bar_h))
+                            Some((sf.origin.x, sf.origin.y, sf.size.width, sf.size.height, notch_off))
                         };
 
-                        if let Some((sx, sy, sw, sh, notch_off, menu_bar_h)) = screen_info {
+                        if let Some((sx, sy, sw, sh, notch_off)) = screen_info {
                             let (win_w, win_h) = collapsed_mascot_window_size(1.0);
                             let x = sx + sw / 2.0 + notch_off;
-                            let y = sy + sh - win_h - menu_bar_h;
+                            let y = sy + sh - win_h - MASCOT_TOP_INSET;
                             let frame = NSRect::new(NSPoint::new(x, y), NSSize::new(win_w, win_h));
                             unsafe {
                                 let _: () = msg_send![obj, setFrame: frame, display: true];
@@ -12647,17 +12603,17 @@ pub fn run() {
                 });
             }
 
+            // Windows: position mini window at top-center of primary monitor
             #[cfg(target_os = "windows")]
             if let Some(win) = app.get_webview_window("mini") {
                 let _ = win.set_always_on_top(true);
                 let _ = win.set_skip_taskbar(true);
-                let wa_top = get_work_area(&win).map(|(_, wy, _, _)| wy).unwrap_or(0.0);
                 if let Ok(Some(monitor)) = win.primary_monitor() {
                     let screen = monitor.size();
                     let scale = monitor.scale_factor();
                     let sw = screen.width as f64 / scale;
                     let x = sw / 2.0 + 40.0;
-                    let _ = win.set_position(tauri::LogicalPosition::new(x, wa_top));
+                    let _ = win.set_position(tauri::LogicalPosition::new(x, MASCOT_TOP_INSET));
                 }
                 let _ = win.show();
             }

@@ -109,12 +109,18 @@ const EDGE_TOLERANCE = 4
 // These values are intentionally per-physics-pet defaults; once a
 // second physics pet ships, lift them into pet.json.physics.bbox.
 const SPRITE_PAD_BOTTOM_FRAC = 0.30
+// Top pad — pushed to 0.40. The climb-ceiling sprite anchors the
+// cat's head much deeper into the cell than estimated; the gap was
+// still visible at 0.18 per user. If 0.40 now makes the cat clip
+// past the menu bar (head disappears behind it), dial back toward
+// 0.30. If still a gap, push to 0.50.
 const SPRITE_PAD_TOP_FRAC = 0.40
-// Side pads — fallback fractions used before the runtime alpha-scan
-// measurement completes (~2 s after physics enable). Tuned for wall
-// sprites so the Rust safety-net clamp allows wall-climbing sprites
-// to reach the screen edge. The frontend physics tick applies a
-// tighter per-tick cap for non-wall states once measurement is ready.
+// Side pads — symmetric at 0.45 for shimeji-bola: the grab-wall /
+// climb-wall body is significantly inset on whichever side the cat
+// is rendered. With the per-side flipped variants the rendering is
+// mirror-symmetric, so left and right need the same overshoot to
+// reach the screen edge. If the cat now clips past either edge,
+// dial both back toward 0.40.
 const SPRITE_PAD_LEFT_FRAC = 0.45
 const SPRITE_PAD_RIGHT_FRAC = 0.45
 
@@ -185,16 +191,6 @@ export function resetRuntimeSpritePadCSS() {
   runtimeSpritePad.rightPx = null
   runtimeSpritePad.bottomPx = null
   runtimeSpritePad.leftPx = null
-  cachedTightSidePad = null
-}
-
-// Tight side pad — the smallest side gap across ALL animation rows.
-// Used by the physics tick to cap horizontal movement in non-wall
-// states so no sprite escapes the screen edge.
-let cachedTightSidePad: { leftPx: number; rightPx: number } | null = null
-
-export function getTightSidePad() {
-  return cachedTightSidePad
 }
 
 // Resolve the sprite content padding in *window pixels* for a mascot of
@@ -362,43 +358,39 @@ export async function measureSpriteAnchorsCSS(
     ? gapTop + minTop * yScale
     : null
 
-  // Wall-sprite side pad (loose) — used for edge detection and Rust
-  // clamp so wall/ceiling sprites sit flush with the screen edge.
-  let wallMinLeft = cellW
+  // Sides — bounding box across wall rows. For the `spriteNameFor`
+  // flipX convention (no flip on left wall, CSS scaleX(-1) on right
+  // wall — see petPhysics.ts), both walls' padding derives from the
+  // *leftmost* opaque pixel of the unflipped wall sprite:
+  //
+  //   On LEFT wall (no flip): cat's leftmost-in-render = minLeftmostX
+  //     → padLeft = gap + minLeftmostX × xScale puts that pixel at vf.left.
+  //
+  //   On RIGHT wall (with flip): the cat's wall-touching pixel in the
+  //     flipped render comes from the same unflipped cell-x =
+  //     minLeftmostX (its rendered right edge after mirroring).
+  //     → padRight = gap + minLeftmostX × xScale puts that pixel at vf.right.
+  //
+  // So padLeft == padRight == gap + minLeftmostX × xScale, regardless
+  // of where the cat sits in the cell (left-anchored, centered like
+  // shimeji-bola where minLeft=48, or right-anchored). The earlier
+  // `min(minLeft, cellW-1-maxRight)` heuristic was over-engineering
+  // for an asymmetric-rendering case that doesn't actually exist with
+  // the current renderer — and broke centered sprites by under-padding
+  // by exactly the asymmetry (e.g. 14.8 CSS px gap from wall to hand
+  // for shimeji-bola).
+  let minLeft = cellW
   let anyWallScanned = false
   for (const row of wallRows) {
     const bbox = await getBBox(row)
     if (!bbox) continue
     anyWallScanned = true
-    if (bbox.left < wallMinLeft) wallMinLeft = bbox.left
+    if (bbox.left < minLeft) minLeft = bbox.left
   }
-  const wallSideCSS = anyWallScanned ? Math.max(0, wallMinLeft) * xScale : -1
-  const leftPx = anyWallScanned ? gapLeft + wallSideCSS : null
-  const rightPx = anyWallScanned ? gapRight + wallSideCSS : null
-
-  // Tight side pad (all rows) — the physics tick uses this to cap
-  // horizontal movement in non-wall states so no sprite escapes.
-  const allRows = new Set<number>([...floorRows, ...ceilingRows, ...wallRows])
-  for (const a of Object.values(pet.animations)) {
-    allRows.add(a.row)
-  }
-  let tightMinLeft = cellW
-  let anyTightScanned = false
-  for (const row of allRows) {
-    const bbox = await getBBox(row)
-    if (!bbox) continue
-    anyTightScanned = true
-    if (bbox.left < tightMinLeft) tightMinLeft = bbox.left
-    const rightEdgeMirror = cellW - 1 - bbox.right
-    if (rightEdgeMirror < tightMinLeft) tightMinLeft = rightEdgeMirror
-  }
-  if (anyTightScanned) {
-    const tightCSS = Math.max(0, tightMinLeft) * xScale
-    cachedTightSidePad = {
-      leftPx: gapLeft + tightCSS,
-      rightPx: gapRight + tightCSS,
-    }
-  }
+  const sideCellPad = anyWallScanned ? Math.max(0, minLeft) : -1
+  const sideCSS = sideCellPad >= 0 ? sideCellPad * xScale : -1
+  const leftPx = anyWallScanned ? gapLeft + sideCSS : null
+  const rightPx = anyWallScanned ? gapRight + sideCSS : null
 
   return { topPx, rightPx, bottomPx, leftPx }
 }
