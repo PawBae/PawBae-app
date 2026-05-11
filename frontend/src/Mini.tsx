@@ -4252,14 +4252,14 @@ export default function Mini() {
                 data-physics-anchor=""
                 style={{
                   position: 'relative',
-                  width: collapsedMascotSize * MINI_SPRITE_DISPLAY_MULTIPLIER,
-                  height: Math.round(collapsedMascotSize * MINI_SPRITE_DISPLAY_MULTIPLIER * (miniPet.atlas.cellH / miniPet.atlas.cellW)),
+                  width: collapsedMascotSize * MINI_SPRITE_DISPLAY_MULTIPLIER * (miniPet.displayScale ?? 1),
+                  height: Math.round(collapsedMascotSize * MINI_SPRITE_DISPLAY_MULTIPLIER * (miniPet.atlas.cellH / miniPet.atlas.cellW) * (miniPet.displayScale ?? 1)),
                 }}
               >
                 <MiniPetMascot
                   pet={miniPet}
                   baseState={mainSpriteState}
-                  size={collapsedMascotSize * MINI_SPRITE_DISPLAY_MULTIPLIER}
+                  size={collapsedMascotSize * MINI_SPRITE_DISPLAY_MULTIPLIER * (miniPet.displayScale ?? 1)}
                   enableHoverJump
                   externalHover={mascotHover}
                   useExternalHover={!isWindowsPlatform}
@@ -4710,13 +4710,13 @@ export default function Mini() {
                                         }}
                                         className="relative shrink-0 flex items-center justify-center cursor-pointer"
                                         style={{
-                                          width: Math.round(40 * SESSION_SPRITE_DISPLAY_MULTIPLIER),
-                                          height: Math.round(40 * SESSION_SPRITE_DISPLAY_MULTIPLIER * ((rowPet?.atlas.cellH ?? 208) / (rowPet?.atlas.cellW ?? 192))),
+                                          width: Math.round(40 * SESSION_SPRITE_DISPLAY_MULTIPLIER * (rowPet?.displayScale ?? 1)),
+                                          height: Math.round(40 * SESSION_SPRITE_DISPLAY_MULTIPLIER * ((rowPet?.atlas.cellH ?? 208) / (rowPet?.atlas.cellW ?? 192)) * (rowPet?.displayScale ?? 1)),
                                         }}
                                       >
                                         <div className="absolute inset-0" style={{ left: -16 }} />
                                         {rowPet ? (
-                                          <SpritePet pet={rowPet} state={ocSpriteState} size={Math.round(40 * SESSION_SPRITE_DISPLAY_MULTIPLIER)} />
+                                          <SpritePet pet={rowPet} state={ocSpriteState} size={Math.round(40 * SESSION_SPRITE_DISPLAY_MULTIPLIER * (rowPet.displayScale ?? 1))} />
                                         ) : (
                                           <span className="text-white/40 text-lg">{agent?.identityEmoji || '?'}</span>
                                         )}
@@ -4875,13 +4875,13 @@ export default function Mini() {
                                           }}
                                           className="relative shrink-0 flex items-center justify-center cursor-pointer"
                                           style={{
-                                            width: Math.round(40 * SESSION_SPRITE_DISPLAY_MULTIPLIER),
-                                            height: Math.round(40 * SESSION_SPRITE_DISPLAY_MULTIPLIER * ((rowPet?.atlas.cellH ?? 208) / (rowPet?.atlas.cellW ?? 192))),
+                                            width: Math.round(40 * SESSION_SPRITE_DISPLAY_MULTIPLIER * (rowPet?.displayScale ?? 1)),
+                                            height: Math.round(40 * SESSION_SPRITE_DISPLAY_MULTIPLIER * ((rowPet?.atlas.cellH ?? 208) / (rowPet?.atlas.cellW ?? 192)) * (rowPet?.displayScale ?? 1)),
                                           }}
                                         >
                                           <div className="absolute inset-0" style={{ left: -16 }} />
                                           {rowPet ? (
-                                            <SpritePet pet={rowPet} state={claudeSpriteState} size={Math.round(40 * SESSION_SPRITE_DISPLAY_MULTIPLIER)} />
+                                            <SpritePet pet={rowPet} state={claudeSpriteState} size={Math.round(40 * SESSION_SPRITE_DISPLAY_MULTIPLIER * (rowPet.displayScale ?? 1))} />
                                           ) : (
                                             <span className="text-white/40 text-lg">🤖</span>
                                           )}
@@ -5331,7 +5331,7 @@ export default function Mini() {
                             <SpritePet
                               pet={miniPet}
                               state="idle"
-                              size={Math.round(68 * SESSION_SPRITE_DISPLAY_MULTIPLIER)}
+                              size={Math.round(68 * SESSION_SPRITE_DISPLAY_MULTIPLIER * (miniPet.displayScale ?? 1))}
                               style={{ animation: 'bob 2s ease-in-out infinite', opacity: 0.8 }}
                             />
                           ) : (
@@ -5396,7 +5396,7 @@ export default function Mini() {
                             >
                               <div style={{ position: 'relative' }}>
                                 {slotPet ? (
-                                  <SpritePet pet={slotPet} state={slotSpriteState} size={Math.round(56 * SESSION_SPRITE_DISPLAY_MULTIPLIER)} />
+                                  <SpritePet pet={slotPet} state={slotSpriteState} size={Math.round(56 * SESSION_SPRITE_DISPLAY_MULTIPLIER * (slotPet.displayScale ?? 1))} />
                                 ) : null}
                                 {!miniPet && petQueueResolved.length === 0 && (
                                   <div

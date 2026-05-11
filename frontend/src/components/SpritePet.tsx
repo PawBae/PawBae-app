@@ -150,6 +150,17 @@ export function SpritePet({ pet, state, size, onOneShotEnd, loop, className, sty
   const bgX = -(offsetCol + frame) * pet.atlas.cellW * scale
   const bgY = -row.row * pet.atlas.cellH * scale
 
+  // Per-row visual scale anchored at the feet: when a row's character
+  // bbox is smaller than other rows (e.g. Yoonie's running pose is ~9%
+  // shorter than her idle pose), declaring displayScale > 1 enlarges
+  // just this row so the pet doesn't appear to shrink mid-animation.
+  // transform-origin: bottom center keeps the feet on the floor.
+  const rowScale = row.displayScale ?? 1
+  const transformParts: string[] = []
+  if (row.flipX) transformParts.push('scaleX(-1)')
+  if (rowScale !== 1) transformParts.push(`scale(${rowScale})`)
+  const transform = transformParts.length ? transformParts.join(' ') : undefined
+
   return (
     <div
       className={className}
@@ -161,7 +172,9 @@ export function SpritePet({ pet, state, size, onOneShotEnd, loop, className, sty
         backgroundSize: `${totalW}px ${totalH}px`,
         backgroundPosition: `${bgX}px ${bgY}px`,
         imageRendering: 'pixelated',
-        transform: row.flipX ? 'scaleX(-1)' : undefined,
+        transform,
+        transformOrigin: rowScale !== 1 ? 'bottom center' : undefined,
+        overflow: 'visible',
         ...style,
       }}
     />
