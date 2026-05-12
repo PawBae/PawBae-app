@@ -558,7 +558,11 @@ function stepOnScreen(s: MutablePhysicsState, edge: EdgeState) {
         s.ticksInState = 0
         s.vx = 0
         s.vy = -CLIMB_SPEED
-        s.facing = 1
+        // Match the steady on_wall convention below on the very first
+        // climb frame: left screen wall uses the flipped wall pose, right
+        // screen wall uses the native pose. If this starts opposite, the
+        // next tick corrects it and the sprite visibly flips while climbing.
+        s.facing = -1
         return
       }
       if (edge.onRight && s.vx > 0) {
@@ -566,7 +570,9 @@ function stepOnScreen(s: MutablePhysicsState, edge: EdgeState) {
         s.ticksInState = 0
         s.vx = 0
         s.vy = -CLIMB_SPEED
-        s.facing = -1
+        // Keep this aligned with the on_wall edge check so the first
+        // grab-wall frame does not briefly render the mirrored variant.
+        s.facing = 1
         return
       }
       return
