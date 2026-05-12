@@ -715,6 +715,89 @@ export default function Mini() {
   // clobber a user edit. Seeded from voiceText when entering `editing`.
   const [voiceDraft, setVoiceDraft] = useState('')
   const voiceTextareaRef = useRef<HTMLTextAreaElement | null>(null)
+  // Auto-grow the voice textarea to fit content, capped at maxHeight (set
+  // in its inline style). Reset to 'auto' first so scrollHeight reflects
+  // shrinking too — without that, deleting text leaves stale tall height.
+  // Runs on every voiceDraft change (initial seed from STT and ongoing
+  // edits both go through setVoiceDraft).
+  useEffect(() => {
+    const el = voiceTextareaRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    // Match the inline maxHeight cap. scrollHeight includes padding so the
+    // resulting height is "tightest fit, capped at 80px".
+    el.style.height = `${Math.min(80, el.scrollHeight)}px`
+  }, [voiceDraft, voiceMode])
+  // Voice dispatch target list, populated when entering `editing`. The first
+  // entry is auto-selected (already sorted by Rust: frontmost > updated_at).
+  // `voiceTargetId === null` means "no live target available" — the bubble
+  // shows a "no agent" hint and Enter copies to clipboard.
+  interface VoiceTargetUI {
+    id: string
+    kind: string         // "cc" | "codex" | "openclaw" (cursor AI chat is excluded by the Rust list_voice_targets filter)
+    label: string
+    cwd?: string | null
+    updatedAt?: number | null
+    hostTerminal?: string | null
+    isFrontmost: boolean
+    // false for proc-scan-only orphans that started before oc-claw installed
+    // hooks: dispatch still works (iTerm write text is hook-independent), but
+    // no voice-agent-done event will ever fire for them. Used to mark the
+    // picker row + soften the success toast so users don't keep waiting.
+    hasReceipt: boolean
+  }
+  const [voiceTargets, setVoiceTargets] = useState<VoiceTargetUI[]>([])
+  const [voiceTargetId, setVoiceTargetId] = useState<string | null>(null)
+  const voiceTargetIdRef = useRef<string | null>(null)
+  useEffect(() => { voiceTargetIdRef.current = voiceTargetId }, [voiceTargetId])
+  // Optional post-submit feedback shown in place of the editable card while
+  // the bubble fades out. Tone drives the background color.
+  type VoiceFeedbackTone = 'success' | 'info' | 'error'
+  const [voiceFeedback, setVoiceFeedback] = useState<{ text: string; tone: VoiceFeedbackTone } | null>(null)
+  // Sticky last-used target so future invocations can prefer it when multiple
+  // candidates have similar freshness. Persisted in localStorage for cross-
+  // session continuity.
+  const lastVoiceTargetIdRef = useRef<string | null>(null)
+  useEffect(() => {
+    try {
+      const v = localStorage.getItem('voice.lastTargetId')
+      lastVoiceTargetIdRef.current = v || null
+    } catch {}
+  }, [])
+  // User-declared custom terminal agents. Anything that runs in a tty and
+  // accepts text on stdin qualifies (aider, opencode, cline, …). We don't
+  // install hooks for these — completion receipts will be unavailable —
+  // but voice dispatch via iTerm/Terminal write text works the same way.
+  // Persisted as JSON in store key `custom_agents`.
+  interface CustomAgentDef {
+    binary: string
+    displayName?: string
+    kind?: string
+  }
+  const [customAgents, setCustomAgents] = useState<CustomAgentDef[]>([])
+  const customAgentsRef = useRef<CustomAgentDef[]>([])
+  useEffect(() => { customAgentsRef.current = customAgents }, [customAgents])
+
+  // Voice target mode (Settings):
+  //   'auto'  — pick last-used sticky, fall back to first running agent
+  //   'fixed' — always pick the pinned target (matched by kind + cwd basename)
+  //   'ask'   — never pre-pick; user MUST select a target before submit works
+  // The fixed key is a stable string built from (kind, cwd) so it survives
+  // process restarts. Volatile session/proc ids would break across restarts.
+  type VoiceTargetMode = 'auto' | 'fixed' | 'ask'
+  const [voiceTargetMode, setVoiceTargetMode] = useState<VoiceTargetMode>('auto')
+  const voiceTargetModeRef = useRef<VoiceTargetMode>('auto')
+  useEffect(() => { voiceTargetModeRef.current = voiceTargetMode }, [voiceTargetMode])
+  const [voiceFixedTargetKey, setVoiceFixedTargetKey] = useState<string | null>(null)
+  const voiceFixedTargetKeyRef = useRef<string | null>(null)
+  useEffect(() => { voiceFixedTargetKeyRef.current = voiceFixedTargetKey }, [voiceFixedTargetKey])
+  // Build a stable selector key for a target. Keeps this in sync with the
+  // matching logic in `pickDefaultVoiceTarget` so saving and matching never
+  // disagree. `cwd` is normalized to trailing-slash-free.
+  const targetSelectorKey = (t: { kind: string; cwd?: string | null }): string => {
+    const cwd = (t.cwd || '').replace(/\/+$/, '')
+    return `${t.kind}:${cwd}`
+  }
   // Refs mirroring agents + selection so the (mount-bound) voice listeners
   // and submit handler can read the latest values without re-binding.
   // (`appModeRef` already exists higher up — reuse it.)
@@ -1666,11 +1749,61 @@ export default function Mini() {
       voiceFadeTimerRef.current = null
     }
     setVoiceDraft(seed)
+    setVoiceFeedback(null)
     setVoiceMode('editing')
     voiceModeRef.current = 'editing'
     setVoiceBubbleVisible(true)
     enterListenPose()
     setVoicePassthroughOverride(true)
+    // Fetch the dispatch target list and pick a default per the user's
+    // configured target mode. Rust already sorts by (is_frontmost desc,
+    // updated_at desc); we then apply:
+    //   'auto'  → last-used sticky id, else first in list
+    //   'fixed' → match saved (kind, cwd) key, else first in list
+    //   'ask'   → leave selection null so submit blocks until user picks
+    invoke<VoiceTargetUI[]>('list_voice_targets', { customAgents: customAgentsRef.current })
+      .then((list) => {
+        // Respect the Settings → "Enable Claude Code / Codex / Cursor" toggles:
+        // if the user disabled an agent globally, it shouldn't show up as a
+        // voice target either. Cursor is already excluded server-side. We
+        // intentionally still include OpenClaw and any unknown kinds (no
+        // toggle exists for them today).
+        const targets = (list || []).filter((t) => {
+          if (t.kind === 'cc' && !enableClaudeCode) return false
+          if (t.kind === 'codex' && !enableCodex) return false
+          if (t.kind === 'cursor' && !enableCursor) return false
+          return true
+        })
+        setVoiceTargets(targets)
+        const mode = voiceTargetModeRef.current
+        let picked: string | null = null
+        if (mode === 'ask') {
+          picked = null
+        } else if (mode === 'fixed') {
+          const key = voiceFixedTargetKeyRef.current
+          if (key) {
+            const match = targets.find(t => targetSelectorKey(t) === key)
+            if (match) picked = match.id
+          }
+          if (!picked && targets.length > 0) picked = targets[0].id
+        } else {
+          const last = lastVoiceTargetIdRef.current
+          if (last && targets.some(t => t.id === last)) {
+            picked = last
+          } else if (targets.length > 0) {
+            picked = targets[0].id
+          }
+        }
+        setVoiceTargetId(picked)
+        voiceTargetIdRef.current = picked
+        console.warn('[voice] targets loaded:', targets.length, 'mode:', mode, 'picked:', picked)
+      })
+      .catch((e) => {
+        console.warn('[voice] list_voice_targets failed:', e)
+        setVoiceTargets([])
+        setVoiceTargetId(null)
+        voiceTargetIdRef.current = null
+      })
     // Focus + caret-to-end on the next paint.
     requestAnimationFrame(() => {
       const el = voiceTextareaRef.current
@@ -1691,6 +1824,10 @@ export default function Mini() {
     setVoiceText('')
     setVoiceBubbleVisible(false)
     setVoiceError(undefined)
+    setVoiceFeedback(null)
+    setVoiceTargets([])
+    setVoiceTargetId(null)
+    voiceTargetIdRef.current = null
     setVoiceMode('idle')
     voiceModeRef.current = 'idle'
     clearListenPose()
@@ -1700,63 +1837,114 @@ export default function Mini() {
       .then((rec) => { if (rec) invoke('voice_toggle').catch(() => {}) })
       .catch(() => {})
   }
-  // Helper: submit the (possibly edited) prompt to the currently-selected
-  // OpenClaw agent. Falls back to the first agent in the list. Flips the
-  // pet to `work` for the duration of the openclaw subprocess and back to
-  // idle when it completes (success or failure).
+  // Submit the (possibly edited) voice prompt to the chosen target via the
+  // unified Rust `dispatch_voice_message` command. Routing matrix (all in Rust):
+  //   target.kind == "cc" | "codex"  → terminal injection (iTerm/Terminal.app
+  //                                    write text, or Ghostty raise+paste)
+  //   target.kind == "openclaw"      → spawn_openclaw_agent (shared with send_chat)
+  //   no target selected             → clipboard-only fallback
+  // Cursor's native AI chat is intentionally excluded from the picker — we
+  // have no API to inject into Cursor's chat panel, and surfacing it would
+  // just lead users to the clipboard fallback.
+  //
+  // OpenClaw is a long-running subprocess so we trigger the pet "work" animation
+  // before the await and restore idle after. The other kinds are fire-and-forget
+  // and return within ~100ms.
+  //
+  // The Rust call returns one of three result shapes:
+  //   {kind: "sent",      target_kind, target_label}
+  //   {kind: "clipboard", reason}
+  //   {kind: "failed",    reason}
+  // Each maps to a short toast shown in the bubble before it fades out.
   const submitVoicePrompt = async (text: string) => {
     const trimmed = text.trim()
     if (!trimmed) { cancelVoice(); return }
-    let targetId: string | null = selectedAgentIdRef.current
-    if (!targetId) {
-      const first = agentsRef.current[0]
-      targetId = first?.id ?? null
-    }
-    if (!targetId) {
-      setVoiceError('No OpenClaw agent available')
-      setVoiceMode('idle'); voiceModeRef.current = 'idle'
-      clearListenPose()
-      setVoicePassthroughOverride(false)
-      setVoiceBubbleVisible(true)
-      if (voiceFadeTimerRef.current) clearTimeout(voiceFadeTimerRef.current)
-      voiceFadeTimerRef.current = setTimeout(() => {
-        setVoiceBubbleVisible(false)
-        setVoiceError(undefined)
-      }, 3000)
+
+    const targetId = voiceTargetIdRef.current
+    const target = (voiceTargets || []).find(t => t.id === targetId) || null
+    console.warn('[voice] submit start', { len: trimmed.length, targetId, kind: target?.kind, label: target?.label })
+
+    // 'ask' mode blocks submit until the user explicitly picks a target via
+    // Tab/click. Keep editor state intact so the user can pick a target and
+    // submit without re-typing. The target indicator row shows the prompt
+    // inline (handled in the bubble render below).
+    if (voiceTargetModeRef.current === 'ask' && !target && (voiceTargets || []).length > 0) {
+      console.warn('[voice] ask mode: submit blocked, no target picked')
       return
     }
-    const realId = agentRealIdMapRef.current.get(targetId) || targetId
+
+    const isOpenclaw = target?.kind === 'openclaw'
+    const agentId = isOpenclaw ? (agentRealIdMapRef.current.get(target!.id) || target!.id) : null
 
     setVoiceMode('submitting'); voiceModeRef.current = 'submitting'
-    // Transition the pet from "listening" to "working" while openclaw runs.
-    setCurrentPetAction('work'); currentPetActionRef.current = 'work'
-    // The editable card is no longer needed; let the panel/session view show
-    // ongoing progress and the reply.
-    setVoiceBubbleVisible(false)
-    setVoiceText('')
-    setVoiceDraft('')
-    setVoicePassthroughOverride(false)
+    if (isOpenclaw) {
+      setCurrentPetAction('work'); currentPetActionRef.current = 'work'
+      setVoiceBubbleVisible(false)
+      setVoiceText('')
+      setVoiceDraft('')
+      setVoicePassthroughOverride(false)
+    }
 
     try {
-      await invoke('send_chat', { message: trimmed, agentId: realId })
+      const result = await invoke<
+        | { kind: 'sent'; target_kind: string; target_label: string; expects_receipt: boolean }
+        | { kind: 'clipboard'; reason: string }
+        | { kind: 'failed'; reason: string }
+      >('dispatch_voice_message', {
+        message: trimmed,
+        targetId: target?.id ?? null,
+        targetKind: target?.kind ?? null,
+        agentId,
+      })
+      console.warn('[voice] dispatch result:', result)
+      if (result.kind === 'sent') {
+        if (target) {
+          try { localStorage.setItem('voice.lastTargetId', target.id) } catch {}
+          lastVoiceTargetIdRef.current = target.id
+        }
+        // OpenClaw spawns its own subprocess and the result text is the agent
+        // reply — we already showed pet "work" animation; no toast needed.
+        if (!isOpenclaw) {
+          // For hookless targets (proc-scan orphans), the toast tells the
+          // user upfront that no completion ping will follow — otherwise
+          // they'd sit there expecting one. Standard targets keep the
+          // short "Sent to X" toast.
+          const base = `✓ Sent to ${result.target_label || target?.label || 'agent'}`
+          const text = result.expects_receipt ? base : `${base} · 无回执`
+          showVoiceFeedback(text, 'success', result.expects_receipt ? 1400 : 2400)
+        }
+      } else if (result.kind === 'clipboard') {
+        showVoiceFeedback(`📋 Copied to clipboard`, 'info', 1600)
+      } else {
+        showVoiceFeedback(`✗ ${result.reason}`, 'error', 3000)
+      }
     } catch (e) {
-      console.warn('[voice] send_chat failed:', e)
-      setVoiceError(String(e))
-      setVoiceBubbleVisible(true)
-      if (voiceFadeTimerRef.current) clearTimeout(voiceFadeTimerRef.current)
-      voiceFadeTimerRef.current = setTimeout(() => {
-        setVoiceBubbleVisible(false)
-        setVoiceError(undefined)
-      }, 3000)
+      console.warn('[voice] dispatch_voice_message threw:', e)
+      showVoiceFeedback(`✗ ${String(e)}`, 'error', 3000)
     } finally {
       setVoiceMode('idle'); voiceModeRef.current = 'idle'
-      // Drop work → idle (don't touch higher-priority actions if anything
-      // else escalated in the meantime).
-      if (currentPetActionRef.current === 'work') {
+      if (isOpenclaw && currentPetActionRef.current === 'work') {
         setCurrentPetAction('idle')
         currentPetActionRef.current = 'idle'
       }
     }
+  }
+
+  // Show a transient toast in the voice bubble. Reuses the bubble container
+  // so we don't paint two overlapping pieces of UI; clears all editing
+  // state but keeps the bubble visible until the fade timer fires.
+  const showVoiceFeedback = (text: string, tone: VoiceFeedbackTone, fadeMs: number) => {
+    setVoiceDraft('')
+    setVoiceText('')
+    setVoicePassthroughOverride(false)
+    setVoiceFeedback({ text, tone })
+    setVoiceBubbleVisible(true)
+    if (voiceFadeTimerRef.current) clearTimeout(voiceFadeTimerRef.current)
+    voiceFadeTimerRef.current = setTimeout(() => {
+      setVoiceBubbleVisible(false)
+      setVoiceFeedback(null)
+      clearListenPose()
+    }, fadeMs)
   }
 
   // Voice input event listeners (push-to-talk via Ctrl+Shift+V).
@@ -1833,9 +2021,38 @@ export default function Mini() {
         enterEditing(ev.payload.text)
       }
     })
+    // Voice-dispatch completion receipt. Rust emits this when a CC/Codex
+    // session that we just voice-dispatched to fires its next Stop event.
+    // We show a small "done" toast in the pet bubble and play a distinct
+    // sound — but only if the user isn't actively editing a NEW voice
+    // prompt, since overwriting their draft mid-typing would be hostile.
+    const p3 = listen<{ sessionId: string; label: string; targetKind: string; preview: string }>(
+      'voice-agent-done',
+      (ev) => {
+        console.warn('[voice-agent-done]', ev.payload)
+        const mode = voiceModeRef.current
+        if (mode === 'editing' || mode === 'recording') {
+          // Don't steal the bubble from an in-progress voice session — the
+          // pet bubble is currently theirs. Skip the toast; the existing
+          // standard completion-sound path still fires.
+          return
+        }
+        const { label, preview } = ev.payload
+        const display = preview && preview.length > 0
+          ? `✓ ${label} · ${preview}`
+          : `✓ ${label} 完成`
+        showVoiceFeedback(display, 'success', 2400)
+        // Distinct short sound so the user can tell "voice-targeted agent
+        // finished" apart from any other notification. Pop is a brief macOS
+        // system sound; on Windows the Rust play_sound falls back to the
+        // bundled glass.mp3, which is also fine for this purpose.
+        invoke('play_sound', { name: 'Pop' }).catch(() => {})
+      }
+    )
     return () => {
       p1.then(fn => fn())
       p2.then(fn => fn())
+      p3.then(fn => fn())
       if (voiceFadeTimerRef.current) clearTimeout(voiceFadeTimerRef.current)
       // Safety: clear the passthrough override on unmount so we never leave
       // pet mode stuck-interactive after a hot reload.
@@ -2444,6 +2661,24 @@ export default function Mini() {
         const clamped = Math.min(30, Math.max(0.5, piim))
         setPetIdleIntervalMin(clamped)
         petIdleIntervalMinRef.current = clamped
+      }
+      const vtm = await store.get('voice_target_mode')
+      if (vtm === 'auto' || vtm === 'fixed' || vtm === 'ask') {
+        setVoiceTargetMode(vtm)
+        voiceTargetModeRef.current = vtm
+      }
+      const vftk = await store.get('voice_fixed_target_key')
+      if (typeof vftk === 'string' && vftk) {
+        setVoiceFixedTargetKey(vftk)
+        voiceFixedTargetKeyRef.current = vftk
+      }
+      const ca = await store.get('custom_agents')
+      if (Array.isArray(ca)) {
+        const cleaned = (ca as unknown[])
+          .filter((x): x is CustomAgentDef =>
+            !!x && typeof x === 'object' && typeof (x as CustomAgentDef).binary === 'string' && !!(x as CustomAgentDef).binary)
+        setCustomAgents(cleaned)
+        customAgentsRef.current = cleaned
       }
       const aet = await store.get('auto_expand_on_task')
       if (typeof aet === 'boolean') {
@@ -4268,18 +4503,37 @@ export default function Mini() {
           pointerEvents: 'none',
           zIndex: 99999,
         }}>
+          {(() => {
+          // Compute bubble background tone once so the body + tail triangle
+          // share the same color. rgba lets the backdrop blur show through
+          // the bubble for a more native-feeling translucent control.
+          const bubbleBg = voiceFeedback
+            ? (voiceFeedback.tone === 'success' ? 'rgba(39, 174, 96, 0.88)'
+               : voiceFeedback.tone === 'error' ? 'rgba(231, 76, 60, 0.88)'
+               : 'rgba(52, 152, 219, 0.88)')
+            : (voiceError ? 'rgba(231, 76, 60, 0.88)' : 'rgba(245, 166, 35, 0.88)')
+          return (
           <div style={{
-            background: voiceError ? '#e74c3c' : '#F5A623',
+            background: bubbleBg,
+            backdropFilter: 'blur(12px) saturate(140%)',
+            WebkitBackdropFilter: 'blur(12px) saturate(140%)',
             borderRadius: 14,
             padding: voiceMode === 'editing' ? '8px 12px' : '6px 12px',
             color: '#fff',
             fontSize: 12,
             fontWeight: 500,
             textAlign: 'center',
-            boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
+            // Layered shadow: tight close-shadow for definition, looser
+            // far-shadow for depth without ringing the bubble in dark grey.
+            boxShadow: '0 1px 2px rgba(0,0,0,0.18), 0 4px 14px rgba(0,0,0,0.22)',
             maxWidth: voiceMode === 'editing' ? 360 : '90%',
             minWidth: voiceMode === 'editing' ? 220 : undefined,
             lineHeight: 1.4,
+            // Smooth tone transitions when feedback flips success ↔ error
+            // ↔ default. Otherwise the color change is a jarring hard cut.
+            transition: 'background-color 0.18s ease',
+            // Anchor for the tail triangle's absolute positioning.
+            position: 'relative',
             // Only the editable card is interactive — recording-mode bubble
             // stays passthrough.
             pointerEvents: voiceMode === 'editing' ? 'auto' : 'none',
@@ -4292,7 +4546,9 @@ export default function Mini() {
               voiceTextareaRef.current?.focus()
             }
           }}>
-            {voiceError ? (
+            {voiceFeedback ? (
+              voiceFeedback.text
+            ) : voiceError ? (
               voiceError
             ) : voiceMode === 'editing' ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -4309,11 +4565,23 @@ export default function Mini() {
                     } else if (e.key === 'Escape') {
                       e.preventDefault()
                       cancelVoice()
+                    } else if (e.key === 'Tab' && voiceTargets.length > 1) {
+                      // Tab cycles through targets without losing focus.
+                      e.preventDefault()
+                      const idx = voiceTargets.findIndex(t => t.id === voiceTargetId)
+                      const step = e.shiftKey ? -1 : 1
+                      const next = (idx + step + voiceTargets.length) % voiceTargets.length
+                      setVoiceTargetId(voiceTargets[next].id)
+                      voiceTargetIdRef.current = voiceTargets[next].id
                     }
                   }}
-                  // Prevent the global Ctrl+Shift+V hotkey from also being
-                  // intercepted by the textarea's default keymap.
-                  rows={Math.min(4, Math.max(1, voiceDraft.split('\n').length))}
+                  // rows=1 baseline; the actual height is driven by the
+                  // auto-grow effect below (reads scrollHeight on each draft
+                  // change). The old `Math.min(4, split('\n').length)` only
+                  // counted explicit linebreaks, so a single long sentence
+                  // that visually wraps to 4 lines stayed at rows=1 and got
+                  // visually clipped to its bottom line.
+                  rows={1}
                   placeholder=""
                   style={{
                     background: 'rgba(255,255,255,0.22)',
@@ -4329,18 +4597,165 @@ export default function Mini() {
                     resize: 'none',
                     fontFamily: 'inherit',
                     lineHeight: 1.4,
+                    // Hard cap. Bubble container has no max-height itself,
+                    // so this is what stops a multi-paragraph voice prompt
+                    // from extending the bubble down over the mascot.
+                    // Content beyond ~3 lines scrolls inside the textarea.
+                    maxHeight: 80,
+                    overflowY: 'auto',
                   }}
                 />
-                <div style={{ fontSize: 10, opacity: 0.85, textAlign: 'center' }}>
-                  Enter ↵ send · Esc cancel
-                </div>
+                {/* Target row: shows the current dispatch destination. When
+                    the list is empty, surface a hint so the user knows
+                    pressing Enter will fall back to the clipboard. In 'ask'
+                    mode with no pre-pick, prompt the user to pick first. */}
+                {(() => {
+                  const t = voiceTargets.find(x => x.id === voiceTargetId)
+                  if (!t) {
+                    if (voiceTargetMode === 'ask' && voiceTargets.length > 0) {
+                      return (
+                        <div style={{
+                          fontSize: 10,
+                          opacity: 0.95,
+                          textAlign: 'center',
+                          background: 'rgba(245, 166, 35, 0.45)',
+                          borderRadius: 6,
+                          padding: '3px 6px',
+                        }}>
+                          Tab to pick agent · then Enter
+                        </div>
+                      )
+                    }
+                    return (
+                      <div style={{
+                        fontSize: 10,
+                        opacity: 0.95,
+                        textAlign: 'center',
+                        background: 'rgba(231, 76, 60, 0.35)',
+                        borderRadius: 6,
+                        padding: '3px 6px',
+                      }}>
+                        No running agent · Enter → 📋 clipboard
+                      </div>
+                    )
+                  }
+                  const kindLabel = t.kind === 'cc' ? 'Claude Code' : t.kind === 'codex' ? 'Codex' : t.kind === 'cursor' ? 'Cursor' : t.kind
+                  const cwdShort = t.cwd ? (t.cwd.split('/').filter(Boolean).pop() || t.cwd) : ''
+                  const moreSuffix = voiceTargets.length > 1 ? `  ·  Tab to switch (${voiceTargets.length})` : ''
+                  const currentKey = targetSelectorKey(t)
+                  const isPinnedHere = voiceTargetMode === 'fixed' && voiceFixedTargetKey === currentKey
+                  // Pin button: sets this target as the fixed pin (and flips
+                  // mode to 'fixed' so the pin is honored on next invocation).
+                  // Clicking the filled pin toggles back to 'auto' mode.
+                  const togglePin = async () => {
+                    try {
+                      const store = await getStore()
+                      if (isPinnedHere) {
+                        setVoiceTargetMode('auto'); voiceTargetModeRef.current = 'auto'
+                        setVoiceFixedTargetKey(null); voiceFixedTargetKeyRef.current = null
+                        await store.set('voice_target_mode', 'auto')
+                        await store.set('voice_fixed_target_key', '')
+                      } else {
+                        setVoiceTargetMode('fixed'); voiceTargetModeRef.current = 'fixed'
+                        setVoiceFixedTargetKey(currentKey); voiceFixedTargetKeyRef.current = currentKey
+                        await store.set('voice_target_mode', 'fixed')
+                        await store.set('voice_fixed_target_key', currentKey)
+                      }
+                      await store.save()
+                    } catch (e) {
+                      console.warn('[voice] pin toggle failed:', e)
+                    }
+                  }
+                  return (
+                    <div style={{
+                      fontSize: 10,
+                      opacity: 0.95,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 4,
+                      background: 'rgba(255,255,255,0.15)',
+                      borderRadius: 6,
+                      padding: '3px 6px',
+                    }}>
+                      <span style={{ flex: 1, textAlign: 'center' }}>
+                        → {kindLabel}{cwdShort ? ` · ${cwdShort}` : ''}
+                        {!t.hasReceipt && (
+                          // Hover-tooltip explains both the symptom and the
+                          // fix. Dotted underline + help cursor signals that
+                          // this is interactive (not just a static label).
+                          <span
+                            title="该 agent 启动于 oc-claw 安装 hook 之前，处理完不会自动回执。在该终端重启 agent 进程即可启用回执。"
+                            style={{
+                              textDecoration: 'underline dotted',
+                              cursor: 'help',
+                              opacity: 0.85,
+                            }}
+                          >
+                            {'  ·  无回执'}
+                          </span>
+                        )}
+                        {moreSuffix}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={togglePin}
+                        title={isPinnedHere ? 'Click to unpin (auto mode)' : 'Pin this target (fixed mode)'}
+                        style={{
+                          background: 'transparent',
+                          border: 'none',
+                          cursor: 'pointer',
+                          padding: 2,
+                          margin: 0,
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          borderRadius: 4,
+                          opacity: isPinnedHere ? 1 : 0.55,
+                          color: '#fff',
+                          transition: 'opacity 0.15s ease, background 0.15s ease',
+                        }}
+                        onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.18)' }}
+                        onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
+                      >
+                        {/* Lucide Pin: line-icon avoids the cross-platform emoji
+                           inconsistency (📍/📌 render very differently across
+                           macOS versions and emoji-font fallbacks). Filled when
+                           the current target is the active pin. */}
+                        <Pin size={11} strokeWidth={2} fill={isPinnedHere ? 'currentColor' : 'none'} />
+                      </button>
+                    </div>
+                  )
+                })()}
               </div>
             ) : voiceMode === 'submitting' ? (
               'Sending…'
             ) : (
               voiceText || (voiceRecording ? '...' : '')
             )}
+            {/* Tail triangle pointing down toward the mascot. Inherits the
+                bubble's translucent background color so it looks like one
+                continuous shape. No backdrop-filter on the tail itself —
+                blur on a 12px element produces visible artifacts at the
+                tip; the bubble body already carries the blur effect. */}
+            <div
+              aria-hidden
+              style={{
+                position: 'absolute',
+                bottom: -6,
+                left: '50%',
+                transform: 'translateX(-50%)',
+                width: 0,
+                height: 0,
+                borderLeft: '7px solid transparent',
+                borderRight: '7px solid transparent',
+                borderTop: `7px solid ${bubbleBg}`,
+                pointerEvents: 'none',
+                filter: 'drop-shadow(0 2px 2px rgba(0,0,0,0.18))',
+              }}
+            />
           </div>
+          )
+          })()}
         </div>
       )}
       {/* Collapsed */}
@@ -6235,6 +6650,45 @@ export default function Mini() {
                           petIdleIntervalMinRef.current = clamped
                           const store = await getStore()
                           await store.set('pet_idle_interval_min', clamped)
+                          await store.save()
+                        }}
+                        voiceTargetMode={voiceTargetMode}
+                        onChangeVoiceTargetMode={async (v) => {
+                          setVoiceTargetMode(v)
+                          voiceTargetModeRef.current = v
+                          const store = await getStore()
+                          await store.set('voice_target_mode', v)
+                          await store.save()
+                        }}
+                        voiceFixedTargetKey={voiceFixedTargetKey}
+                        onClearVoiceFixedTarget={async () => {
+                          setVoiceFixedTargetKey(null)
+                          voiceFixedTargetKeyRef.current = null
+                          const store = await getStore()
+                          await store.set('voice_fixed_target_key', '')
+                          await store.save()
+                        }}
+                        customAgents={customAgents}
+                        onAddCustomAgent={async (a) => {
+                          // Dedup by binary — adding the same name overwrites
+                          // the existing display name rather than producing
+                          // duplicate rows.
+                          const next = [
+                            ...customAgents.filter((c) => c.binary !== a.binary),
+                            a,
+                          ]
+                          setCustomAgents(next)
+                          customAgentsRef.current = next
+                          const store = await getStore()
+                          await store.set('custom_agents', next)
+                          await store.save()
+                        }}
+                        onRemoveCustomAgent={async (binary) => {
+                          const next = customAgents.filter((c) => c.binary !== binary)
+                          setCustomAgents(next)
+                          customAgentsRef.current = next
+                          const store = await getStore()
+                          await store.set('custom_agents', next)
                           await store.save()
                         }}
                       />

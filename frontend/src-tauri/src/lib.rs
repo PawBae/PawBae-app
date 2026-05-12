@@ -397,6 +397,31 @@ struct ActiveAgentPid {
     pid: Mutex<Option<u32>>,
 }
 
+/// One pending voice dispatch awaiting its target agent's next Stop event.
+/// Keyed by the agent's terminal-resident pid so the Stop handler in
+/// `process_claude_event` can correlate completion back to a voice send.
+#[derive(Clone)]
+struct VoicePendingInfo {
+    /// Display label captured at dispatch time (e.g. "Codex · PawPet"); shown
+    /// in the completion bubble so the user knows which agent finished.
+    label: String,
+    /// "cc" | "codex"; used to gate display formatting if needed later.
+    target_kind: String,
+    /// Unix seconds at dispatch. Currently unused — kept so we can later
+    /// expire entries that never see a Stop (agent killed mid-turn etc.).
+    #[allow(dead_code)]
+    sent_at: u64,
+}
+
+/// pid → pending voice dispatch info. Populated by `dispatch_voice_message`
+/// after a successful terminal injection; drained by `process_claude_event`
+/// on the next completion Stop for that pid.
+static VOICE_PENDING: std::sync::OnceLock<Mutex<std::collections::HashMap<u32, VoicePendingInfo>>>
+    = std::sync::OnceLock::new();
+fn voice_pending_map() -> &'static Mutex<std::collections::HashMap<u32, VoicePendingInfo>> {
+    VOICE_PENDING.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct SessionInfo {
     pub id: String,
@@ -1399,10 +1424,16 @@ async fn get_status(_gateway_url: String, _token: String, agent_id: String) -> R
     Ok(GatewayStatus { active, sessions })
 }
 
-#[tauri::command]
-async fn send_chat(message: String, agent_id: String, state: tauri::State<'_, ActiveAgentPid>) -> Result<String, String> {
-    // Read sessions.json to get the first sessionId
-    let path = sessions_json_path(&agent_id);
+// Spawn an `openclaw agent` subprocess for the given message and await its
+// reply. Used by both `send_chat` (the chat input path) and the voice agent
+// dispatcher when the user targets an OpenClaw agent. Stores the child PID
+// in shared state so `interrupt_agent` can SIGINT the running turn.
+async fn spawn_openclaw_agent(
+    message: &str,
+    agent_id: &str,
+    active_agent: &ActiveAgentPid,
+) -> Result<String, String> {
+    let path = sessions_json_path(agent_id);
     let content = tokio::fs::read_to_string(&path)
         .await
         .map_err(|e| format!("read sessions.json: {}", e))?;
@@ -1415,12 +1446,11 @@ async fn send_chat(message: String, agent_id: String, state: tauri::State<'_, Ac
         .ok_or("no session found")?
         .to_string();
 
-    // Spawn openclaw agent and track its PID so interrupt_agent can SIGINT it
     let child = tokio::process::Command::new("openclaw")
         .args([
             "agent",
             "--message",
-            &message,
+            message,
             "--session-id",
             &session_id,
             "--json",
@@ -1430,20 +1460,17 @@ async fn send_chat(message: String, agent_id: String, state: tauri::State<'_, Ac
         .spawn()
         .map_err(|e| format!("openclaw agent: {}", e))?;
 
-    // Store PID for interrupt_agent
     if let Some(pid) = child.id() {
-        *state.pid.lock().unwrap() = Some(pid);
+        *active_agent.pid.lock().unwrap() = Some(pid);
     }
 
     let output = child.wait_with_output().await.map_err(|e| format!("openclaw agent wait: {}", e))?;
-
-    // Clear PID once done
-    *state.pid.lock().unwrap() = None;
+    *active_agent.pid.lock().unwrap() = None;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
 
-    // Try to parse JSON from stdout first — exit code may be non-zero due to config warnings
-    // even when the agent turn succeeded
+    // Try to parse JSON from stdout first — exit code may be non-zero due to
+    // config warnings even when the agent turn succeeded.
     if let Some(json_start) = stdout.find('{') {
         if let Ok(body) = serde_json::from_str::<serde_json::Value>(&stdout[json_start..]) {
             let reply = body["result"]["payloads"]
@@ -1456,13 +1483,17 @@ async fn send_chat(message: String, agent_id: String, state: tauri::State<'_, Ac
         }
     }
 
-    // No usable JSON — treat as real failure
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(format!("openclaw agent failed: {}", stderr));
     }
 
     Ok(String::new())
+}
+
+#[tauri::command]
+async fn send_chat(message: String, agent_id: String, state: tauri::State<'_, ActiveAgentPid>) -> Result<String, String> {
+    spawn_openclaw_agent(&message, &agent_id, state.inner()).await
 }
 
 /// Built-in assets directory (read-only in production).
@@ -11202,6 +11233,10 @@ fn process_claude_event(
         let pending_agents;
         let session_source: String;
         let stop_was_interrupted;
+        // Captured for the voice-agent-done correlation below — drained from
+        // VOICE_PENDING by pid when this Stop event is a real completion.
+        let session_pid: Option<u32>;
+        let session_last_response: Option<String>;
 
         {
             let mut sessions = state.lock().unwrap();
@@ -11211,9 +11246,20 @@ fn process_claude_event(
 
             if hook_event == "SessionEnd" {
                 session_source = sessions.get(&session_id).map(|s| s.source.clone()).unwrap_or_else(|| "cc".to_string());
+                session_pid = sessions.get(&session_id).and_then(|s| s.pid);
+                session_last_response = None;
                 sessions.remove(&session_id);
                 pending_agents = 0;
                 stop_was_interrupted = false;
+                // Drop any pending voice-dispatch entry for this pid. Without
+                // this, a Ctrl+C / window-closed agent leaks an entry forever,
+                // and a later process that reuses the same pid would emit a
+                // misleading "voice-agent-done" bubble.
+                if let Some(pid) = session_pid {
+                    if voice_pending_map().lock().unwrap().remove(&pid).is_some() {
+                        log::info!("[voice-done] dropped pending entry for pid={} (SessionEnd)", pid);
+                    }
+                }
             } else {
                 // Determine source: explicit override from socket server, or from JSON, or default "cc"
                 let source = source_override
@@ -11360,9 +11406,20 @@ fn process_claude_event(
                     session.pid = Some(pid_u32);
                     #[cfg(target_os = "macos")]
                     if session.host_terminal.is_none() && session.source != "cursor" {
-                        session.host_terminal = find_terminal_app_for_pid(pid_u32);
-                        log::info!("[claude_event] session={} host_terminal={:?}",
-                            &session_id[..session_id.len().min(8)], session.host_terminal);
+                        // Walk from the parent pid, not the agent's own pid:
+                        // "codex" and "Cursor" appear in find_terminal_app_for_pid's
+                        // known_terminals list (they can host external processes),
+                        // so starting from the agent itself would short-circuit
+                        // at the agent's own basename and cache an unusable
+                        // host_terminal that breaks voice dispatch.
+                        let ppid = get_parent_pid(pid_u32).unwrap_or(0);
+                        session.host_terminal = if ppid > 1 {
+                            find_terminal_app_for_pid(ppid)
+                        } else {
+                            None
+                        };
+                        log::info!("[claude_event] session={} host_terminal={:?} (resolved from ppid={})",
+                            &session_id[..session_id.len().min(8)], session.host_terminal, ppid);
                         if session.source == "cc"
                             && session
                                 .host_terminal
@@ -11477,6 +11534,8 @@ fn process_claude_event(
 
                 pending_agents = session.pending_agents;
                 session_source = session.source.clone();
+                session_pid = session.pid;
+                session_last_response = session.last_response.clone();
             }
         }
 
@@ -11495,6 +11554,42 @@ fn process_claude_event(
             && (is_completion_stop || is_wait_event) {
             let is_waiting = is_wait_event;
             let _ = app.emit("claude-task-complete", serde_json::json!({"sessionId": session_id, "waiting": is_waiting, "source": session_source}));
+        }
+
+        // Voice-dispatch completion receipt: if this session was the target of
+        // a recent `dispatch_voice_message` call, drain the pending entry and
+        // emit a separate event so the pet can show a small "done" bubble +
+        // play a distinct sound. Correlated by pid because that's the stable
+        // key shared between the dispatch path (which knew only the target's
+        // pid) and the Stop event (which knows the session's pid).
+        if is_completion_stop {
+            if let Some(pid) = session_pid {
+                let info_opt = voice_pending_map().lock().unwrap().remove(&pid);
+                if let Some(info) = info_opt {
+                    let preview = session_last_response.as_deref().unwrap_or("").trim();
+                    let preview_short: String = if preview.is_empty() {
+                        String::new()
+                    } else {
+                        // Cap at ~80 chars for the bubble; collapse internal
+                        // whitespace so multi-line markdown shrinks cleanly.
+                        let one_line: String = preview.split_whitespace().collect::<Vec<_>>().join(" ");
+                        if one_line.chars().count() > 80 {
+                            let cut: String = one_line.chars().take(80).collect();
+                            format!("{}…", cut)
+                        } else {
+                            one_line
+                        }
+                    };
+                    log::info!("[voice-done] pid={} label={} preview_len={}",
+                        pid, info.label, preview_short.len());
+                    let _ = app.emit("voice-agent-done", serde_json::json!({
+                        "sessionId": &session_id,
+                        "label": info.label,
+                        "targetKind": info.target_kind,
+                        "preview": preview_short,
+                    }));
+                }
+            }
         }
 
         let cwd_str = event.get("cwd")
@@ -12452,6 +12547,840 @@ fn voice_is_recording() -> bool {
     }
 }
 
+// ===================== Voice dispatch =====================
+//
+// `dispatch_voice_message` is the single entry point that the frontend calls
+// after the user presses Enter on a transcribed voice prompt. The whole point
+// is to NOT require the user to switch focus to the agent's terminal —
+// oc-claw injects the text into the target session and synthesizes Return
+// so the agent starts processing immediately.
+//
+// Routing matrix (macOS):
+//   target_kind == "cc" | "codex" + host_terminal == "iTerm2"        → iTerm `write text` (no focus change)
+//   target_kind == "cc" | "codex" + host_terminal == "Terminal"      → Terminal.app `do script ... in window`
+//   target_kind == "cc" | "codex" + host_terminal == "Ghostty"       → activate Ghostty + ⌘V + Return (brief flicker)
+//   target_kind == "cc" | "codex" + host_terminal == "Cursor"        → fallback to clipboard for now
+//   target_kind == "cursor"                                          → fallback to clipboard for now (extension RPC TODO)
+//   target_kind == "openclaw"                                        → reserved (handled by send_chat path)
+//   target_id is None                                                → clipboard only (explicit fallback)
+//
+// All injection paths require us to put the text through the system
+// clipboard at least transiently — keystroke is unreliable for CJK input
+// methods, and iTerm `write text` is the only API that works without
+// stealing focus. We do NOT attempt to restore the user's previous
+// clipboard contents in this version.
+
+#[derive(serde::Serialize, Clone)]
+struct VoiceTarget {
+    id: String,
+    kind: String,
+    label: String,
+    cwd: Option<String>,
+    #[serde(rename = "updatedAt")]
+    updated_at: Option<u64>,
+    #[serde(rename = "hostTerminal")]
+    host_terminal: Option<String>,
+    #[serde(rename = "isFrontmost")]
+    is_frontmost: bool,
+    /// Whether this target has hooks installed and will fire a Stop event we
+    /// can correlate with `VOICE_PENDING` to emit a completion receipt.
+    /// `true` for hook-registered sessions; `false` for proc-scan-only
+    /// orphans (agent started before oc-claw installed hooks). Frontend uses
+    /// this to mark the target row so users don't expect a ping that
+    /// physically cannot arrive.
+    #[serde(rename = "hasReceipt")]
+    has_receipt: bool,
+}
+
+#[derive(serde::Serialize, Clone)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum VoiceDispatchResult {
+    Sent {
+        target_kind: String,
+        target_label: String,
+        /// Whether a `voice-agent-done` event will follow when the agent
+        /// finishes. False for hookless proc-scan targets — the frontend
+        /// uses this to phrase the toast as "Sent (no receipt)" instead of
+        /// the usual "Sent" so the user doesn't keep waiting for a ping
+        /// that physically cannot arrive.
+        expects_receipt: bool,
+    },
+    Clipboard { reason: String },
+    Failed { reason: String },
+}
+
+/// Look up the working directory of a process via `lsof`. Returns None if
+/// lsof is missing or the process has no resolvable cwd. Used by the voice
+/// target scanner to surface CC/Codex processes that started before
+/// oc-claw was launched (and therefore never fired a hook event).
+#[cfg(target_os = "macos")]
+fn get_cwd_for_pid(pid: u32) -> Option<String> {
+    let out = std::process::Command::new("lsof")
+        .args(["-p", &pid.to_string(), "-a", "-d", "cwd", "-Fn"])
+        .output()
+        .ok()?;
+    let text = String::from_utf8_lossy(&out.stdout);
+    for line in text.lines() {
+        if let Some(rest) = line.strip_prefix('n') {
+            let p = rest.trim();
+            if !p.is_empty() { return Some(p.to_string()); }
+        }
+    }
+    None
+}
+
+/// Scan running CC / Codex processes via `ps`. Returns
+/// (pid, kind, tty, cwd, host_terminal) tuples. Designed to be cheap enough
+/// to run on every `list_voice_targets` call (a few ps + lsof spawns,
+/// typically <50ms total).
+///
+/// Why this exists: oc-claw normally tracks agent sessions via hook events
+/// fired by the agent itself (~/.claude/hooks/, ~/.Codex/hooks/). But agents
+/// that started BEFORE oc-claw was launched will never fire those hooks
+/// until the user types into them. Voice dispatch can't wait for that —
+/// the user expects to talk to an already-running CC/Codex immediately. So
+/// we walk `ps` once per list call and synthesize targets for any agent
+/// process that the hook tracker doesn't know about.
+#[cfg(target_os = "macos")]
+/// A user-declared "custom" terminal agent — anything that runs in a tty
+/// and accepts text on stdin counts. The user provides `binary` (the exact
+/// basename `ps` reports, e.g. "aider", "opencode") and an optional kind
+/// override; we use the binary itself as the kind when none is given.
+#[derive(Clone, Debug, serde::Deserialize, Default, PartialEq, Eq)]
+struct CustomAgent {
+    binary: String,
+    /// Optional kind string (stable id). Defaults to `binary`. The frontend
+    /// uses this both for routing in dispatch_voice_message and as the
+    /// display label fallback when no display_name is set.
+    #[serde(default)]
+    kind: Option<String>,
+    /// Optional human-readable name (e.g. "Aider"). When unset, the label
+    /// row in the voice picker just shows the binary name.
+    #[serde(default)]
+    display_name: Option<String>,
+}
+
+/// 500ms scan cache. The full scan (ps -A + lsof per match + ppid walk +
+/// frontmost-app osascript) takes 100-300ms on a busy machine — when the
+/// user presses Ctrl+Shift+V the bubble visibly lags. Voice key presses
+/// are at most a few per minute, so a 500ms TTL gives near-100% hit rate
+/// without ever serving meaningfully stale data. Cached results invalidate
+/// whenever the custom-agents list changes (different inputs → different
+/// matches), so the user adding/removing an entry sees it immediately.
+#[cfg(target_os = "macos")]
+type ScanCacheEntry = (std::time::Instant, Vec<CustomAgent>, Vec<(u32, String, String, String, String)>);
+#[cfg(target_os = "macos")]
+static SCAN_CACHE: std::sync::OnceLock<Mutex<Option<ScanCacheEntry>>> = std::sync::OnceLock::new();
+#[cfg(target_os = "macos")]
+fn scan_cache() -> &'static Mutex<Option<ScanCacheEntry>> {
+    SCAN_CACHE.get_or_init(|| Mutex::new(None))
+}
+
+#[cfg(target_os = "macos")]
+fn scan_active_agent_processes(custom: &[CustomAgent]) -> Vec<(u32, String, String, String, String)> {
+    const CACHE_TTL_MS: u128 = 500;
+    {
+        let cache = scan_cache().lock().unwrap();
+        if let Some((cached_at, cached_custom, cached_results)) = &*cache {
+            let fresh = cached_at.elapsed().as_millis() < CACHE_TTL_MS;
+            let same_inputs = cached_custom.as_slice() == custom;
+            if fresh && same_inputs {
+                return cached_results.clone();
+            }
+        }
+    }
+    let results = do_scan_active_agent_processes(custom);
+    *scan_cache().lock().unwrap() = Some((std::time::Instant::now(), custom.to_vec(), results.clone()));
+    results
+}
+
+#[cfg(target_os = "macos")]
+fn do_scan_active_agent_processes(custom: &[CustomAgent]) -> Vec<(u32, String, String, String, String)> {
+    let out = match std::process::Command::new("ps")
+        .args(["-Ao", "pid=,comm="])
+        .output() {
+        Ok(o) => o,
+        Err(_) => return Vec::new(),
+    };
+    let text = String::from_utf8_lossy(&out.stdout);
+    let mut found = Vec::new();
+    for line in text.lines() {
+        let line = line.trim_start();
+        let mut iter = line.splitn(2, char::is_whitespace);
+        let pid_str = iter.next().unwrap_or("");
+        let comm_raw = iter.next().unwrap_or("").trim();
+        let Ok(pid) = pid_str.parse::<u32>() else { continue };
+        // `comm` from ps is the basename of the executable. Match exact names
+        // to avoid false positives like "claude-code-fork".
+        let basename = std::path::Path::new(comm_raw)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(comm_raw);
+        // Built-in binaries first; otherwise fall through to the user-declared
+        // custom agent list. Custom matches use the binary itself as the kind
+        // unless the user provided an explicit override.
+        let kind: String = match basename {
+            "claude" => "cc".to_string(),
+            "codex" => "codex".to_string(),
+            other => {
+                let Some(matched) = custom.iter().find(|c| c.binary == other) else { continue };
+                matched.kind.clone().unwrap_or_else(|| matched.binary.clone())
+            }
+        };
+        if !is_pid_alive(pid) { continue; }
+        let tty = get_tty_for_pid(pid).unwrap_or_default();
+        if tty.is_empty() { continue; }
+        let cwd = get_cwd_for_pid(pid).unwrap_or_default();
+        if cwd.is_empty() { continue; }
+        // Start the terminal-lookup walk from the PARENT pid, not the agent's
+        // own pid. `find_terminal_app_for_pid` treats the binary name "codex"
+        // as a known terminal (because Codex can also act as a host shell in
+        // other contexts) — passing the codex CLI's own pid would short-circuit
+        // there instead of climbing up to the real host (iTerm2/Ghostty/etc).
+        let ppid = get_parent_pid(pid).unwrap_or(0);
+        let host = if ppid > 1 {
+            find_terminal_app_for_pid(ppid).unwrap_or_default()
+        } else {
+            String::new()
+        };
+        found.push((pid, kind, tty, cwd, host));
+    }
+    found
+}
+
+/// Read the parent PID of a given process via `ps`. Returns None for pid 1
+/// or if the lookup fails.
+#[cfg(target_os = "macos")]
+fn get_parent_pid(pid: u32) -> Option<u32> {
+    let out = std::process::Command::new("ps")
+        .args(["-p", &pid.to_string(), "-o", "ppid="])
+        .output()
+        .ok()?;
+    let text = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    text.parse::<u32>().ok().filter(|p| *p > 1)
+}
+
+#[cfg(target_os = "macos")]
+fn pbcopy_text(text: &str) -> Result<(), String> {
+    use std::io::Write;
+    let mut child = std::process::Command::new("pbcopy")
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("spawn pbcopy: {}", e))?;
+    {
+        let stdin = child.stdin.as_mut().ok_or("pbcopy stdin missing")?;
+        stdin.write_all(text.as_bytes()).map_err(|e| format!("pbcopy write: {}", e))?;
+    }
+    child.wait().map_err(|e| format!("pbcopy wait: {}", e))?;
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn pbcopy_text(_text: &str) -> Result<(), String> {
+    Err("clipboard fallback only implemented on macOS".to_string())
+}
+
+/// Escape a string for embedding inside an AppleScript double-quoted literal.
+/// Escapes backslashes, double quotes; replaces newlines with literal
+/// `" & linefeed & "` concatenations.
+#[cfg(target_os = "macos")]
+fn escape_for_applescript(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 8);
+    for ch in s.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\" & linefeed & \""),
+            '\r' => {}
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+/// Send `message` to the iTerm2 session attached to `tty` via the
+/// scripting `write text` command. iTerm appends a newline automatically,
+/// so the agent's REPL sees a full submitted prompt. Does NOT require iTerm
+/// to be frontmost — perfect for zero-jump voice dispatch.
+#[cfg(target_os = "macos")]
+/// Run a terminal-inject closure with a hard timeout. AppleScript / osascript
+/// usually returns in tens of milliseconds, but a stuck UI (App stuck on
+/// permission dialog, frozen terminal app) can make it hang indefinitely.
+/// Without a timeout, `dispatch_voice_message` would block forever and the
+/// pet bubble would freeze in "submitting…". We run the inject on a
+/// blocking-thread-pool task so the cooperative scheduler stays responsive,
+/// and bound it with `tokio::time::timeout`. On timeout the osascript child
+/// may still finish on its own (we don't actively kill it — the dangling
+/// process is harmless and short-lived in practice).
+#[cfg(target_os = "macos")]
+async fn inject_with_timeout(
+    host: &str,
+    tty: &str,
+    message: &str,
+    timeout_secs: u64,
+) -> Result<(), String> {
+    let host = host.to_string();
+    let tty = tty.to_string();
+    let message = message.to_string();
+    let task = tokio::task::spawn_blocking(move || -> Result<(), String> {
+        match host.as_str() {
+            "iTerm2" | "iTerm" | "iterm2" => inject_into_iterm(&tty, &message),
+            "Terminal" | "Apple_Terminal" => inject_into_terminal_app(&tty, &message),
+            "Ghostty" | "ghostty" => inject_into_ghostty_via_paste(&message),
+            _ => Err(format!("unsupported host terminal: {}", host)),
+        }
+    });
+    match tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), task).await {
+        Ok(Ok(r)) => r,
+        Ok(Err(e)) => Err(format!("inject task join: {}", e)),
+        Err(_) => Err(format!("inject timed out after {}s", timeout_secs)),
+    }
+}
+
+fn inject_into_iterm(tty: &str, message: &str) -> Result<(), String> {
+    if tty.is_empty() {
+        return Err("empty tty".into());
+    }
+    let tty_esc = escape_for_applescript(tty);
+    let msg_esc = escape_for_applescript(message);
+    // Two-step write to defeat iTerm's bracketed-paste-mode wrapping. When
+    // the running program (CC's Ink TUI, Codex, etc.) has BPM enabled,
+    // multi-character `write text` calls get wrapped in \e[200~...\e[201~
+    // and the trailing newline becomes part of the *pasted content* — the
+    // text appears in the input buffer but never submits. Sending the body
+    // (newline NO so iTerm doesn't append LF inside the paste) followed by
+    // a single CR character in a separate write makes the CR arrive
+    // outside the bracketed-paste markers, where the program interprets it
+    // as a real Enter keystroke and submits.
+    let script = format!(
+        r#"tell application "iTerm2"
+    if not (it is running) then return "noapp"
+    repeat with aWindow in windows
+        repeat with aTab in tabs of aWindow
+            repeat with aSession in sessions of aTab
+                try
+                    if tty of aSession is "{tty}" then
+                        tell aSession
+                            write text "{msg}" newline NO
+                            write text (ASCII character 13) newline NO
+                        end tell
+                        return "ok"
+                    end if
+                end try
+            end repeat
+        end repeat
+    end repeat
+    return "notfound"
+end tell"#,
+        tty = tty_esc,
+        msg = msg_esc,
+    );
+    let out = std::process::Command::new("osascript")
+        .args(["-e", &script])
+        .output()
+        .map_err(|e| format!("osascript spawn: {}", e))?;
+    let result = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if result == "ok" { Ok(()) } else { Err(format!("iTerm inject result: {}", result)) }
+}
+
+/// Send `message` to a Terminal.app tab attached to `tty`. Uses `do script`
+/// into the matching window. Does NOT need Terminal.app to be frontmost.
+#[cfg(target_os = "macos")]
+fn inject_into_terminal_app(tty: &str, message: &str) -> Result<(), String> {
+    if tty.is_empty() {
+        return Err("empty tty".into());
+    }
+    let tty_esc = escape_for_applescript(tty);
+    let msg_esc = escape_for_applescript(message);
+    let script = format!(
+        r#"tell application "Terminal"
+    if not (it is running) then return "noapp"
+    repeat with aWindow in windows
+        repeat with aTab in tabs of aWindow
+            try
+                if tty of aTab is "{tty}" then
+                    do script "{msg}" in aTab
+                    return "ok"
+                end if
+            end try
+        end repeat
+    end repeat
+    return "notfound"
+end tell"#,
+        tty = tty_esc,
+        msg = msg_esc,
+    );
+    let out = std::process::Command::new("osascript")
+        .args(["-e", &script])
+        .output()
+        .map_err(|e| format!("osascript spawn: {}", e))?;
+    let result = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if result == "ok" { Ok(()) } else { Err(format!("Terminal.app inject result: {}", result)) }
+}
+
+/// Ghostty has no scriptable text-injection API. Best-effort path:
+///   1. Capture the current frontmost app name so we can restore focus.
+///   2. Put `message` on the clipboard.
+///   3. Activate Ghostty (raises window; brief visual flicker).
+///   4. ⌘V to paste, then Return.
+///   5. Re-activate the previous frontmost app.
+/// Requires Accessibility permission for the keystroke step. If that fails,
+/// the caller should fall through to the clipboard-only path.
+#[cfg(target_os = "macos")]
+fn inject_into_ghostty_via_paste(message: &str) -> Result<(), String> {
+    // 1. Remember previous frontmost.
+    let prev_app: String = {
+        let out = std::process::Command::new("osascript")
+            .args(["-e", r#"tell application "System Events" to get name of first application process whose frontmost is true"#])
+            .output()
+            .map_err(|e| format!("osascript prev: {}", e))?;
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    };
+
+    // 2. Put text on clipboard.
+    pbcopy_text(message)?;
+
+    // 3-4. Activate Ghostty + ⌘V + Return.
+    let inject_script = r#"
+tell application "Ghostty" to activate
+delay 0.1
+tell application "System Events"
+    keystroke "v" using {command down}
+    delay 0.05
+    key code 36
+end tell
+"#;
+    let out = std::process::Command::new("osascript")
+        .args(["-e", inject_script])
+        .output()
+        .map_err(|e| format!("osascript inject: {}", e))?;
+    if !out.status.success() {
+        let err = String::from_utf8_lossy(&out.stderr).to_string();
+        return Err(format!("Ghostty paste failed: {}", err));
+    }
+
+    // 5. Restore previous app focus.
+    if !prev_app.is_empty() && prev_app != "Ghostty" {
+        let restore = format!(
+            r#"tell application "System Events" to set frontmost of (first application process whose name is "{}") to true"#,
+            prev_app.replace('"', "\\\"")
+        );
+        let _ = std::process::Command::new("osascript")
+            .args(["-e", &restore])
+            .output();
+    }
+    Ok(())
+}
+
+/// Pick the host terminal app from a session, falling back to a process-tree
+/// lookup when the cached field is missing. Returns "" if unknown.
+#[cfg(target_os = "macos")]
+fn resolve_host_terminal(session: &ClaudeSession) -> String {
+    // Reject cached values that are actually agent-binary names. Older
+    // builds set host_terminal by walking from the agent's own pid, which
+    // could short-circuit at "codex" / "Cursor" (both listed as terminals
+    // because they can host external processes). When we see one of those
+    // stale entries, recompute from the parent pid so the existing in-memory
+    // state self-heals without an app restart.
+    let cached_is_agent_binary = match session.host_terminal.as_deref() {
+        Some(t) => matches!(
+            t.to_ascii_lowercase().as_str(),
+            "codex" | "claude" | "cursor"
+        ),
+        None => false,
+    };
+    if !cached_is_agent_binary {
+        if let Some(t) = session.host_terminal.as_deref() {
+            if !t.is_empty() {
+                return t.to_string();
+            }
+        }
+    }
+    if let Some(pid) = session.pid {
+        // Walk from ppid for the same reason as the SET site above.
+        let ppid = get_parent_pid(pid).unwrap_or(0);
+        if ppid > 1 {
+            if let Some(name) = find_terminal_app_for_pid(ppid) {
+                return name;
+            }
+        }
+    }
+    String::new()
+}
+
+#[tauri::command]
+async fn list_voice_targets(
+    state: tauri::State<'_, ClaudeState>,
+    // Optional list of user-declared custom terminal agents. Each entry adds
+    // a binary basename for the proc scanner to look for. Targets matched
+    // this way appear in the picker as "<displayName> · <cwd>" with the
+    // hookless badge (no Stop event source means no completion receipts).
+    custom_agents: Option<Vec<CustomAgent>>,
+) -> Result<Vec<VoiceTarget>, String> {
+    let custom_agents = custom_agents.unwrap_or_default();
+    let sessions: Vec<ClaudeSession> = {
+        let map = state.sessions.lock().map_err(|e| e.to_string())?;
+        map.values().cloned().collect()
+    };
+
+    // Frontmost app hint (used to mark `is_frontmost = true` so the frontend
+    // can default-select the session the user is actively staring at).
+    #[cfg(target_os = "macos")]
+    let frontmost_app: String = {
+        let out = std::process::Command::new("osascript")
+            .args(["-e", r#"tell application "System Events" to get name of first application process whose frontmost is true"#])
+            .output();
+        out.map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).unwrap_or_default()
+    };
+    #[cfg(not(target_os = "macos"))]
+    let frontmost_app: String = String::new();
+
+    let mut targets: Vec<VoiceTarget> = Vec::new();
+    for s in sessions {
+        // Skip sub-agent sessions and clearly-dead entries.
+        // "stopped"/"interrupted" sessions are still valid voice targets —
+        // those statuses mean the agent finished its previous turn and is
+        // sitting at the prompt waiting for input, which is exactly when we
+        // want to dispatch new text. Only filter "ended" (terminated) and
+        // require the PID to still be alive for CC/Codex.
+        if s.session_id.contains(":subagent:") { continue; }
+        if s.status == "ended" { continue; }
+        if s.cwd.is_empty() { continue; }
+        // Cursor's native AI chat is not a valid voice target — VSCode/Cursor
+        // expose no public API for injecting text into the chat panel, and
+        // sending to the active integrated terminal is unreliable (the user
+        // may not have one open, and "Cursor agent" really means the chat).
+        // Skip these entries so the picker only shows agents we can actually
+        // dispatch into (cc, codex, openclaw — all terminal-resident).
+        if s.source == "cursor" { continue; }
+        // For CC/Codex, drop dead processes — once the PID is gone, paste
+        // would land in a shell with no agent listening.
+        if matches!(s.source.as_str(), "cc" | "codex") {
+            if let Some(pid) = s.pid {
+                if !is_pid_alive(pid) { continue; }
+            }
+        }
+
+        let kind = s.source.clone();
+        let host = {
+            #[cfg(target_os = "macos")] { resolve_host_terminal(&s) }
+            #[cfg(not(target_os = "macos"))] { s.host_terminal.clone().unwrap_or_default() }
+        };
+
+        // Short label: last segment of cwd, e.g. "PawPet".
+        let label_base = std::path::Path::new(&s.cwd)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(&s.cwd)
+            .to_string();
+        let prefix = match kind.as_str() {
+            "cc" => "Claude Code",
+            "codex" => "Codex",
+            "cursor" => "Cursor",
+            other => other,
+        };
+        let label = format!("{} · {}", prefix, label_base);
+
+        let is_frontmost = !frontmost_app.is_empty()
+            && !host.is_empty()
+            && (host.eq_ignore_ascii_case(&frontmost_app)
+                || frontmost_app.eq_ignore_ascii_case("iTerm2") && host.eq_ignore_ascii_case("iTerm")
+                || frontmost_app.eq_ignore_ascii_case("iTerm") && host.eq_ignore_ascii_case("iTerm2"));
+
+        targets.push(VoiceTarget {
+            id: s.session_id.clone(),
+            kind,
+            label,
+            cwd: Some(s.cwd.clone()),
+            updated_at: Some(s.updated_at),
+            host_terminal: if host.is_empty() { None } else { Some(host) },
+            is_frontmost,
+            // Registered via hooks → Stop event will reach us → receipt works.
+            has_receipt: true,
+        });
+    }
+
+    // Augment with running CC/Codex processes that the hook tracker doesn't
+    // know about (sessions that started before oc-claw was launched, or
+    // never fired a UserPromptSubmit/PreToolUse hook yet). Match against
+    // already-added targets by pid via the registered sessions' pid field
+    // and skip duplicates so we don't show the same agent twice.
+    #[cfg(target_os = "macos")]
+    {
+        let known_pids: std::collections::HashSet<u32> = {
+            let map = state.sessions.lock().map_err(|e| e.to_string())?;
+            map.values().filter_map(|s| s.pid).collect()
+        };
+        for (pid, kind, _tty, cwd, host) in scan_active_agent_processes(&custom_agents) {
+            if known_pids.contains(&pid) { continue; }
+            let label_base = std::path::Path::new(&cwd)
+                .file_name().and_then(|n| n.to_str()).unwrap_or(&cwd).to_string();
+            // Built-in kinds get a fixed display prefix; custom kinds use the
+            // user-provided display_name (when set) or fall back to the kind
+            // string itself (which equals the binary name for unnamed entries).
+            let custom_prefix = custom_agents.iter().find_map(|c| {
+                let c_kind = c.kind.clone().unwrap_or_else(|| c.binary.clone());
+                if c_kind == kind { c.display_name.clone() } else { None }
+            });
+            let prefix: String = match kind.as_str() {
+                "cc" => "Claude Code".to_string(),
+                "codex" => "Codex".to_string(),
+                _ => custom_prefix.unwrap_or_else(|| kind.clone()),
+            };
+            let label = format!("{} · {}", prefix, label_base);
+            let is_frontmost = !frontmost_app.is_empty()
+                && !host.is_empty()
+                && (host.eq_ignore_ascii_case(&frontmost_app)
+                    || (frontmost_app.eq_ignore_ascii_case("iTerm2") && host.eq_ignore_ascii_case("iTerm"))
+                    || (frontmost_app.eq_ignore_ascii_case("iTerm") && host.eq_ignore_ascii_case("iTerm2")));
+            targets.push(VoiceTarget {
+                // proc:KIND:PID synthetic id; dispatch_voice_message parses this
+                // back into a direct pid-based injection without needing a
+                // ClaudeSession entry.
+                id: format!("proc:{}:{}", kind, pid),
+                kind: kind.clone(),
+                label,
+                cwd: Some(cwd),
+                updated_at: None,
+                host_terminal: if host.is_empty() { None } else { Some(host) },
+                is_frontmost,
+                // Proc-scan-only target: this agent never fired a hook, so it
+                // started before oc-claw installed Codex/CC hooks. Stop will
+                // never reach us → no completion receipt is physically possible.
+                has_receipt: false,
+            });
+        }
+    }
+
+    // Sort: frontmost first, then updated_at desc.
+    targets.sort_by(|a, b| {
+        b.is_frontmost.cmp(&a.is_frontmost)
+            .then_with(|| b.updated_at.unwrap_or(0).cmp(&a.updated_at.unwrap_or(0)))
+    });
+
+    // Spammy: fires on every Ctrl+Shift+V. Downgraded to debug so production
+    // logs stay clean; flip RUST_LOG=debug to see per-call target dumps.
+    log::debug!(
+        "[voice] list_voice_targets returning {} target(s), frontmost_app={:?}",
+        targets.len(),
+        frontmost_app
+    );
+    for t in &targets {
+        log::debug!(
+            "[voice]   target id={} kind={} host={:?} updated_at={:?} frontmost={}",
+            t.id, t.kind, t.host_terminal, t.updated_at, t.is_frontmost
+        );
+    }
+
+    Ok(targets)
+}
+
+#[tauri::command]
+async fn dispatch_voice_message(
+    message: String,
+    target_id: Option<String>,
+    target_kind: Option<String>,
+    // Required only when target_kind == "openclaw" — the agent UUID under
+    // ~/.openclaw/agents that `spawn_openclaw_agent` needs to look up the
+    // session id. Ignored for cc/codex/cursor.
+    agent_id: Option<String>,
+    state: tauri::State<'_, ClaudeState>,
+    active_agent: tauri::State<'_, ActiveAgentPid>,
+) -> Result<VoiceDispatchResult, String> {
+    let message = message.trim().to_string();
+    if message.is_empty() {
+        return Ok(VoiceDispatchResult::Failed { reason: "empty message".into() });
+    }
+
+    // No target → clipboard fallback.
+    let Some(target_id) = target_id else {
+        return match pbcopy_text(&message) {
+            Ok(()) => Ok(VoiceDispatchResult::Clipboard { reason: "no target selected".into() }),
+            Err(e) => Ok(VoiceDispatchResult::Failed { reason: format!("clipboard write failed: {}", e) }),
+        };
+    };
+
+    let kind = target_kind.unwrap_or_else(|| "cc".to_string());
+
+    // Synthetic "proc:KIND:PID" target — built by list_voice_targets for
+    // running agent processes that the hook tracker doesn't know about.
+    // Resolve pid/tty/host directly via ps + lsof rather than going through
+    // state.sessions.
+    let session_snapshot: Option<(Option<u32>, String, String)> = if target_id.starts_with("proc:") {
+        let parts: Vec<&str> = target_id.splitn(3, ':').collect();
+        if parts.len() == 3 {
+            if let Ok(pid) = parts[2].parse::<u32>() {
+                #[cfg(target_os = "macos")]
+                {
+                    let cwd = get_cwd_for_pid(pid).unwrap_or_default();
+                    // Walk from parent pid to avoid matching the agent's
+                    // own binary name (e.g. "codex" is in known_terminals).
+                    let ppid = get_parent_pid(pid).unwrap_or(0);
+                    let host = if ppid > 1 {
+                        find_terminal_app_for_pid(ppid).unwrap_or_default()
+                    } else { String::new() };
+                    Some((Some(pid), cwd, host))
+                }
+                #[cfg(not(target_os = "macos"))]
+                { Some((Some(pid), String::new(), String::new())) }
+            } else { None }
+        } else { None }
+    } else {
+        let map = state.sessions.lock().map_err(|e| e.to_string())?;
+        map.get(&target_id).map(|s| {
+            #[cfg(target_os = "macos")]
+            let host = resolve_host_terminal(s);
+            #[cfg(not(target_os = "macos"))]
+            let host = s.host_terminal.clone().unwrap_or_default();
+            (s.pid, s.cwd.clone(), host)
+        })
+    };
+
+    let label = session_snapshot
+        .as_ref()
+        .map(|(_, cwd, _)| std::path::Path::new(cwd).file_name().and_then(|n| n.to_str()).unwrap_or(cwd).to_string())
+        .unwrap_or_else(|| target_id.clone());
+
+    #[cfg(target_os = "macos")]
+    {
+        // Cursor and OpenClaw are special-cased below — anything else (cc,
+        // codex, or a user-declared custom agent like "aider" / "opencode")
+        // is treated as a terminal-resident process: we inject text into its
+        // tty via the host terminal's AppleScript interface. The kind string
+        // is only used for labeling/routing; the actual dispatch mechanism
+        // is host-driven (iTerm vs Terminal.app vs Ghostty).
+        let is_tty_kind = !matches!(kind.as_str(), "cursor" | "openclaw");
+        match kind.as_str() {
+            _ if is_tty_kind => {
+                let Some((pid_opt, _cwd, host)) = session_snapshot else {
+                    let _ = pbcopy_text(&message);
+                    return Ok(VoiceDispatchResult::Clipboard { reason: "session not found, copied to clipboard".into() });
+                };
+                let tty = pid_opt.and_then(get_tty_for_pid).unwrap_or_default();
+
+                // Flatten any embedded newlines to spaces BEFORE injection.
+                // iTerm's `write text` (and Terminal.app's `do script`) append
+                // a single Enter at the end, but they pass internal `\n`
+                // characters through to the tty unchanged. CC / Codex read
+                // the tty in line mode — each LF is treated as a submit, so
+                // a multi-line voice prompt would arrive as N separate
+                // prompts (only the first being processed, the rest queued
+                // as fresh turns). Voice is inherently single-thought, so
+                // collapsing newlines to spaces preserves the intent while
+                // letting the trailing Enter from `write text` submit the
+                // whole thing in one go.
+                let flat_message: String = message
+                    .chars()
+                    .map(|c| if c == '\n' || c == '\r' { ' ' } else { c })
+                    .collect();
+
+                // 3s timeout covers ~99% of real osascript runs; anything
+                // longer is a stuck terminal app and the user is better off
+                // getting the clipboard fallback than waiting on a frozen
+                // bubble. inject_with_timeout dispatches to the per-host
+                // inject_into_* function on a blocking thread.
+                let inject = inject_with_timeout(&host, &tty, &flat_message, 3).await;
+
+                match inject {
+                    Ok(()) => {
+                        // Register a pending-completion entry so the next Stop
+                        // event for this pid emits voice-agent-done. Skipped
+                        // when pid is unknown — without a pid we have no way
+                        // to correlate the Stop back to this dispatch.
+                        // Also skipped for proc:* synthetic targets: those
+                        // agents started before oc-claw installed hooks and
+                        // physically cannot fire Stop, so queueing them just
+                        // leaks an entry until the 30-min GC sweeps it.
+                        let is_hookless = target_id.starts_with("proc:");
+                        if let Some(pid) = pid_opt {
+                            if is_hookless {
+                                log::info!("[voice-dispatch] skip pending insert for hookless pid={}", pid);
+                            }
+                        }
+                        if let Some(pid) = pid_opt.filter(|_| !is_hookless) {
+                            let now = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .map(|d| d.as_secs()).unwrap_or(0);
+                            {
+                                let mut map = voice_pending_map().lock().unwrap();
+                                // Opportunistic GC: any entry older than 30 min
+                                // is almost certainly stale (agent crashed or
+                                // never finished). Cheap because the map only
+                                // holds entries for in-flight voice dispatches.
+                                let cutoff = now.saturating_sub(30 * 60);
+                                map.retain(|_, info| info.sent_at >= cutoff);
+                                map.insert(pid, VoicePendingInfo {
+                                    label: label.clone(),
+                                    target_kind: kind.clone(),
+                                    sent_at: now,
+                                });
+                            }
+                            log::info!("[voice-dispatch] queued completion ping for pid={}", pid);
+                        }
+                        Ok(VoiceDispatchResult::Sent {
+                            target_kind: kind,
+                            target_label: label,
+                            expects_receipt: !is_hookless,
+                        })
+                    }
+                    Err(e) => {
+                        log::warn!("[voice-dispatch] inject failed: {}, falling back to clipboard", e);
+                        let _ = pbcopy_text(&message);
+                        Ok(VoiceDispatchResult::Clipboard { reason: format!("{}; copied to clipboard", e) })
+                    }
+                }
+            }
+            "cursor" => {
+                // Defensive only — list_voice_targets already filters out
+                // cursor sessions because we cannot inject into Cursor's AI
+                // chat panel. Falling back to clipboard so a stale id from
+                // an older client doesn't get silently dropped.
+                let _ = pbcopy_text(&message);
+                Ok(VoiceDispatchResult::Clipboard {
+                    reason: "Cursor AI chat is not a voice target; copied to clipboard".into(),
+                })
+            }
+            "openclaw" => {
+                // OpenClaw is a long-running subprocess, not a terminal text
+                // injection. We share `spawn_openclaw_agent` with `send_chat`
+                // so both the chat input path and the voice path go through
+                // the same binary invocation + interrupt-tracking state.
+                let Some(agent_id) = agent_id else {
+                    return Ok(VoiceDispatchResult::Failed {
+                        reason: "openclaw target requires agent_id".into(),
+                    });
+                };
+                match spawn_openclaw_agent(&message, &agent_id, active_agent.inner()).await {
+                    // OpenClaw spawn is synchronous (we await the subprocess)
+                    // and the reply is already in hand — no separate Stop hook
+                    // pings back. From the frontend's perspective the bubble
+                    // can close immediately without expecting a follow-up
+                    // voice-agent-done event.
+                    Ok(_reply) => Ok(VoiceDispatchResult::Sent {
+                        target_kind: kind,
+                        target_label: label,
+                        expects_receipt: false,
+                    }),
+                    Err(e) => Ok(VoiceDispatchResult::Failed {
+                        reason: format!("openclaw spawn failed: {}", e),
+                    }),
+                }
+            }
+            // All non-special kinds (cc, codex, custom) handled by the
+            // is_tty_kind arm above. This is unreachable but the Rust match
+            // exhaustiveness checker can't prove it on string patterns, so
+            // we leave a defensive Failed result.
+            other => Ok(VoiceDispatchResult::Failed { reason: format!("unhandled target kind: {}", other) }),
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (kind, label, session_snapshot, agent_id, &active_agent);
+        Ok(VoiceDispatchResult::Failed { reason: "voice dispatch only implemented on macOS".into() })
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     #[cfg(target_os = "windows")]
@@ -12827,7 +13756,7 @@ pub fn run() {
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![get_status, send_chat, open_detail_panel, save_character_gif, delete_character_assets, delete_character_gif, get_agents, get_health, get_agent_metrics, interrupt_agent, scan_characters, get_agent_extra_info, open_mini, close_mini, set_mini_expanded, set_mini_size, set_efficiency_hover_tracking, resize_mini_height, move_mini_by, get_mini_origin, get_mini_monitor_rect, get_pet_floor_info, get_frontmost_app_window, set_sprite_pad_fractions, set_mini_origin, set_ime_mode, get_agent_sessions, get_session_preview, get_session_messages, get_active_sessions, proxy_post, play_sound, get_claude_sessions, get_claude_conversation, install_claude_hooks, install_cursor_hooks, remove_claude_session, resolve_claude_permission, get_claude_stats, open_url, activate_app, focus_cursor_terminal, check_ax_permission, request_ax_permission, jump_to_claude_terminal, check_for_update, run_update, close_ssh, read_local_file, list_backgrounds, save_background, get_background_data, exit_app, get_ssh_key_info, reset_ssh, get_ui_scale, list_custom_codex_pets, open_codex_pets_dir, import_codex_pet, pick_codex_pet_folder, reassert_floating, spawn_demo_mascot, close_demo_mascot, close_demo_mascots, debug_log, update_tray_language, set_pet_mode_window, set_pet_context_menu, set_pet_pomodoro_active, set_pet_voice_editing, get_now_playing, get_system_idle_time, set_stroll_mode, set_throw_tracking, voice_toggle, voice_is_recording])
+        .invoke_handler(tauri::generate_handler![get_status, send_chat, open_detail_panel, save_character_gif, delete_character_assets, delete_character_gif, get_agents, get_health, get_agent_metrics, interrupt_agent, scan_characters, get_agent_extra_info, open_mini, close_mini, set_mini_expanded, set_mini_size, set_efficiency_hover_tracking, resize_mini_height, move_mini_by, get_mini_origin, get_mini_monitor_rect, get_pet_floor_info, get_frontmost_app_window, set_sprite_pad_fractions, set_mini_origin, set_ime_mode, get_agent_sessions, get_session_preview, get_session_messages, get_active_sessions, proxy_post, play_sound, get_claude_sessions, get_claude_conversation, install_claude_hooks, install_cursor_hooks, remove_claude_session, resolve_claude_permission, get_claude_stats, open_url, activate_app, focus_cursor_terminal, check_ax_permission, request_ax_permission, jump_to_claude_terminal, check_for_update, run_update, close_ssh, read_local_file, list_backgrounds, save_background, get_background_data, exit_app, get_ssh_key_info, reset_ssh, get_ui_scale, list_custom_codex_pets, open_codex_pets_dir, import_codex_pet, pick_codex_pet_folder, reassert_floating, spawn_demo_mascot, close_demo_mascot, close_demo_mascots, debug_log, update_tray_language, set_pet_mode_window, set_pet_context_menu, set_pet_pomodoro_active, set_pet_voice_editing, get_now_playing, get_system_idle_time, set_stroll_mode, set_throw_tracking, voice_toggle, voice_is_recording, list_voice_targets, dispatch_voice_message])
         .manage(ActiveAgentPid { pid: Mutex::new(None) })
         .manage(ClaudeState { sessions: Arc::new(Mutex::new(HashMap::new())), pending_permissions: Arc::new(Mutex::new(HashMap::new())) })
         .run(tauri::generate_context!())

@@ -15,6 +15,46 @@ type UpdateProgressPayload = {
   message?: string
 }
 
+function CustomAgentAddRow({ onAdd }: { onAdd: (a: { binary: string; displayName?: string }) => void }) {
+  const [binary, setBinary] = useState('')
+  const [displayName, setDisplayName] = useState('')
+  const submit = () => {
+    const b = binary.trim()
+    if (!b) return
+    onAdd({ binary: b, displayName: displayName.trim() || undefined })
+    setBinary('')
+    setDisplayName('')
+  }
+  return (
+    <div className="flex items-center gap-2 bg-black/20 border border-dashed border-white/10 rounded-lg px-3 py-2">
+      <input
+        type="text"
+        placeholder="binary (e.g. aider)"
+        value={binary}
+        onChange={(e) => setBinary(e.target.value)}
+        onKeyDown={(e) => { if (e.key === 'Enter') submit() }}
+        className="flex-1 min-w-0 bg-transparent text-sm text-white/90 placeholder-white/30 outline-none"
+      />
+      <input
+        type="text"
+        placeholder="display name (optional)"
+        value={displayName}
+        onChange={(e) => setDisplayName(e.target.value)}
+        onKeyDown={(e) => { if (e.key === 'Enter') submit() }}
+        className="flex-1 min-w-0 bg-transparent text-sm text-white/90 placeholder-white/30 outline-none"
+      />
+      <button
+        type="button"
+        onClick={submit}
+        disabled={!binary.trim()}
+        className="text-xs px-2 py-1 bg-white/10 hover:bg-white/20 disabled:opacity-30 border border-white/10 rounded text-white"
+      >
+        Add
+      </button>
+    </div>
+  )
+}
+
 function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
   return (
     <button
@@ -226,7 +266,7 @@ function ConnectionRow({ conn, onUpdate, onDelete, disableLocal }: { conn: OcCon
   )
 }
 
-export function SettingsTab({ notifySound, onChangeNotifySound, waitingSound, onToggleWaitingSound, soundEnabled, onToggleSoundEnabled, codexSoundEnabled, onToggleCodexSoundEnabled, cursorSoundEnabled, onToggleCursorSoundEnabled, autoCloseCompletion, onToggleAutoCloseCompletion, autoExpandOnTask, onToggleAutoExpandOnTask, islandBg, onChangeIslandBg, bgPos, onChangeBgPos, panelMaxHeight, onChangePanelMaxHeight, hoverDelay, onChangeHoverDelay, largeMascotScale, onChangeLargeMascotScale, appMode, onChangeAppMode, petSfxEnabled, onTogglePetSfxEnabled, petIdleIntervalMin, onChangePetIdleIntervalMin }: { notifySound: 'default' | 'manbo'; onChangeNotifySound: (v: 'default' | 'manbo') => void; waitingSound: boolean; onToggleWaitingSound: (v: boolean) => void; soundEnabled: boolean; onToggleSoundEnabled: (v: boolean) => void; codexSoundEnabled: boolean; onToggleCodexSoundEnabled: (v: boolean) => void; cursorSoundEnabled: boolean; onToggleCursorSoundEnabled: (v: boolean) => void; autoCloseCompletion: boolean; onToggleAutoCloseCompletion: (v: boolean) => void; autoExpandOnTask: boolean; onToggleAutoExpandOnTask: (v: boolean) => void; islandBg: string; onChangeIslandBg: (v: string) => void; bgPos: { x: number; y: number }; onChangeBgPos: (v: { x: number; y: number }) => void; panelMaxHeight: number; onChangePanelMaxHeight: (v: number) => void; hoverDelay: number; onChangeHoverDelay: (v: number) => void; largeMascotScale: number; onChangeLargeMascotScale: (v: number) => void; appMode?: 'coding' | 'pet' | null; onChangeAppMode?: (v: 'coding' | 'pet') => void; petSfxEnabled?: boolean; onTogglePetSfxEnabled?: (v: boolean) => void; petIdleIntervalMin?: number; onChangePetIdleIntervalMin?: (v: number) => void }) {
+export function SettingsTab({ notifySound, onChangeNotifySound, waitingSound, onToggleWaitingSound, soundEnabled, onToggleSoundEnabled, codexSoundEnabled, onToggleCodexSoundEnabled, cursorSoundEnabled, onToggleCursorSoundEnabled, autoCloseCompletion, onToggleAutoCloseCompletion, autoExpandOnTask, onToggleAutoExpandOnTask, islandBg, onChangeIslandBg, bgPos, onChangeBgPos, panelMaxHeight, onChangePanelMaxHeight, hoverDelay, onChangeHoverDelay, largeMascotScale, onChangeLargeMascotScale, appMode, onChangeAppMode, petSfxEnabled, onTogglePetSfxEnabled, petIdleIntervalMin, onChangePetIdleIntervalMin, voiceTargetMode, onChangeVoiceTargetMode, voiceFixedTargetKey, onClearVoiceFixedTarget }: { notifySound: 'default' | 'manbo'; onChangeNotifySound: (v: 'default' | 'manbo') => void; waitingSound: boolean; onToggleWaitingSound: (v: boolean) => void; soundEnabled: boolean; onToggleSoundEnabled: (v: boolean) => void; codexSoundEnabled: boolean; onToggleCodexSoundEnabled: (v: boolean) => void; cursorSoundEnabled: boolean; onToggleCursorSoundEnabled: (v: boolean) => void; autoCloseCompletion: boolean; onToggleAutoCloseCompletion: (v: boolean) => void; autoExpandOnTask: boolean; onToggleAutoExpandOnTask: (v: boolean) => void; islandBg: string; onChangeIslandBg: (v: string) => void; bgPos: { x: number; y: number }; onChangeBgPos: (v: { x: number; y: number }) => void; panelMaxHeight: number; onChangePanelMaxHeight: (v: number) => void; hoverDelay: number; onChangeHoverDelay: (v: number) => void; largeMascotScale: number; onChangeLargeMascotScale: (v: number) => void; appMode?: 'coding' | 'pet' | null; onChangeAppMode?: (v: 'coding' | 'pet') => void; petSfxEnabled?: boolean; onTogglePetSfxEnabled?: (v: boolean) => void; petIdleIntervalMin?: number; onChangePetIdleIntervalMin?: (v: number) => void; voiceTargetMode?: 'auto' | 'fixed' | 'ask'; onChangeVoiceTargetMode?: (v: 'auto' | 'fixed' | 'ask') => void; voiceFixedTargetKey?: string | null; onClearVoiceFixedTarget?: () => void; customAgents?: { binary: string; displayName?: string }[]; onAddCustomAgent?: (a: { binary: string; displayName?: string }) => void; onRemoveCustomAgent?: (binary: string) => void }) {
   const { t, i18n } = useTranslation()
   const isWindowsPlatform = typeof navigator !== 'undefined' && navigator.userAgent.includes('Windows')
   const [connections, setConnections] = useState<OcConnection[]>([])
@@ -559,6 +599,94 @@ export function SettingsTab({ notifySound, onChangeNotifySound, waitingSound, on
                 className="w-full accent-white/60 h-1"
               />
             </div>
+          </div>
+        </section>
+      )}
+
+      {/* Voice agent target mode — visible in both efficiency + pet modes */}
+      {onChangeVoiceTargetMode && (
+        <section className="flex flex-col gap-4">
+          <h2 className="text-lg font-medium text-white">{t('settings.voiceAgent', 'Voice Agent')}</h2>
+          <div className="bg-[#0f0f0f] border border-white/5 rounded-2xl overflow-hidden">
+            <div className="p-4">
+              <div className="flex flex-col gap-1 mb-3">
+                <span className="text-sm font-medium text-white/90">
+                  {t('settings.voiceTargetMode', 'Default target')}
+                </span>
+                <span className="text-xs text-white/40">
+                  {t('settings.voiceTargetModeDesc', 'How the voice prompt picks an agent when you press Enter')}
+                </span>
+              </div>
+              <div className="flex gap-2">
+                {(['auto', 'fixed', 'ask'] as const).map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => onChangeVoiceTargetMode(m)}
+                    className={`flex-1 px-3 py-2 rounded-lg text-xs font-medium transition-colors border ${
+                      (voiceTargetMode || 'auto') === m
+                        ? 'bg-white/20 border-white/30 text-white'
+                        : 'bg-white/5 border-white/10 text-white/60 hover:bg-white/10'
+                    }`}
+                  >
+                    {m === 'auto' ? t('settings.voiceModeAuto', 'Auto (last used)')
+                      : m === 'fixed' ? t('settings.voiceModeFixed', 'Fixed (pinned)')
+                      : t('settings.voiceModeAsk', 'Ask each time')}
+                  </button>
+                ))}
+              </div>
+              {(voiceTargetMode || 'auto') === 'fixed' && (
+                <div className="mt-3 flex items-center justify-between text-xs">
+                  <span className="text-white/60 truncate mr-2">
+                    {voiceFixedTargetKey
+                      ? t('settings.voicePinnedTo', { defaultValue: 'Pinned: {{key}}', key: voiceFixedTargetKey })
+                      : t('settings.voiceNotPinned', 'Not pinned — press 📍 in the voice bubble to pin the current target')}
+                  </span>
+                  {voiceFixedTargetKey && onClearVoiceFixedTarget && (
+                    <button
+                      type="button"
+                      onClick={onClearVoiceFixedTarget}
+                      className="px-2 py-1 bg-white/5 hover:bg-white/10 border border-white/10 rounded text-white/70"
+                    >
+                      {t('common.clear', 'Clear')}
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+            {/* Custom terminal agents */}
+            {onAddCustomAgent && (
+              <div className="border-t border-white/5 p-4">
+                <div className="flex flex-col gap-1 mb-3">
+                  <span className="text-sm font-medium text-white/90">
+                    {t('settings.customAgents', 'Custom terminal agents')}
+                  </span>
+                  <span className="text-xs text-white/40">
+                    {t('settings.customAgentsDesc', 'Add any tty-resident AI (aider, opencode, cline, …). Voice dispatch works via terminal injection; no hooks → no completion receipt.')}
+                  </span>
+                </div>
+                <div className="flex flex-col gap-2">
+                  {(customAgents || []).map((a) => (
+                    <div key={a.binary} className="flex items-center justify-between bg-black/40 border border-white/10 rounded-lg px-3 py-2">
+                      <div className="flex flex-col">
+                        <span className="text-sm text-white/90">{a.displayName || a.binary}</span>
+                        <span className="text-xs text-white/40">$ {a.binary}</span>
+                      </div>
+                      {onRemoveCustomAgent && (
+                        <button
+                          type="button"
+                          onClick={() => onRemoveCustomAgent(a.binary)}
+                          className="text-xs px-2 py-1 bg-white/5 hover:bg-white/10 border border-white/10 rounded text-white/70"
+                        >
+                          {t('common.remove', 'Remove')}
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                  <CustomAgentAddRow onAdd={onAddCustomAgent} />
+                </div>
+              </div>
+            )}
           </div>
         </section>
       )}
