@@ -341,12 +341,13 @@ function stepOnWindow(s: MutablePhysicsState, edge: EdgeState) {
       // Re-assert facing every tick so even transient transitions
       // through other states (on_ceiling → on_wall, edge flag flickers
       // from window drag, etc.) can't leave the climb sprite mirrored
-      // against the side it's clinging to. LEFT side uses flipped
-      // (body on right of cell, looks outward to the left). RIGHT side
-      // uses native (body on left of cell, looks outward to the right).
+      // against the side it's clinging to. On a window's LEFT side the
+      // pet stands outside the window with the wall to its right, so
+      // use the native right-facing wall pose. On a window's RIGHT side
+      // the wall is to its left, so use the flipped pose.
       // See the attachment block in `stepOnScreen.falling` for the
       // geometry rationale.
-      s.facing = w.onLeftOfWindow ? -1 : 1
+      s.facing = w.onLeftOfWindow ? 1 : -1
       // Reached title bar — switch to on_floor on the window surface
       // and walk inward across the bar.
       if (s.vy < 0 && !w.withinVerticalRange) {
@@ -386,12 +387,10 @@ function stepOnWindow(s: MutablePhysicsState, edge: EdgeState) {
         s.ticksInState = 0
         s.vx = 0
         s.vy = -CLIMB_SPEED
-        // Match the reversed window-wall facing convention: LEFT side
-        // uses the flipped sprite (body on right of cell), RIGHT side
-        // uses native (body on left of cell). Without this assignment
+        // Match the window-wall facing convention above; without this
         // we'd keep the on_ceiling facing, which doesn't reflect the
-        // body-position the side cling requires.
-        s.facing = w.onLeftOfWindow ? -1 : 1
+        // side the body is clinging to.
+        s.facing = w.onLeftOfWindow ? 1 : -1
         return
       }
       if (s.ticksInState > 60 && Math.random() < WALL_DETACH_CHANCE_PER_TICK) {
@@ -445,6 +444,40 @@ function maybeJumpToWindow(s: MutablePhysicsState, edge: EdgeState): boolean {
   s.ticksInState = 0
   s.vy = -v  // top-down: negative = up
   s.vx = 0
+  return true
+}
+
+// Screen-floor entry into the frontmost-window side climb. The falling
+// state already lets the mascot grab a window's side while dropping
+// past it; this covers the more common programming-mode case where the
+// pet is simply walking along the Dock/screen floor and bumps into the
+// current top window's left or right edge. We only attach when the pet
+// is moving into that side, so brushing past a nearby window while
+// walking away does not unexpectedly snap it onto the window.
+function maybeGrabWindowSideFromScreenFloor(s: MutablePhysicsState, edge: EdgeState): boolean {
+  const w = edge.activeWindow
+  if (!w || !w.withinVerticalRange) return false
+
+  const walkingIntoLeftSide = w.onLeftOfWindow && s.vx > 0
+  const walkingIntoRightSide = w.onRightOfWindow && s.vx < 0
+  if (!walkingIntoLeftSide && !walkingIntoRightSide) return false
+
+  s.state = 'on_wall'
+  s.surface = 'window'
+  s.surfaceWindowId = w.windowId
+  s.lastWindowX = w.rect.x
+  s.lastWindowY = w.rect.y
+  s.lastWindowW = w.rect.width
+  s.lastWindowH = w.rect.height
+  s.vx = 0
+  s.vy = -CLIMB_SPEED
+  // Window walls use the outside-clinging convention: on the window's
+  // left side the wall is to the pet's right (native pose); on the
+  // right side the wall is to the pet's left (flipped pose).
+  s.facing = w.onLeftOfWindow ? 1 : -1
+  s.ticksInState = 0
+  s.floorWalkTicks = 0
+  s.restTicksRemaining = 0
   return true
 }
 
@@ -503,6 +536,9 @@ function stepOnScreen(s: MutablePhysicsState, edge: EdgeState) {
         s.vx = WALK_SPEED * s.lastFloorDir
       }
       s.facing = s.vx >= 0 ? 1 : -1
+      if (maybeGrabWindowSideFromScreenFloor(s, edge)) {
+        return
+      }
       // Once we've been walking for the minimum time, roll the dice
       // each tick for a rest dwell. Tuned so the cat rests on average
       // every ~6 seconds for 1-4 seconds.
@@ -632,21 +668,12 @@ function stepOnScreen(s: MutablePhysicsState, edge: EdgeState) {
       // its body is within the window's vertical range, grab the side
       // and start climbing.
       //
-      // FACING: the sprite atlas only ships native (body on LEFT of
-      // cell, facing right) and flipped (body on RIGHT of cell, facing
-      // left). For SCREEN walls the cat is *inside* the world, so
-      // left-screen-wall uses native (body touches wall on its left =
-      // correct). For WINDOW walls the cat is *outside* the window —
-      // its body must sit on the OPPOSITE side of the cell, otherwise
-      // the body floats away from the wall with empty space between.
-      // So the facing assignment is REVERSED vs screen walls:
-      //   - Window LEFT side: use FLIPPED sprite (facing=-1). Body on
-      //     right of cell touches window's left vertical from outside.
-      //     Cat looks left, away from the window — a natural "clinging
-      //     from outside" posture.
-      //   - Window RIGHT side: use NATIVE sprite (facing=+1). Body on
-      //     left of cell touches window's right vertical from outside.
-      //     Cat looks right, away from the window.
+      // FACING: window walls are climbed from outside the window, so
+      // choose the pose whose wall-touching side points at the window:
+      //   - Window LEFT side: the window is to the pet's right, so use
+      //     the native right-facing wall pose (facing=+1).
+      //   - Window RIGHT side: the window is to the pet's left, so use
+      //     the flipped left-facing wall pose (facing=-1).
       //
       // COOLDOWN: re-attaching immediately after walking off a title
       // bar's end creates an infinite lap loop (walk off → fall →
@@ -668,8 +695,7 @@ function stepOnScreen(s: MutablePhysicsState, edge: EdgeState) {
         s.lastWindowH = edge.activeWindow.rect.height
         s.vx = 0
         s.vy = 0
-        // Reversed vs screen wall (see comment above).
-        s.facing = edge.activeWindow.onLeftOfWindow ? -1 : 1
+        s.facing = edge.activeWindow.onLeftOfWindow ? 1 : -1
         s.ticksInState = 0
         return
       }

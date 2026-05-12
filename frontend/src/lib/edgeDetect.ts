@@ -214,6 +214,12 @@ interface CellBBox {
   right: number    // 0-indexed X of rightmost opaque pixel
   bottom: number   // 0-indexed Y of lowest opaque pixel
   left: number     // 0-indexed X of leftmost opaque pixel
+  // Side-contact columns ignore wispy extremities such as ears, tails,
+  // shadows, and antialiased pixels. Window-wall detection uses these
+  // instead of raw left/right so the mascot grips the visible window
+  // border with its body/paws rather than a decorative outlier pixel.
+  contactLeft: number
+  contactRight: number
 }
 const cellBBoxCache = new Map<string, CellBBox | null>()
 
@@ -252,18 +258,11 @@ const ON_WALL_ANIM_KEYS = [
 //   - top: min topmostOpaqueY across on-ceiling rows. The pose with
 //     the topmost head reaches the menubar; others stay slightly
 //     below (never clip past it).
-//   - left / right: tighter of (min leftmostX in any wall row) and
-//     (cellW − 1 − max rightmostX in any wall row). Picking the
-//     tighter handles BOTH conventions:
-//       * Mirror pets (shimeji-bola style — grab-wall has the cat on
-//         the left of the cell, grab-wall-flipped uses CSS scaleX)
-//         have leftmost reach in the left rows only; rightmost reach
-//         is the same number (cellW − 1 − leftmost in the mirrored
-//         render). Tighter is leftmost.
-//       * Asymmetric pets with separate L/R rows have both
-//         leftmost-in-left-row AND rightmost-in-right-row roughly
-//         equal (the cat hugs each wall the same way). Tighter is
-//         either, both equivalent.
+//   - left / right: wall-pose contact column, not the raw bbox side.
+//     Raw bbox sides include decorative extremities, which makes the
+//     pet visually hover away from screen/window borders. The contact
+//     column requires enough vertical alpha coverage to behave like
+//     the body/paw edge that actually grips the wall.
 //
 // Returns `null` when the DOM anchor isn't in the tree yet — caller
 // should retry. Individual edge fields may be `null` if the pet
@@ -358,36 +357,33 @@ export async function measureSpriteAnchorsCSS(
     ? Math.max(0, gapTop + minTop * yScale)
     : null
 
-  // Sides — bounding box across wall rows. For the `spriteNameFor`
+  // Sides — contact columns across wall rows. For the `spriteNameFor`
   // flipX convention (no flip on left wall, CSS scaleX(-1) on right
   // wall — see petPhysics.ts), both walls' padding derives from the
-  // *leftmost* opaque pixel of the unflipped wall sprite:
+  // *left-side contact column* of the unflipped wall sprite:
   //
-  //   On LEFT wall (no flip): cat's leftmost-in-render = minLeftmostX
-  //     → padLeft = gap + minLeftmostX × xScale puts that pixel at vf.left.
+  //   On LEFT wall (no flip): cat's left contact column =
+  //     minContactLeftX → padLeft = gap + minContactLeftX × xScale.
   //
   //   On RIGHT wall (with flip): the cat's wall-touching pixel in the
   //     flipped render comes from the same unflipped cell-x =
-  //     minLeftmostX (its rendered right edge after mirroring).
-  //     → padRight = gap + minLeftmostX × xScale puts that pixel at vf.right.
+  //     minContactLeftX (its rendered right edge after mirroring).
+  //     → padRight = gap + minContactLeftX × xScale.
   //
-  // So padLeft == padRight == gap + minLeftmostX × xScale, regardless
-  // of where the cat sits in the cell (left-anchored, centered like
-  // shimeji-bola where minLeft=48, or right-anchored). The earlier
-  // `min(minLeft, cellW-1-maxRight)` heuristic was over-engineering
-  // for an asymmetric-rendering case that doesn't actually exist with
-  // the current renderer — and broke centered sprites by under-padding
-  // by exactly the asymmetry (e.g. 14.8 CSS px gap from wall to hand
-  // for shimeji-bola).
-  let minLeft = cellW
+  // Using raw leftmost opaque pixels works for boxy sprites, but it
+  // treats wispy ears/tails as the window-border contact point. The
+  // contact column is derived from per-column alpha coverage so those
+  // decorative outliers do not make the pet hover a few pixels away
+  // from the actual top-window border.
+  let minContactLeft = cellW
   let anyWallScanned = false
   for (const row of wallRows) {
     const bbox = await getBBox(row)
     if (!bbox) continue
     anyWallScanned = true
-    if (bbox.left < minLeft) minLeft = bbox.left
+    if (bbox.contactLeft < minContactLeft) minContactLeft = bbox.contactLeft
   }
-  const sideCellPad = anyWallScanned ? Math.max(0, minLeft) : -1
+  const sideCellPad = anyWallScanned ? Math.max(0, minContactLeft) : -1
   const sideCSS = sideCellPad >= 0 ? sideCellPad * xScale : -1
   const leftPx = anyWallScanned ? Math.max(0, gapLeft + sideCSS) : null
   const rightPx = anyWallScanned ? Math.max(0, gapRight + sideCSS) : null
@@ -452,9 +448,11 @@ function scanCellBBox(
   const ctx = canvas.getContext('2d')
   if (!ctx) return null
   const ALPHA_THRESHOLD = 16
+  const SIDE_CONTACT_COVERAGE_RATIO = 0.2
   const frames = Math.max(1, frameCount | 0)
   let aggTop = -1, aggBottom = -1, aggLeft = cellW, aggRight = -1
   let anyOpaque = false
+  const columnCoverage = new Array<number>(cellW).fill(0)
   for (let frame = 0; frame < frames; frame++) {
     ctx.clearRect(0, 0, cellW, cellH)
     ctx.drawImage(
@@ -473,6 +471,7 @@ function scanCellBBox(
       for (let x = 0; x < cellW; x++) {
         if (data[rowStart + x * 4 + 3] >= ALPHA_THRESHOLD) {
           anyOpaque = true
+          columnCoverage[x] += 1
           if (aggTop < 0 || y < aggTop) aggTop = y
           if (y > aggBottom) aggBottom = y
           if (x < aggLeft) aggLeft = x
@@ -482,7 +481,18 @@ function scanCellBBox(
     }
   }
   if (!anyOpaque) return null
-  return { top: aggTop, right: aggRight, bottom: aggBottom, left: aggLeft }
+  const maxCoverage = Math.max(...columnCoverage)
+  const minContactCoverage = Math.max(1, maxCoverage * SIDE_CONTACT_COVERAGE_RATIO)
+  const contactLeft = columnCoverage.findIndex((count) => count >= minContactCoverage)
+  const contactRightFromEnd = [...columnCoverage].reverse().findIndex((count) => count >= minContactCoverage)
+  return {
+    top: aggTop,
+    right: aggRight,
+    bottom: aggBottom,
+    left: aggLeft,
+    contactLeft: contactLeft >= 0 ? contactLeft : aggLeft,
+    contactRight: contactRightFromEnd >= 0 ? cellW - 1 - contactRightFromEnd : aggRight,
+  }
 }
 
 function loadImage(url: string): Promise<HTMLImageElement> {
