@@ -3,6 +3,7 @@
   "displayName": "芝麻球",
   "description": "ShimejiEE 像素猫，移植自 group-finity (BSD/zlib 授权)。原作者 Yuki Yamada / 增强版作者 Kilkakon。",
   "spritesheetPath": "spritesheet.webp",
+  "imageRendering": "pixelated",
   "kind": "creature",
   "schemaVersion": 2,
   "atlas": {
@@ -26,12 +27,12 @@
     "run-left": {
       "row": 1,
       "frames": 4,
-      "fps": 8
+      "fps": 10
     },
     "run-right": {
       "row": 1,
       "frames": 4,
-      "fps": 8,
+      "fps": 10,
       "flipX": true
     },
     "review": {
@@ -62,23 +63,23 @@
     "climb-wall": {
       "row": 5,
       "frames": 4,
-      "fps": 8
+      "fps": 10
     },
     "climb-wall-flipped": {
       "row": 5,
       "frames": 4,
-      "fps": 8,
+      "fps": 10,
       "flipX": true
     },
     "climb-ceiling": {
       "row": 6,
       "frames": 4,
-      "fps": 8
+      "fps": 10
     },
     "climb-ceiling-flipped": {
       "row": 6,
       "frames": 4,
-      "fps": 8,
+      "fps": 10,
       "flipX": true
     },
     "falling": {

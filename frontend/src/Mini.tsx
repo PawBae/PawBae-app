@@ -4039,13 +4039,18 @@ export default function Mini() {
   const collapsedStatusBorder = largeMascot ? 1.1 : 1.2
   const largeMascotVisualSize = collapsedMascotSize * largeMascotScale
   const miniPetRenderWidth = miniPet
-    ? collapsedMascotSize * MINI_SPRITE_DISPLAY_MULTIPLIER * (miniPet.displayScale ?? 1)
+    ? Math.round(collapsedMascotSize * MINI_SPRITE_DISPLAY_MULTIPLIER * (miniPet.displayScale ?? 1))
     : 0
   const miniPetRenderHeight = miniPet
     ? Math.round(miniPetRenderWidth * (miniPet.atlas.cellH / miniPet.atlas.cellW))
     : 0
   const shouldBottomAnchorMiniSprite = appMode === 'coding' && !largeMascot && !!miniPet
   const [miniSpriteBottomPadCSS, setMiniSpriteBottomPadCSS] = useState(0)
+  const miniSpriteBottomAnchorState: CodexPetState =
+    strollEnabled
+    && (mainSpriteState === 'falling' || mainSpriteState === 'jumping' || mainSpriteState === 'bouncing')
+      ? 'idle'
+      : mainSpriteState
 
   useEffect(() => {
     let cancelled = false
@@ -4055,9 +4060,11 @@ export default function Mini() {
     }
 
     // The mini window should sit on the visible sprite feet, not on the
-    // transparent atlas cell. Measure the current animation row so custom
-    // pets with different sheet padding still anchor cleanly in coding mode.
-    measureSpriteBottomPadCSS(miniPet, mainSpriteState, miniPetRenderWidth)
+    // transparent atlas cell. Landing states are deliberately anchored
+    // to idle: falling/bouncing frames have very different transparent
+    // bottom padding, and remeasuring those transient rows after React
+    // paints creates a visible one-frame landing hitch.
+    measureSpriteBottomPadCSS(miniPet, miniSpriteBottomAnchorState, miniPetRenderWidth, miniPetRenderHeight)
       .then((pad) => {
         if (cancelled) return
         setMiniSpriteBottomPadCSS(pad == null ? 0 : Math.round(pad * 100) / 100)
@@ -4067,7 +4074,7 @@ export default function Mini() {
       })
 
     return () => { cancelled = true }
-  }, [shouldBottomAnchorMiniSprite, miniPet, mainSpriteState, miniPetRenderWidth])
+  }, [shouldBottomAnchorMiniSprite, miniPet, miniSpriteBottomAnchorState, miniPetRenderWidth, miniPetRenderHeight])
 
   useEffect(() => {
     if (!useWindowsChromaKey || !largeMascot) return

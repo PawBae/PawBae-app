@@ -357,33 +357,29 @@ export async function measureSpriteAnchorsCSS(
     ? Math.max(0, gapTop + minTop * yScale)
     : null
 
-  // Sides — contact columns across wall rows. For the `spriteNameFor`
-  // flipX convention (no flip on left wall, CSS scaleX(-1) on right
-  // wall — see petPhysics.ts), both walls' padding derives from the
-  // *left-side contact column* of the unflipped wall sprite:
+  // Sides — visible silhouette across wall rows. Wall sprites can be
+  // rendered either unflipped or CSS-flipped depending on whether the
+  // pet is clinging to a screen edge or a window side. Runtime edge
+  // detection stores one left/right pad for the pet, not per-state
+  // flip-aware pads, so use the smallest transparent horizontal gap
+  // across both sides of the unflipped cell. That is conservative for
+  // both the native and mirrored renders: the pet may sit a little
+  // farther from the edge, but no head/ear pixels disappear.
   //
-  //   On LEFT wall (no flip): cat's left contact column =
-  //     minContactLeftX → padLeft = gap + minContactLeftX × xScale.
-  //
-  //   On RIGHT wall (with flip): the cat's wall-touching pixel in the
-  //     flipped render comes from the same unflipped cell-x =
-  //     minContactLeftX (its rendered right edge after mirroring).
-  //     → padRight = gap + minContactLeftX × xScale.
-  //
-  // Using raw leftmost opaque pixels works for boxy sprites, but it
-  // treats wispy ears/tails as the window-border contact point. The
-  // contact column is derived from per-column alpha coverage so those
-  // decorative outliers do not make the pet hover a few pixels away
-  // from the actual top-window border.
-  let minContactLeft = cellW
+  // Earlier versions used a body/paw "contact column" so the paws could
+  // sit exactly on the border, but Yoonie's long ears extend past that
+  // contact column. The native window is clipped by screen edges, so
+  // contact-column padding pushed the ear outside the visible frame on
+  // walls. Full-silhouette padding keeps the whole character visible.
+  let minSideGap = cellW
   let anyWallScanned = false
   for (const row of wallRows) {
     const bbox = await getBBox(row)
     if (!bbox) continue
     anyWallScanned = true
-    if (bbox.contactLeft < minContactLeft) minContactLeft = bbox.contactLeft
+    minSideGap = Math.min(minSideGap, bbox.left, cellW - 1 - bbox.right)
   }
-  const sideCellPad = anyWallScanned ? Math.max(0, minContactLeft) : -1
+  const sideCellPad = anyWallScanned ? Math.max(0, minSideGap) : -1
   const sideCSS = sideCellPad >= 0 ? sideCellPad * xScale : -1
   const leftPx = anyWallScanned ? Math.max(0, gapLeft + sideCSS) : null
   const rightPx = anyWallScanned ? Math.max(0, gapRight + sideCSS) : null
@@ -400,6 +396,7 @@ export async function measureSpriteBottomPadCSS(
   pet: CodexPet,
   state: CodexPetState,
   renderWidth: number,
+  renderHeight?: number,
 ): Promise<number | null> {
   const row = animationFor(pet, state) ?? animationFor(pet, 'idle')
   if (!row) return null
@@ -418,9 +415,9 @@ export async function measureSpriteBottomPadCSS(
   const bbox = scanCellBBox(img, cellW, cellH, row.row, row.frames, row.offsetCol ?? 0)
   if (!bbox) return null
 
-  const cssScale = renderWidth / cellW
+  const cssScaleY = (renderHeight && renderHeight > 0 ? renderHeight : renderWidth * (cellH / cellW)) / cellH
   const rowScale = row.displayScale ?? 1
-  return Math.max(0, (cellH - 1 - bbox.bottom) * cssScale * rowScale)
+  return Math.max(0, (cellH - 1 - bbox.bottom) * cssScaleY * rowScale)
 }
 
 // Scan every frame of a row and return the unioned bounding box of

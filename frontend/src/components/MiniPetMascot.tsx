@@ -130,7 +130,7 @@ export function MiniPetMascot({
       style={{ display: 'inline-block', lineHeight: 0, ...style }}
     >
       <SpritePet
-        key={showJump ? `jump-${jumpKey}` : `base-${renderState}`}
+        key={showJump ? `jump-${jumpKey}` : `base-${pet.id}-${pet.spritesheetUrl}`}
         pet={pet}
         state={renderState}
         size={size}

@@ -62,6 +62,8 @@ export interface PhysicsSpec {
   enabled?: boolean
 }
 
+export type SpriteImageRendering = 'auto' | 'pixelated' | 'crisp-edges'
+
 export type MiniPetSourceState = 'idle' | 'working' | 'compacting' | 'waiting'
 
 export interface CodexPet {
@@ -87,6 +89,10 @@ export interface CodexPet {
   // cell render visually smaller, so different packs read as the same
   // on-screen size. Defaults to 1.
   displayScale?: number
+  // CSS image-rendering mode for atlas sampling. High-resolution painted
+  // pets should use browser smoothing; pixel-art packs can opt into
+  // nearest-neighbour rendering with "pixelated".
+  imageRendering: SpriteImageRendering
 }
 
 // Default hatch-pet atlas (legacy 192×208 cells, 8 cols × 9 rows). Used
@@ -219,6 +225,7 @@ interface RawPetMeta {
   oneShot?: string[]
   physics?: PhysicsSpec
   displayScale?: number
+  imageRendering?: SpriteImageRendering
 }
 
 interface PetsManifest {
@@ -283,6 +290,7 @@ function resolvePet(meta: RawPetMeta, fallbackId: string, spritesheetUrl: string
     oneShot,
     physics: meta.physics,
     displayScale: meta.displayScale,
+    imageRendering: meta.imageRendering ?? 'auto',
   }
 }
 

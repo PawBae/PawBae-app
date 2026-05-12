@@ -70,7 +70,8 @@ const CLIMB_SPEED = 1
 const BOUNCE_DAMPING = 0.4
 const RESISTANCE_X = 0.05
 export const MAX_THROW_SPEED = 30
-const BOUNCE_FRAMES = 6 // hold `bouncing` for ~180ms after impact
+const BOUNCE_FRAMES = 10 // hold `bouncing` for ~300ms so all 3 sprite frames play
+const WALL_GRAB_HOLD_TICKS = 1 // one-frame settle pose before the climb loop starts
 // While ascending a wall, the mascot eventually mounts the ceiling.
 // Apply a small probability of voluntarily detaching once climbed
 // halfway up the screen to avoid a stuck-on-wall feel.
@@ -219,7 +220,7 @@ function spriteNameFor(s: MutablePhysicsState): string {
       // paws reaching toward a wall on the right side of the cell. Use
       // the flipped variant on left borders so her paws touch that side.
       const flip = s.facing === -1 ? '-flipped' : ''
-      if (s.ticksInState < 6 || Math.abs(s.vy) < 0.01) return 'grab-wall' + flip
+      if (s.ticksInState < WALL_GRAB_HOLD_TICKS || Math.abs(s.vy) < 0.01) return 'grab-wall' + flip
       return 'climb-wall' + flip
     }
     case 'on_ceiling': {

@@ -38,16 +38,33 @@ export function SpritePet({ pet, state, size, onOneShotEnd, loop, className, sty
   const onOneShotEndRef = useRef(onOneShotEnd)
   const oneShotFiredRef = useRef(false)
   const petRef = useRef(pet)
+  const clockResetRef = useRef(0)
   // Timestamp until which the current looping cycle is "resting" on the
   // last frame. 0 means no rest in flight.
   const restUntilRef = useRef(0)
 
   useEffect(() => {
+    const prevPet = petRef.current
+    const prevState = stateRef.current
+    const prevRow = animationFor(prevPet, prevState) ?? animationFor(prevPet, 'idle')
+    const nextRow = animationFor(pet, state) ?? animationFor(pet, 'idle')
+    const canCarryFrame =
+      !!prevRow
+      && !!nextRow
+      && prevPet.spritesheetUrl === pet.spritesheetUrl
+      && prevRow.row === nextRow.row
+      && prevRow.frames === nextRow.frames
+      && (prevRow.offsetCol ?? 0) === (nextRow.offsetCol ?? 0)
+
     stateRef.current = state
     oneShotFiredRef.current = false
     restUntilRef.current = 0
-    setFrameIndex(0)
-  }, [state])
+    // Same-row transitions (for example run-left/run-right or closely
+    // related physics states packed into one row) should keep the frame
+    // cadence. Resetting the clock there inserts a tiny visible pause.
+    if (!canCarryFrame) clockResetRef.current += 1
+    setFrameIndex((prev) => (canCarryFrame && nextRow ? Math.min(prev, nextRow.frames - 1) : 0))
+  }, [pet, state])
 
   useEffect(() => {
     loopRef.current = loop ?? false
@@ -65,10 +82,16 @@ export function SpritePet({ pet, state, size, onOneShotEnd, loop, className, sty
     let raf = 0
     let acc = 0
     let last = performance.now()
+    let clockResetVersion = clockResetRef.current
     let cancelled = false
 
     const tick = (now: number) => {
       if (cancelled) return
+      if (clockResetVersion !== clockResetRef.current) {
+        clockResetVersion = clockResetRef.current
+        acc = 0
+        last = now
+      }
       // If we're in an inter-cycle rest, hold the last frame and skip
       // frame advancement until the rest deadline passes.
       if (restUntilRef.current > 0) {
@@ -86,13 +109,16 @@ export function SpritePet({ pet, state, size, onOneShotEnd, loop, className, sty
         raf = requestAnimationFrame(tick)
         return
       }
-      const dt = now - last
-      last = now
-      acc += dt
       // Re-read the per-frame interval each iteration so per-state fps
       // overrides take effect immediately when the state changes mid-tick.
       const curPet = petRef.current
       const frameMs = 1000 / fpsFor(curPet, stateRef.current)
+      const dt = now - last
+      last = now
+      // WebViews can stall briefly during native-window moves or IPC.
+      // Capping catch-up avoids jumping several sprite frames at once after
+      // a hiccup, which reads as a broken run/climb cycle.
+      acc = Math.min(acc + dt, frameMs * 1.5)
       while (acc >= frameMs) {
         if (restUntilRef.current > 0) break
         acc -= frameMs
@@ -142,13 +168,15 @@ export function SpritePet({ pet, state, size, onOneShotEnd, loop, className, sty
   const frame = Math.min(frameIndex, row.frames - 1)
   const offsetCol = row.offsetCol ?? 0
   const aspect = pet.atlas.cellH / pet.atlas.cellW
-  const renderW = size
-  const renderH = size * aspect
-  const scale = renderW / pet.atlas.cellW
-  const totalW = pet.atlas.cellW * pet.atlas.cols * scale
-  const totalH = pet.atlas.cellH * pet.atlas.rows * scale
-  const bgX = -(offsetCol + frame) * pet.atlas.cellW * scale
-  const bgY = -row.row * pet.atlas.cellH * scale
+  // Keep each displayed atlas cell on whole CSS pixels. Fractional
+  // background sizes/positions force subpixel sampling and make the pet
+  // look soft, especially while the native window is moving.
+  const renderW = Math.max(1, Math.round(size))
+  const renderH = Math.max(1, Math.round(size * aspect))
+  const totalW = renderW * pet.atlas.cols
+  const totalH = renderH * pet.atlas.rows
+  const bgX = -(offsetCol + frame) * renderW
+  const bgY = -row.row * renderH
 
   // Per-row visual scale anchored at the feet: when a row's character
   // bbox is smaller than other rows (e.g. Yoonie's running pose is ~9%
@@ -171,7 +199,8 @@ export function SpritePet({ pet, state, size, onOneShotEnd, loop, className, sty
         backgroundRepeat: 'no-repeat',
         backgroundSize: `${totalW}px ${totalH}px`,
         backgroundPosition: `${bgX}px ${bgY}px`,
-        imageRendering: 'pixelated',
+        imageRendering: pet.imageRendering,
+        willChange: 'background-position',
         transform,
         transformOrigin: rowScale !== 1 ? 'bottom center' : undefined,
         overflow: 'visible',
