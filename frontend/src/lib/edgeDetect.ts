@@ -18,7 +18,7 @@
 
 import { invoke } from '@tauri-apps/api/core'
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow'
-import type { CodexPet } from './codexPet'
+import { animationFor, type CodexPet, type CodexPetState } from './codexPet'
 
 export interface MonitorRect {
   // Origin (bottom-left on macOS, top-left on Windows).
@@ -342,7 +342,7 @@ export async function measureSpriteAnchorsCSS(
     if (bbox && bbox.bottom > maxBottom) maxBottom = bbox.bottom
   }
   const bottomPx = maxBottom >= 0
-    ? gapBottom + (cellH - 1 - maxBottom) * yScale
+    ? Math.max(0, gapBottom + (cellH - 1 - maxBottom) * yScale)
     : null
 
   // Top — min topmostOpaqueY across on-ceiling rows. If the pet has no
@@ -355,7 +355,7 @@ export async function measureSpriteAnchorsCSS(
     if (bbox) { anyCeilingScanned = true; if (bbox.top < minTop) minTop = bbox.top }
   }
   const topPx = anyCeilingScanned
-    ? gapTop + minTop * yScale
+    ? Math.max(0, gapTop + minTop * yScale)
     : null
 
   // Sides — bounding box across wall rows. For the `spriteNameFor`
@@ -389,10 +389,42 @@ export async function measureSpriteAnchorsCSS(
   }
   const sideCellPad = anyWallScanned ? Math.max(0, minLeft) : -1
   const sideCSS = sideCellPad >= 0 ? sideCellPad * xScale : -1
-  const leftPx = anyWallScanned ? gapLeft + sideCSS : null
-  const rightPx = anyWallScanned ? gapRight + sideCSS : null
+  const leftPx = anyWallScanned ? Math.max(0, gapLeft + sideCSS) : null
+  const rightPx = anyWallScanned ? Math.max(0, gapRight + sideCSS) : null
 
   return { topPx, rightPx, bottomPx, leftPx }
+}
+
+// Measure how much transparent atlas padding sits below the visible pixels
+// for a specific rendered animation. The coding-mode mini mascot uses this
+// to visually anchor user-selected sprite pets to the native window bottom:
+// CSS layout anchors the full atlas cell, but many pets intentionally leave
+// transparent room below their feet inside each cell.
+export async function measureSpriteBottomPadCSS(
+  pet: CodexPet,
+  state: CodexPetState,
+  renderWidth: number,
+): Promise<number | null> {
+  const row = animationFor(pet, state) ?? animationFor(pet, 'idle')
+  if (!row) return null
+
+  const cellW = pet.atlas.cellW
+  const cellH = pet.atlas.cellH
+  if (cellW <= 0 || cellH <= 0 || renderWidth <= 0) return null
+
+  let img: HTMLImageElement
+  try {
+    img = await loadImage(pet.spritesheetUrl)
+  } catch {
+    return null
+  }
+
+  const bbox = scanCellBBox(img, cellW, cellH, row.row, row.frames, row.offsetCol ?? 0)
+  if (!bbox) return null
+
+  const cssScale = renderWidth / cellW
+  const rowScale = row.displayScale ?? 1
+  return Math.max(0, (cellH - 1 - bbox.bottom) * cssScale * rowScale)
 }
 
 // Scan every frame of a row and return the unioned bounding box of
@@ -412,6 +444,7 @@ function scanCellBBox(
   cellH: number,
   row: number,
   frameCount: number,
+  offsetCol = 0,
 ): CellBBox | null {
   const canvas = document.createElement('canvas')
   canvas.width = cellW
@@ -426,7 +459,7 @@ function scanCellBBox(
     ctx.clearRect(0, 0, cellW, cellH)
     ctx.drawImage(
       img,
-      frame * cellW, row * cellH, cellW, cellH,
+      (offsetCol + frame) * cellW, row * cellH, cellW, cellH,
       0, 0, cellW, cellH,
     )
     let data: Uint8ClampedArray

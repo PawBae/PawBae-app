@@ -37,6 +37,7 @@ import { MiniPetMascot } from './components/MiniPetMascot'
 import { SpritePet } from './components/SpritePet'
 import { PetPicker } from './components/PetPicker'
 import { usePhysicsLoop, type PhysicsHandle } from './lib/petPhysics'
+import { measureSpriteBottomPadCSS } from './lib/edgeDetect'
 
 interface CharacterMeta {
   name: string
@@ -4037,6 +4038,36 @@ export default function Mini() {
   const collapsedStatusSize = largeMascot ? 5 : 6
   const collapsedStatusBorder = largeMascot ? 1.1 : 1.2
   const largeMascotVisualSize = collapsedMascotSize * largeMascotScale
+  const miniPetRenderWidth = miniPet
+    ? collapsedMascotSize * MINI_SPRITE_DISPLAY_MULTIPLIER * (miniPet.displayScale ?? 1)
+    : 0
+  const miniPetRenderHeight = miniPet
+    ? Math.round(miniPetRenderWidth * (miniPet.atlas.cellH / miniPet.atlas.cellW))
+    : 0
+  const shouldBottomAnchorMiniSprite = appMode === 'coding' && !largeMascot && !!miniPet
+  const [miniSpriteBottomPadCSS, setMiniSpriteBottomPadCSS] = useState(0)
+
+  useEffect(() => {
+    let cancelled = false
+    if (!shouldBottomAnchorMiniSprite || !miniPet || miniPetRenderWidth <= 0) {
+      setMiniSpriteBottomPadCSS(0)
+      return
+    }
+
+    // The mini window should sit on the visible sprite feet, not on the
+    // transparent atlas cell. Measure the current animation row so custom
+    // pets with different sheet padding still anchor cleanly in coding mode.
+    measureSpriteBottomPadCSS(miniPet, mainSpriteState, miniPetRenderWidth)
+      .then((pad) => {
+        if (cancelled) return
+        setMiniSpriteBottomPadCSS(pad == null ? 0 : Math.round(pad * 100) / 100)
+      })
+      .catch(() => {
+        if (!cancelled) setMiniSpriteBottomPadCSS(0)
+      })
+
+    return () => { cancelled = true }
+  }, [shouldBottomAnchorMiniSprite, miniPet, mainSpriteState, miniPetRenderWidth])
 
   useEffect(() => {
     if (!useWindowsChromaKey || !largeMascot) return
@@ -4142,7 +4173,11 @@ export default function Mini() {
             height: '100%',
             position: 'relative',
             display: (appMode === 'pet' && largeMascot) ? 'block' : 'flex',
-            alignItems: (appMode === 'pet' && largeMascot) ? undefined : 'center',
+            alignItems: (appMode === 'pet' && largeMascot)
+              ? undefined
+              : shouldBottomAnchorMiniSprite
+                ? 'flex-end'
+                : 'center',
             justifyContent: (appMode === 'pet' && largeMascot) ? undefined : 'center',
             // No background. Used to be `rgba(0,0,0,0.01)` to coax macOS
             // WKWebView into delivering hover events on transparent area,
@@ -4301,21 +4336,25 @@ export default function Mini() {
               })}
             </div>) : miniPet ? (
               <div
-                // data-physics-anchor lets edgeDetect.measureBottomFootOffsetCSS
-                // locate the rendered sprite via getBoundingClientRect, so the
-                // stroll-mode floor math accounts for any centering offset
-                // between this div and the surrounding mini window.
+                // data-physics-anchor lets edgeDetect.measureSpriteAnchorsCSS
+                // locate the rendered sprite via getBoundingClientRect. In
+                // coding mode the transform below removes transparent atlas
+                // padding so both the visual pet and stroll physics share the
+                // same bottom-of-window anchor.
                 data-physics-anchor=""
                 style={{
                   position: 'relative',
-                  width: collapsedMascotSize * MINI_SPRITE_DISPLAY_MULTIPLIER * (miniPet.displayScale ?? 1),
-                  height: Math.round(collapsedMascotSize * MINI_SPRITE_DISPLAY_MULTIPLIER * (miniPet.atlas.cellH / miniPet.atlas.cellW) * (miniPet.displayScale ?? 1)),
+                  width: miniPetRenderWidth,
+                  height: miniPetRenderHeight,
+                  transform: shouldBottomAnchorMiniSprite && miniSpriteBottomPadCSS > 0
+                    ? `translateY(${miniSpriteBottomPadCSS}px)`
+                    : undefined,
                 }}
               >
                 <MiniPetMascot
                   pet={miniPet}
                   baseState={mainSpriteState}
-                  size={collapsedMascotSize * MINI_SPRITE_DISPLAY_MULTIPLIER * (miniPet.displayScale ?? 1)}
+                  size={miniPetRenderWidth}
                   enableHoverJump
                   externalHover={mascotHover}
                   useExternalHover={!isWindowsPlatform}

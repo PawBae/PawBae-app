@@ -849,6 +849,50 @@ export function usePhysicsLoop(opts: PhysicsOptions): PhysicsHandle {
     }
     let cancelled = false
     let tickInFlight = false
+    const petForMeasure = opts.pet
+
+    const pushMeasuredAnchors = async (): Promise<boolean> => {
+      if (cancelled || !petForMeasure) return false
+      const anchors = await measureSpriteAnchorsCSS(petForMeasure)
+      if (cancelled || anchors === null) return false
+      setRuntimeSpritePadCSS(anchors)
+      // Only push the px fields that were actually measured. Fields
+      // left out keep their reset (None) state in Rust, which falls
+      // back to the fraction defaults — identical to what the
+      // frontend uses for the same null field. So the two sides
+      // stay in sync regardless of which animations the pet
+      // declares.
+      const payload: Record<string, number | boolean> = { resetPx: true }
+      if (anchors.topPx !== null)    payload.topPx    = anchors.topPx
+      if (anchors.rightPx !== null)  payload.rightPx  = anchors.rightPx
+      if (anchors.bottomPx !== null) payload.bottomPx = anchors.bottomPx
+      if (anchors.leftPx !== null)   payload.leftPx   = anchors.leftPx
+      invoke('set_sprite_pad_fractions', payload).catch(() => {
+        // Older Rust builds may not have the px fields; the frontend
+        // override is still effective for visible landing even if the
+        // safety-clamp disagrees by a couple of px.
+      })
+      return true
+    }
+
+    const measureWithRetries = async (attempt = 0) => {
+      if (cancelled) return
+      const measured = await pushMeasuredAnchors()
+      if (!measured && attempt < 19) {
+        setTimeout(() => { void measureWithRetries(attempt + 1) }, 100)
+      }
+    }
+
+    const scheduleAnchorMeasure = (delayMs = 0) => {
+      const schedule = () => {
+        requestAnimationFrame(() => { void measureWithRetries() })
+      }
+      if (delayMs > 0) {
+        setTimeout(schedule, delayMs)
+      } else {
+        schedule()
+      }
+    }
 
     const tick = async () => {
       if (cancelled || tickInFlight) return
@@ -867,6 +911,13 @@ export function usePhysicsLoop(opts: PhysicsOptions): PhysicsHandle {
         if (newSprite !== lastSpriteRef.current) {
           lastSpriteRef.current = newSprite
           setSnapshot({ spriteName: newSprite, physicsState: s.state })
+          // Mini.tsx applies a per-animation bottom correction after
+          // React paints the new sprite. Remeasure shortly after a sprite
+          // change so window-surface collision uses the same visual foot
+          // position the user sees, instead of an old atlas-padding value
+          // that can make the pet sink into the foreground window.
+          scheduleAnchorMeasure()
+          scheduleAnchorMeasure(120)
         }
 
         // FallWithIE / WalkWithIE — when sitting on a window surface,
@@ -956,40 +1007,14 @@ export function usePhysicsLoop(opts: PhysicsOptions): PhysicsHandle {
     resetRuntimeSpritePadCSS()
     invoke('set_sprite_pad_fractions', { resetPx: true }).catch(() => {})
 
-    const petForMeasure = opts.pet
     if (petForMeasure) {
-      let attempt = 0
-      const tryMeasure = async () => {
-        if (cancelled) return
-        const anchors = await measureSpriteAnchorsCSS(petForMeasure)
-        if (cancelled) return
-        if (anchors === null) {
-          attempt += 1
-          if (attempt >= 20) return // ~2 s of retries with 100 ms gap
-          setTimeout(tryMeasure, 100)
-          return
-        }
-        setRuntimeSpritePadCSS(anchors)
-        // Only push the px fields that were actually measured. Fields
-        // left out keep their reset (None) state in Rust, which falls
-        // back to the fraction defaults — identical to what the
-        // frontend uses for the same null field. So the two sides
-        // stay in sync regardless of which animations the pet
-        // declares.
-        const payload: Record<string, number | boolean> = { resetPx: true }
-        if (anchors.topPx !== null)    payload.topPx    = anchors.topPx
-        if (anchors.rightPx !== null)  payload.rightPx  = anchors.rightPx
-        if (anchors.bottomPx !== null) payload.bottomPx = anchors.bottomPx
-        if (anchors.leftPx !== null)   payload.leftPx   = anchors.leftPx
-        invoke('set_sprite_pad_fractions', payload).catch(() => {
-          // Older Rust builds may not have the px fields; the
-          // frontend override is still effective for visible landing
-          // even if the safety-clamp disagrees by a couple of px.
-        })
-      }
       // requestAnimationFrame defers past the React commit of the
       // mascot so the very first attempt usually succeeds.
-      requestAnimationFrame(() => { void tryMeasure() })
+      scheduleAnchorMeasure()
+      // The visual bottom correction itself is image-measured and async.
+      // Take a second sample after it has had a chance to update, so the
+      // physics pad does not keep a pre-correction value.
+      scheduleAnchorMeasure(120)
     }
 
     return () => {
