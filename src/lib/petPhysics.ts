@@ -840,6 +840,13 @@ export function createPhysicsLoop(opts: PhysicsOptions): PhysicsHandle & { start
   let snapshotSpriteName = 'idle'
   let snapshotPhysicsState: PhysicsState = 'on_floor'
 
+  function syncSnapshot() {
+    const name = spriteNameFor(state)
+    lastSprite = name
+    snapshotSpriteName = name
+    snapshotPhysicsState = state.state
+  }
+
   function beginThrow(vx: number, vy: number) {
     state.state = 'falling'
     state.ticksInState = 0
@@ -847,6 +854,7 @@ export function createPhysicsLoop(opts: PhysicsOptions): PhysicsHandle & { start
     state.vy = Math.max(-MAX_THROW_SPEED, Math.min(MAX_THROW_SPEED, vy))
     state.facing = state.vx >= 0 ? 1 : -1
     state.bounceTicksRemaining = 0
+    syncSnapshot()
   }
 
   function setPaused(v: boolean) { paused = v }
@@ -861,6 +869,7 @@ export function createPhysicsLoop(opts: PhysicsOptions): PhysicsHandle & { start
       state.state = 'falling'
       state.ticksInState = 0
     }
+    syncSnapshot()
   }
 
   function getSpriteAnimationName() { return spriteNameFor(state) }

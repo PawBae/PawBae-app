@@ -43,6 +43,7 @@
     }
     if (!isHovering) {
       hovering = false;
+      showJump = false;
       if (restTimer) {
         clearTimeout(restTimer);
         restTimer = null;
