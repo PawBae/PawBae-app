@@ -121,7 +121,7 @@ export function animationFor(pet: CodexPet, state: CodexPetState): AnimationRow 
   return pet.animations[state]
 }
 
-export const DEFAULT_PET_ID = 'phoebe'
+export const DEFAULT_PET_ID = 'yoonie'
 
 const BUILTIN_BASE = '/assets/builtin'
 const MANIFEST_URL = `${BUILTIN_BASE}/pets-manifest.json`

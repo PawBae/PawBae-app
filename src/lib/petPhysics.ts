@@ -1,0 +1,992 @@
+// Pet physics loop.
+//
+// Drives ShimejiEE-style behaviour for pets that opt in via
+// `pet.physics.enabled` in their pet.json — the pet walks along the
+// floor, climbs the side walls, traverses the ceiling, and falls under
+// gravity when thrown. State machine is independent of the existing
+// PetAction enum so we don't disrupt the pet-mode (large-mascot)
+// peek/walkout/codex flows that share the same window.
+//
+// macOS only. The physics tick reads the current mascot origin and
+// monitor rect via Tauri commands and applies position deltas via
+// `move_mini_by(dx, dy)` in top-down coords.
+
+import { invoke } from '@tauri-apps/api/core'
+import type { CodexPet } from './codexPet'
+import {
+  detectEdges,
+  invalidateMonitorCache,
+  invalidateFloorCache,
+  invalidateActiveWindowCache,
+  measureSpriteAnchorsCSS,
+  setRuntimeSpritePadCSS,
+  resetRuntimeSpritePadCSS,
+  type EdgeState,
+} from './edgeDetect'
+
+export type PhysicsState =
+  | 'on_floor'
+  | 'on_wall'
+  | 'on_ceiling'
+  | 'falling'
+  | 'jumping'
+  | 'bouncing'
+  | 'pinched'
+
+export interface PhysicsHandle {
+  // Called by the drag-end emitter. Switches the state machine into
+  // `falling` with an initial velocity.
+  beginThrow: (vx: number, vy: number) => void
+  // Suspend the physics loop without unmounting (useful when the panel
+  // expands and we want the mascot to freeze at its current spot).
+  setPaused: (paused: boolean) => void
+  // Called externally when the OS reports a drag start, so the loop
+  // pauses position updates while NSEvent moves the window.
+  setPinched: (pinched: boolean) => void
+  // For the sprite render pipeline to derive the right animation key.
+  getSpriteAnimationName: () => string
+  getPhysicsState: () => PhysicsState
+  // Reactive — re-renders the consumer when the sprite name changes,
+  // so SpritePet/MiniPetMascot can swap animations smoothly. Falls
+  // back to 'idle' when physics is disabled.
+  spriteName: string
+  physicsState: PhysicsState
+  updateOpts?: (opts: PhysicsOptions) => void
+}
+
+interface PhysicsOptions {
+  pet: CodexPet | null
+  enabled: boolean
+  onState?: (state: PhysicsState) => void
+}
+
+// Tunables. Values approximate ShimejiEE defaults — feel free to
+// tweak. Velocities are in CSS pixels per tick (TICK_MS).
+const TICK_MS = 30
+const GRAVITY = 0.5
+const TERMINAL_VY = 12
+const WALK_SPEED = 2
+const CLIMB_SPEED = 1
+const BOUNCE_DAMPING = 0.4
+const RESISTANCE_X = 0.05
+export const MAX_THROW_SPEED = 30
+const BOUNCE_FRAMES = 10 // hold `bouncing` for ~300ms so all 3 sprite frames play
+const WALL_GRAB_HOLD_TICKS = 1 // one-frame settle pose before the climb loop starts
+// While ascending a wall, the mascot eventually mounts the ceiling.
+// Apply a small probability of voluntarily detaching once climbed
+// halfway up the screen to avoid a stuck-on-wall feel.
+const WALL_DETACH_CHANCE_PER_TICK = 0.005
+
+// Probability per on-floor tick that the pet jumps up to climb onto a
+// foreground app window's title bar — but only while it's standing
+// directly underneath the window. ~1/600 with a 30 ms tick gives one
+// trigger per ~18 s of overlap, which matches Shimeji's "JumpFromBottomOfIE"
+// frequency intuition (rare enough to feel spontaneous, frequent enough
+// to be a regular occurrence when the user actually has windows open).
+const APPROACH_WINDOW_JUMP_PROB_PER_TICK = 1 / 600
+// Overshoot the window top by this many CSS pixels so the falling-
+// detection in `stepOnScreen` cleanly catches the landing on the way
+// back down instead of grazing the title bar at apex.
+const APPROACH_WINDOW_JUMP_OVERSHOOT_PX = 30
+// Minimum ticks the pet must spend in `falling` before it can re-attach
+// to a window's side or bottom. Without this cooldown, walking off the
+// end of a title bar drops the pet a few pixels, immediately re-attaches
+// it to the wall, the wall logic climbs it back up to the title bar,
+// it walks across, falls off again — an infinite "lap" loop. ~20 ticks
+// ≈ 600 ms combined with the outward kick on title-bar detach gives
+// the pet enough distance to clear the window entirely.
+const MIN_FALL_TICKS_BEFORE_WINDOW_ATTACH = 20
+// Horizontal kick (CSS px/tick) applied when the pet walks off the end
+// of a title bar. The kick continues the walking direction, so a pet
+// that walked off the right corner sails further right while it falls
+// rather than dropping straight down and immediately re-grabbing the
+// window's right vertical. RESISTANCE_X damps it back to ~0 over the
+// cooldown window.
+const TITLE_BAR_WALKOFF_KICK = 4
+
+interface MutablePhysicsState {
+  state: PhysicsState
+  vx: number
+  vy: number
+  // Direction the mascot is "facing" (-1 left / 1 right). Used for
+  // sprite flipX without re-deriving from velocity each frame (which
+  // can be noisy when velocity dips through zero during bounces).
+  facing: -1 | 1
+  bounceTicksRemaining: number
+  // Animation time in ticks since the last state transition; lets the
+  // sprite resolver insert a pose hold (e.g. brief grab-wall before
+  // climbing).
+  ticksInState: number
+  // Last computed walking floor velocity sign — preserved so the
+  // mascot keeps walking the same way after a bounce instead of
+  // randomly flipping each tick.
+  lastFloorDir: -1 | 1
+  // Ticks spent walking on the floor since the last rest. Used to
+  // gate the rest-dwell trigger so the cat doesn't immediately
+  // re-enter rest after just having rested.
+  floorWalkTicks: number
+  // Remaining ticks of the current idle-rest dwell. >0 means the
+  // cat is sitting still in `idle` pose on the floor; 0 means it's
+  // walking (or eligible to start walking).
+  restTicksRemaining: number
+  // Which world the (state, vx, vy) is anchored to. 'screen' is the
+  // classic Shimeji floor/walls/menu-bar play area; 'window' means
+  // the pet is currently interacting with the frontmost app window
+  // (sitting on its title bar, climbing its side, hanging from its
+  // bottom edge). on_floor/on_wall/on_ceiling state names map onto
+  // each surface — the sprite renderer doesn't need to care which
+  // surface because the animations are the same (foot-on-edge,
+  // hand-on-side, …).
+  surface: 'screen' | 'window'
+  // CGWindowID we're currently tracking. When the cached active
+  // window's windowId stops matching this, we know the window we
+  // were sitting on is gone / occluded / replaced and we should
+  // detach to falling.
+  surfaceWindowId: number | null
+  // Last-observed active-window rect (Cocoa bottom-left). Lets the
+  // physics loop apply the per-tick "FallWithIE" delta — when the
+  // user drags the window, the pet rides along by adding the rect
+  // change to its own position. `null` means we don't have a prior
+  // snapshot yet (first tick on the window surface).
+  lastWindowX: number | null
+  lastWindowY: number | null
+  lastWindowW: number | null
+  lastWindowH: number | null
+}
+
+function initialState(): MutablePhysicsState {
+  // Start in `falling` so the cat drops from wherever the mini window
+  // happens to be (typically the notch at the top of the screen) and
+  // settles on the floor naturally. Starting in `on_floor` would make
+  // the cat walk along the top of the screen as if it were the ground
+  // until it bumped into a wall, which looks broken.
+  return {
+    state: 'falling',
+    vx: 0,
+    vy: 0,
+    facing: 1,
+    bounceTicksRemaining: 0,
+    ticksInState: 0,
+    lastFloorDir: 1,
+    floorWalkTicks: 0,
+    restTicksRemaining: 0,
+    surface: 'screen',
+    surfaceWindowId: null,
+    lastWindowX: null,
+    lastWindowY: null,
+    lastWindowW: null,
+    lastWindowH: null,
+  }
+}
+
+// Drop the window anchor: forget the tracked windowId and last-rect
+// snapshot, return to screen surface, and enter `falling` so gravity
+// takes over. Called whenever the window we were on disappears, the
+// pet walks off the edge, or any other "no longer on this surface"
+// condition fires.
+function detachFromWindow(s: MutablePhysicsState) {
+  s.state = 'falling'
+  s.surface = 'screen'
+  s.surfaceWindowId = null
+  s.lastWindowX = null
+  s.lastWindowY = null
+  s.lastWindowW = null
+  s.lastWindowH = null
+  s.ticksInState = 0
+}
+
+// Rest-dwell tuning. The cat walks for at least ~1 second of ticks
+// before becoming eligible to rest, then a small per-tick probability
+// kicks off a 1-4 second pause in `idle` pose. Result: on the Dock the
+// cat is in `idle` (flush feet) most of the time, with brief walking
+// bursts that produce the per-pose anchor offset.
+const FLOOR_WALK_MIN_TICKS_BEFORE_REST = 33   // ~1 s at 30 ms/tick
+const FLOOR_REST_TRIGGER_PROB_PER_TICK = 0.005 // ~average 1 trigger per 200 ticks (~6 s)
+const FLOOR_REST_MIN_TICKS = 33   // 1 s minimum dwell
+const FLOOR_REST_MAX_EXTRA_TICKS = 100 // up to ~3 s extra (4 s total max)
+
+// Map a (state, vx, facing) tuple to the animation key the sprite
+// renderer should display. Names line up with the Phase-2 atlas rows
+// added to the shimeji-bola pet.json (idle / running / run-right /
+// run-left / grab-wall / climb-wall / climb-ceiling / falling /
+// jumping / bouncing / waiting).
+function spriteNameFor(s: MutablePhysicsState): string {
+  switch (s.state) {
+    case 'on_floor':
+      if (Math.abs(s.vx) < 0.01) return 'idle'
+      return s.vx > 0 ? 'run-right' : 'run-left'
+    case 'on_wall': {
+      // Yoonie's native grab-wall / climb-wall row faces right, with
+      // paws reaching toward a wall on the right side of the cell. Use
+      // the flipped variant on left borders so her paws touch that side.
+      const flip = s.facing === -1 ? '-flipped' : ''
+      if (s.ticksInState < WALL_GRAB_HOLD_TICKS || Math.abs(s.vy) < 0.01) return 'grab-wall' + flip
+      return 'climb-wall' + flip
+    }
+    case 'on_ceiling': {
+      // On the ceiling the cat crawls in vx direction; mirror when
+      // moving rightward so head/tail orient consistently with the
+      // wall states.
+      return s.vx > 0 ? 'climb-ceiling-flipped' : 'climb-ceiling'
+    }
+    case 'falling':
+      return 'falling'
+    case 'jumping':
+      return 'jumping'
+    case 'bouncing':
+      return 'bouncing'
+    case 'pinched':
+      // Reuse the existing waiting animation row (Pinched in
+      // ShimejiEE) — the user holds the cursor on the mascot during
+      // drag.
+      return 'waiting'
+  }
+}
+
+// Inspect edges + state and pick the next state / velocity. Mutates
+// `s` in place.
+//
+// Dispatches by surface: when the pet is on the window surface the
+// edge semantics are different (window's top edge is a floor, walking
+// off the side is a fall not a wall-bump, …) so the window-anchored
+// states are handled by `stepOnWindow`. When the window we were on
+// disappears (close, minimize, occlude, switch app, etc.) we detach
+// to screen+falling unconditionally.
+function step(s: MutablePhysicsState, edge: EdgeState) {
+  s.ticksInState += 1
+  if (s.surface === 'window') {
+    if (
+      !edge.activeWindow
+      || edge.activeWindow.windowId !== s.surfaceWindowId
+    ) {
+      detachFromWindow(s)
+      return
+    }
+    stepOnWindow(s, edge)
+    return
+  }
+  stepOnScreen(s, edge)
+}
+
+// Window-surface state machine. Mirrors the screen state machine in
+// structure (on_floor walks/rests, on_wall climbs, on_ceiling hangs)
+// but the edges come from the window rect instead of the screen rect:
+//   - "floor" = window's top edge (pet sits on title bar)
+//   - "walls" = window's left & right verticals (pet climbs from outside)
+//   - "ceiling" = window's bottom edge (pet hangs underneath)
+// Walking off the side of a title bar is a fall, not a wall transition
+// — there is no wall above the title bar in the screen world.
+function stepOnWindow(s: MutablePhysicsState, edge: EdgeState) {
+  const w = edge.activeWindow!
+  switch (s.state) {
+    case 'on_floor': {
+      if (s.ticksInState === 1) {
+        s.floorWalkTicks = 0
+        s.restTicksRemaining = 0
+      }
+      // Walked off the end of the title bar, or the window moved away
+      // from under our feet → fall back to the screen world.
+      if (!w.withinHorizontalRange || !w.onTopOfWindow) {
+        // When the cause is "walked past either end horizontally" we
+        // kick the pet outward in its walking direction. Without the
+        // kick, the pet drops straight down (vx ≈ WALK_SPEED only) and
+        // can land within the side-attach window of the very edge it
+        // just walked off, producing a corner-loop. With the kick + the
+        // 20-tick cooldown, the pet's horizontal drift clears the
+        // window's side-attach range before the cooldown expires.
+        if (!w.withinHorizontalRange) {
+          const walkOffDir = s.lastFloorDir
+          detachFromWindow(s)
+          s.vx = walkOffDir * TITLE_BAR_WALKOFF_KICK
+        } else {
+          detachFromWindow(s)
+        }
+        return
+      }
+      s.vy = 0
+      // Idle-rest dwell (same logic as screen floor; the cat naps on
+      // the title bar just like it does on the Dock).
+      if (s.restTicksRemaining > 0) {
+        s.restTicksRemaining -= 1
+        s.vx = 0
+        s.facing = s.lastFloorDir
+        return
+      }
+      const skidding = Math.abs(s.vx) > WALK_SPEED * 1.5
+      if (skidding) {
+        s.vx *= 1 - RESISTANCE_X * 2
+      } else {
+        s.vx = WALK_SPEED * s.lastFloorDir
+      }
+      s.facing = s.vx >= 0 ? 1 : -1
+      s.floorWalkTicks += 1
+      if (
+        s.floorWalkTicks > FLOOR_WALK_MIN_TICKS_BEFORE_REST
+        && Math.random() < FLOOR_REST_TRIGGER_PROB_PER_TICK
+      ) {
+        s.restTicksRemaining =
+          FLOOR_REST_MIN_TICKS + Math.floor(Math.random() * FLOOR_REST_MAX_EXTRA_TICKS)
+        s.floorWalkTicks = 0
+        s.vx = 0
+        return
+      }
+      return
+    }
+    case 'on_wall': {
+      // Climbing the window's side from outside. Up to the title bar
+      // (climbed past window.top) → walk onto top edge. Down past the
+      // window's bottom → detach (the screen-side wall logic uses the
+      // dock floor; here we just fall back into the screen world).
+      s.vx = 0
+      if (s.vy === 0) s.vy = -CLIMB_SPEED
+      // Re-assert facing every tick so even transient transitions
+      // through other states (on_ceiling → on_wall, edge flag flickers
+      // from window drag, etc.) can't leave the climb sprite mirrored
+      // against the side it's clinging to. On a window's LEFT side the
+      // pet stands outside the window with the wall to its right, so
+      // use the native right-facing wall pose. On a window's RIGHT side
+      // the wall is to its left, so use the flipped pose.
+      // See the attachment block in `stepOnScreen.falling` for the
+      // geometry rationale.
+      s.facing = w.onLeftOfWindow ? 1 : -1
+      // Reached title bar — switch to on_floor on the window surface
+      // and walk inward across the bar.
+      if (s.vy < 0 && !w.withinVerticalRange) {
+        s.state = 'on_floor'
+        s.ticksInState = 0
+        s.vy = 0
+        s.vx = 0
+        s.lastFloorDir = w.onLeftOfWindow ? 1 : -1
+        s.facing = s.lastFloorDir
+        return
+      }
+      // Lost contact with the wall — detach.
+      if (!w.onLeftOfWindow && !w.onRightOfWindow) {
+        detachFromWindow(s)
+        return
+      }
+      // Voluntary detach mid-climb (rare; matches screen wall behavior
+      // so the cat doesn't get stuck spinning on the same side).
+      if (s.ticksInState > 30 && Math.random() < WALL_DETACH_CHANCE_PER_TICK) {
+        detachFromWindow(s)
+        s.vx = w.onLeftOfWindow ? -1 : 1
+        return
+      }
+      return
+    }
+    case 'on_ceiling': {
+      // Hanging upside-down from the window's bottom edge. The pet
+      // crawls in `vx` direction; hitting a side from below transitions
+      // to wall-climbing.
+      s.vy = 0
+      if (!w.onBottomOfWindow) {
+        detachFromWindow(s)
+        return
+      }
+      if ((s.vx < 0 && w.onLeftOfWindow) || (s.vx > 0 && w.onRightOfWindow)) {
+        s.state = 'on_wall'
+        s.ticksInState = 0
+        s.vx = 0
+        s.vy = -CLIMB_SPEED
+        // Match the window-wall facing convention above; without this
+        // we'd keep the on_ceiling facing, which doesn't reflect the
+        // side the body is clinging to.
+        s.facing = w.onLeftOfWindow ? 1 : -1
+        return
+      }
+      if (s.ticksInState > 60 && Math.random() < WALL_DETACH_CHANCE_PER_TICK) {
+        detachFromWindow(s)
+        return
+      }
+      return
+    }
+    default:
+      // Any other state (falling/bouncing/jumping/pinched) while
+      // surface='window' is a contradiction — detach and let the
+      // screen step machine handle it next tick.
+      detachFromWindow(s)
+      return
+  }
+}
+
+// Check whether the pet, currently walking on the screen floor, should
+// spontaneously jump up to climb onto the foreground window's title
+// bar. Returns true (and reconfigures `s` into a vertical jump in the
+// `falling` state) when the trigger fires. Caller should `return` in
+// that case so the rest of the on-floor logic is skipped.
+//
+// The trigger only fires when the pet is *already under* the window's
+// horizontal footprint — the pet doesn't actively path-find toward
+// windows for v1; instead, the natural left/right wandering carries
+// it past every visible window often enough.
+function maybeJumpToWindow(s: MutablePhysicsState, edge: EdgeState): boolean {
+  if (!edge.activeWindow) return false
+  if (Math.random() >= APPROACH_WINDOW_JUMP_PROB_PER_TICK) return false
+  const winLeft = edge.activeWindow.rect.x
+  const winRight = winLeft + edge.activeWindow.rect.width
+  const petCenterX = edge.mascot.x + edge.mascot.width / 2
+  if (petCenterX < winLeft || petCenterX > winRight) return false
+  // Window top in Cocoa coords. Pet's current foot is at floor level
+  // (roughly edge.mascot.y + sprite pad bottom, but using mascot bottom
+  // is close enough — the overshoot constant absorbs the difference).
+  const winTopY = edge.activeWindow.rect.y + edge.activeWindow.rect.height
+  const apexNeeded = (winTopY - edge.mascot.y) + APPROACH_WINDOW_JUMP_OVERSHOOT_PX
+  // If the window is below us (e.g. clipping into the Dock area) the
+  // jump trigger doesn't apply — falling-detection would land us on
+  // air. Bail.
+  if (apexNeeded <= 0) return false
+  // Kinematic: apex_height = v² / (2g). Cap at MAX_THROW_SPEED so we
+  // can never launch off the top of the screen.
+  const v = Math.min(MAX_THROW_SPEED, Math.sqrt(2 * GRAVITY * apexNeeded))
+  // Enter falling state with upward initial velocity. The existing
+  // falling-window-landing detection in stepOnScreen will catch us on
+  // the way back down and switch to surface='window'.
+  s.state = 'falling'
+  s.ticksInState = 0
+  s.vy = -v  // top-down: negative = up
+  s.vx = 0
+  return true
+}
+
+// Screen-floor entry into the frontmost-window side climb. The falling
+// state already lets the mascot grab a window's side while dropping
+// past it; this covers the more common programming-mode case where the
+// pet is simply walking along the Dock/screen floor and bumps into the
+// current top window's left or right edge. We only attach when the pet
+// is moving into that side, so brushing past a nearby window while
+// walking away does not unexpectedly snap it onto the window.
+function maybeGrabWindowSideFromScreenFloor(s: MutablePhysicsState, edge: EdgeState): boolean {
+  const w = edge.activeWindow
+  if (!w || !w.withinVerticalRange) return false
+
+  const walkingIntoLeftSide = w.onLeftOfWindow && s.vx > 0
+  const walkingIntoRightSide = w.onRightOfWindow && s.vx < 0
+  if (!walkingIntoLeftSide && !walkingIntoRightSide) return false
+
+  s.state = 'on_wall'
+  s.surface = 'window'
+  s.surfaceWindowId = w.windowId
+  s.lastWindowX = w.rect.x
+  s.lastWindowY = w.rect.y
+  s.lastWindowW = w.rect.width
+  s.lastWindowH = w.rect.height
+  s.vx = 0
+  s.vy = -CLIMB_SPEED
+  // Window walls use the outside-clinging convention: on the window's
+  // left side the wall is to the pet's right (native pose); on the
+  // right side the wall is to the pet's left (flipped pose).
+  s.facing = w.onLeftOfWindow ? 1 : -1
+  s.ticksInState = 0
+  s.floorWalkTicks = 0
+  s.restTicksRemaining = 0
+  return true
+}
+
+// Screen-surface state machine — the classic ShimejiEE behavior. This
+// is the exact prior `step()` body, lifted into a named function so
+// the surface dispatcher above can choose between screen and window.
+function stepOnScreen(s: MutablePhysicsState, edge: EdgeState) {
+  switch (s.state) {
+    case 'on_floor': {
+      // Reset walk/rest counters on the first tick of a fresh on_floor
+      // visit (ticksInState was just incremented to 1 at top of step).
+      // This makes the rest-dwell timing reset cleanly each time the
+      // cat lands from a wall/ceiling/fall, instead of inheriting stale
+      // counters from a previous on_floor session.
+      if (s.ticksInState === 1) {
+        s.floorWalkTicks = 0
+        s.restTicksRemaining = 0
+      }
+      // If the floor disappeared under the pet (walked off the side of
+      // the macOS Dock platform), start falling. The next tick of
+      // gravity will carry it toward the actual screen bottom; horizontal
+      // momentum from the walk is preserved for natural arc.
+      if (!edge.onBottom) {
+        s.state = 'falling'
+        s.ticksInState = 0
+        // Don't zero vx — the walk direction becomes the fall direction.
+        return
+      }
+      s.vy = 0
+      // Spontaneous "approach window" trigger — when the pet is already
+      // under a foreground window's horizontal footprint, occasionally
+      // jump up to land on its title bar. The jump uses gravity and the
+      // existing falling→title-bar landing detection to enter the window
+      // surface organically.
+      if (maybeJumpToWindow(s, edge)) {
+        return
+      }
+      // Idle-rest dwell: while the cat has rest ticks remaining, sit
+      // still in `idle` pose (vx=0). spriteNameFor maps `on_floor` with
+      // |vx|<0.01 to `idle`, so this directly renders the flush-feet
+      // resting pose instead of the constantly-bobbing running cycle.
+      if (s.restTicksRemaining > 0) {
+        s.restTicksRemaining -= 1
+        s.vx = 0
+        s.facing = s.lastFloorDir
+        return
+      }
+      // Aim to walk in `lastFloorDir`. Preserve any leftover horizontal
+      // momentum from a recent throw so the cat skids instead of
+      // instantly clamping to WALK_SPEED — feels more physical and
+      // matches the "drag direction = throw direction" expectation.
+      const skidding = Math.abs(s.vx) > WALK_SPEED * 1.5
+      if (skidding) {
+        s.vx *= 1 - RESISTANCE_X * 2
+      } else {
+        s.vx = WALK_SPEED * s.lastFloorDir
+      }
+      s.facing = s.vx >= 0 ? 1 : -1
+      if (maybeGrabWindowSideFromScreenFloor(s, edge)) {
+        return
+      }
+      // Once we've been walking for the minimum time, roll the dice
+      // each tick for a rest dwell. Tuned so the cat rests on average
+      // every ~6 seconds for 1-4 seconds.
+      s.floorWalkTicks += 1
+      if (
+        s.floorWalkTicks > FLOOR_WALK_MIN_TICKS_BEFORE_REST
+        && Math.random() < FLOOR_REST_TRIGGER_PROB_PER_TICK
+      ) {
+        s.restTicksRemaining =
+          FLOOR_REST_MIN_TICKS + Math.floor(Math.random() * FLOOR_REST_MAX_EXTRA_TICKS)
+        s.floorWalkTicks = 0
+        s.vx = 0
+        return
+      }
+      if (edge.onLeft && s.vx < 0) {
+        s.state = 'on_wall'
+        s.ticksInState = 0
+        s.vx = 0
+        s.vy = -CLIMB_SPEED
+        // Match the steady on_wall convention below on the very first
+        // climb frame: left screen wall uses the flipped wall pose, right
+        // screen wall uses the native pose. If this starts opposite, the
+        // next tick corrects it and the sprite visibly flips while climbing.
+        s.facing = -1
+        return
+      }
+      if (edge.onRight && s.vx > 0) {
+        s.state = 'on_wall'
+        s.ticksInState = 0
+        s.vx = 0
+        s.vy = -CLIMB_SPEED
+        // Keep this aligned with the on_wall edge check so the first
+        // grab-wall frame does not briefly render the mirrored variant.
+        s.facing = 1
+        return
+      }
+      return
+    }
+    case 'on_wall': {
+      s.vx = 0
+      // Climb upward by default; once we hit the ceiling, transition.
+      if (s.vy === 0) s.vy = -CLIMB_SPEED
+      if (edge.onLeft || edge.onRight) {
+        s.facing = edge.onLeft ? -1 : 1
+      }
+      if (edge.onTop) {
+        s.state = 'on_ceiling'
+        s.ticksInState = 0
+        s.vy = 0
+        // Move toward the opposite wall along the ceiling.
+        s.vx = edge.onLeft ? CLIMB_SPEED : -CLIMB_SPEED
+        return
+      }
+      // Reached the floor while descending — settle and walk again.
+      if (edge.onBottom && s.vy > 0) {
+        s.state = 'on_floor'
+        s.ticksInState = 0
+        s.vy = 0
+        // Walk away from the wall we were on.
+        s.lastFloorDir = edge.onLeft ? 1 : -1
+        s.facing = s.lastFloorDir
+        return
+      }
+      // Voluntary detach mid-wall once climbed for a while.
+      if (s.ticksInState > 30 && Math.random() < WALL_DETACH_CHANCE_PER_TICK) {
+        s.state = 'falling'
+        s.ticksInState = 0
+        s.vx = edge.onLeft ? 1 : -1
+        s.vy = 0
+        return
+      }
+      // If we somehow drift away from the wall, fall.
+      if (!edge.onLeft && !edge.onRight) {
+        s.state = 'falling'
+        s.ticksInState = 0
+        return
+      }
+      return
+    }
+    case 'on_ceiling': {
+      s.vy = 0
+      // If we hit the opposite wall, transition to wall climbing
+      // downward.
+      if ((s.vx < 0 && edge.onLeft) || (s.vx > 0 && edge.onRight)) {
+        s.state = 'on_wall'
+        s.ticksInState = 0
+        s.vx = 0
+        s.vy = CLIMB_SPEED
+        s.facing = edge.onLeft ? -1 : 1
+        return
+      }
+      // Voluntary detach.
+      if (s.ticksInState > 60 && Math.random() < WALL_DETACH_CHANCE_PER_TICK) {
+        s.state = 'falling'
+        s.ticksInState = 0
+        s.vy = 0
+        return
+      }
+      return
+    }
+    case 'falling': {
+      // Apply gravity and air resistance.
+      s.vy = Math.min(s.vy + GRAVITY, TERMINAL_VY)
+      s.vx *= 1 - RESISTANCE_X
+      // Window-landing detection — if there's an active app window
+      // below us and we're horizontally within its footprint, land on
+      // its title bar instead of continuing to the screen floor. This
+      // is the natural way to enter the window surface: the pet falls
+      // off the menu bar, drops past mid-screen, and lands on Finder's
+      // title bar with a soft pose.
+      if (
+        edge.activeWindow
+        && edge.activeWindow.onTopOfWindow
+        && edge.activeWindow.withinHorizontalRange
+        && s.vy > 0
+      ) {
+        s.state = 'on_floor'
+        s.surface = 'window'
+        s.surfaceWindowId = edge.activeWindow.windowId
+        s.lastWindowX = edge.activeWindow.rect.x
+        s.lastWindowY = edge.activeWindow.rect.y
+        s.lastWindowW = edge.activeWindow.rect.width
+        s.lastWindowH = edge.activeWindow.rect.height
+        s.vy = 0
+        s.ticksInState = 0
+        s.lastFloorDir = s.vx >= 0 ? 1 : -1
+        s.facing = s.lastFloorDir
+        s.vx = 0
+        return
+      }
+      // Window-side attachment — Shimeji's "HoldOntoIEWall" entry. When
+      // the pet is falling next to a window's left/right vertical and
+      // its body is within the window's vertical range, grab the side
+      // and start climbing.
+      //
+      // FACING: window walls are climbed from outside the window, so
+      // choose the pose whose wall-touching side points at the window:
+      //   - Window LEFT side: the window is to the pet's right, so use
+      //     the native right-facing wall pose (facing=+1).
+      //   - Window RIGHT side: the window is to the pet's left, so use
+      //     the flipped left-facing wall pose (facing=-1).
+      //
+      // COOLDOWN: re-attaching immediately after walking off a title
+      // bar's end creates an infinite lap loop (walk off → fall →
+      // re-attach → climb up → walk across → fall off → …). Require
+      // some falling ticks first so the pet actually clears the
+      // window vertically before snapping back on.
+      if (
+        edge.activeWindow
+        && edge.activeWindow.withinVerticalRange
+        && (edge.activeWindow.onLeftOfWindow || edge.activeWindow.onRightOfWindow)
+        && s.ticksInState >= MIN_FALL_TICKS_BEFORE_WINDOW_ATTACH
+      ) {
+        s.state = 'on_wall'
+        s.surface = 'window'
+        s.surfaceWindowId = edge.activeWindow.windowId
+        s.lastWindowX = edge.activeWindow.rect.x
+        s.lastWindowY = edge.activeWindow.rect.y
+        s.lastWindowW = edge.activeWindow.rect.width
+        s.lastWindowH = edge.activeWindow.rect.height
+        s.vx = 0
+        s.vy = 0
+        s.facing = edge.activeWindow.onLeftOfWindow ? 1 : -1
+        s.ticksInState = 0
+        return
+      }
+      // Window-bottom attachment — the pet jumped upward, passed under
+      // a window's bottom edge, and now hangs from it (Shimeji's
+      // "ClimbIEBottom"). Mirror of the screen ceiling logic: only
+      // engage on a soft upward contact, so a fast jump arcs past
+      // without unexpected snagging. Same cooldown applies.
+      if (
+        edge.activeWindow
+        && edge.activeWindow.onBottomOfWindow
+        && edge.activeWindow.withinHorizontalRange
+        && s.vy < 0
+        && Math.abs(s.vy) < 1
+        && s.ticksInState >= MIN_FALL_TICKS_BEFORE_WINDOW_ATTACH
+      ) {
+        s.state = 'on_ceiling'
+        s.surface = 'window'
+        s.surfaceWindowId = edge.activeWindow.windowId
+        s.lastWindowX = edge.activeWindow.rect.x
+        s.lastWindowY = edge.activeWindow.rect.y
+        s.lastWindowW = edge.activeWindow.rect.width
+        s.lastWindowH = edge.activeWindow.rect.height
+        s.vy = 0
+        s.vx = s.vx >= 0 ? CLIMB_SPEED : -CLIMB_SPEED
+        s.ticksInState = 0
+        return
+      }
+      // Side collision while falling.
+      //   Hard hit (|vx| ≥ 1) → bounce inward with damping, keep falling.
+      //                        Fall through (no early return) so a corner
+      //                        hit can also bounce off the floor/ceiling
+      //                        in the same tick.
+      //   Soft contact         → grab the wall and start climbing.
+      if (edge.onLeft && s.vx < 0) {
+        if (Math.abs(s.vx) >= 1) {
+          s.vx = Math.abs(s.vx) * BOUNCE_DAMPING
+          s.facing = 1
+        } else {
+          s.state = 'on_wall'
+          s.ticksInState = 0
+          s.vx = 0
+          s.vy = 0
+          s.facing = -1
+          return
+        }
+      } else if (edge.onRight && s.vx > 0) {
+        if (Math.abs(s.vx) >= 1) {
+          s.vx = -Math.abs(s.vx) * BOUNCE_DAMPING
+          s.facing = -1
+        } else {
+          s.state = 'on_wall'
+          s.ticksInState = 0
+          s.vx = 0
+          s.vy = 0
+          s.facing = 1
+          return
+        }
+      }
+      // Ceiling collision (only when moving upward — physics vy is
+      // top-down, so vy < 0 means rising). Hard hit bounces back down;
+      // soft contact mounts the ceiling and crawls in current vx dir.
+      if (edge.onTop && s.vy < 0) {
+        if (Math.abs(s.vy) >= 1) {
+          s.vy = Math.abs(s.vy) * BOUNCE_DAMPING
+        } else {
+          s.state = 'on_ceiling'
+          s.ticksInState = 0
+          s.vy = 0
+          s.vx = s.vx >= 0 ? CLIMB_SPEED : -CLIMB_SPEED
+          return
+        }
+      }
+      // Bottom collision → bounce.
+      if (edge.onBottom) {
+        s.state = 'bouncing'
+        s.ticksInState = 0
+        s.bounceTicksRemaining = BOUNCE_FRAMES
+        s.vy = -Math.abs(s.vy) * BOUNCE_DAMPING
+        if (Math.abs(s.vy) < 1) {
+          // Tiny bounce — settle immediately.
+          s.vy = 0
+          s.state = 'on_floor'
+          s.lastFloorDir = s.vx >= 0 ? 1 : -1
+        }
+        return
+      }
+      s.facing = s.vx >= 0 ? 1 : -1
+      return
+    }
+    case 'bouncing': {
+      // Short hold then either continue falling or land.
+      s.bounceTicksRemaining -= 1
+      // Apply remaining vy to actually leave the floor.
+      s.vy += GRAVITY
+      if (s.bounceTicksRemaining <= 0) {
+        if (s.vy >= 0 || edge.onBottom) {
+          s.state = 'on_floor'
+          s.ticksInState = 0
+          s.vy = 0
+          s.vx = 0
+          s.lastFloorDir = s.facing
+        } else {
+          s.state = 'falling'
+          s.ticksInState = 0
+        }
+      }
+      return
+    }
+    case 'jumping': {
+      // Currently unused — reserved for a future "jump from wall"
+      // playful action. For now treat as falling.
+      s.state = 'falling'
+      s.ticksInState = 0
+      return
+    }
+    case 'pinched': {
+      // Position is owned by NSEvent drag in Rust; physics tick is a
+      // no-op and just waits for `setPinched(false)` to release.
+      s.vx = 0
+      s.vy = 0
+      return
+    }
+  }
+}
+
+export function createPhysicsLoop(opts: PhysicsOptions): PhysicsHandle & { start: () => void; stop: () => void } {
+  const state = initialState()
+  let paused = false
+  let cancelled = false
+  let tickInFlight = false
+  let intervalId: ReturnType<typeof setInterval> | null = null
+  let lastSprite = 'idle'
+  let currentOpts = opts
+  let snapshotSpriteName = 'idle'
+  let snapshotPhysicsState: PhysicsState = 'on_floor'
+
+  function beginThrow(vx: number, vy: number) {
+    state.state = 'falling'
+    state.ticksInState = 0
+    state.vx = Math.max(-MAX_THROW_SPEED, Math.min(MAX_THROW_SPEED, vx))
+    state.vy = Math.max(-MAX_THROW_SPEED, Math.min(MAX_THROW_SPEED, vy))
+    state.facing = state.vx >= 0 ? 1 : -1
+    state.bounceTicksRemaining = 0
+  }
+
+  function setPaused(v: boolean) { paused = v }
+
+  function setPinched(pinched: boolean) {
+    if (pinched) {
+      state.state = 'pinched'
+      state.ticksInState = 0
+      state.vx = 0
+      state.vy = 0
+    } else if (state.state === 'pinched') {
+      state.state = 'falling'
+      state.ticksInState = 0
+    }
+  }
+
+  function getSpriteAnimationName() { return spriteNameFor(state) }
+  function getPhysicsState() { return state.state }
+
+  function updateOpts(newOpts: PhysicsOptions) { currentOpts = newOpts }
+
+  async function pushMeasuredAnchors(): Promise<boolean> {
+    if (cancelled || !currentOpts.pet) return false
+    const anchors = await measureSpriteAnchorsCSS(currentOpts.pet)
+    if (cancelled || anchors === null) return false
+    setRuntimeSpritePadCSS(anchors)
+    const payload: Record<string, number | boolean> = { resetPx: true }
+    if (anchors.topPx !== null) payload.topPx = anchors.topPx
+    if (anchors.rightPx !== null) payload.rightPx = anchors.rightPx
+    if (anchors.bottomPx !== null) payload.bottomPx = anchors.bottomPx
+    if (anchors.leftPx !== null) payload.leftPx = anchors.leftPx
+    invoke('set_sprite_pad_fractions', payload).catch(() => {})
+    return true
+  }
+
+  async function measureWithRetries(attempt = 0) {
+    if (cancelled) return
+    const measured = await pushMeasuredAnchors()
+    if (!measured && attempt < 19) {
+      setTimeout(() => { void measureWithRetries(attempt + 1) }, 100)
+    }
+  }
+
+  function scheduleAnchorMeasure(delayMs = 0) {
+    const schedule = () => { requestAnimationFrame(() => { void measureWithRetries() }) }
+    if (delayMs > 0) setTimeout(schedule, delayMs)
+    else schedule()
+  }
+
+  async function tick() {
+    if (cancelled || tickInFlight) return
+    if (paused || state.state === 'pinched') return
+    tickInFlight = true
+    try {
+      const edge = await detectEdges()
+      const before = state.state
+      const beforeSurface = state.surface
+      step(state, edge)
+      if (state.state !== before && currentOpts.onState) {
+        currentOpts.onState(state.state)
+      }
+      const newSprite = spriteNameFor(state)
+      if (newSprite !== lastSprite) {
+        lastSprite = newSprite
+        snapshotSpriteName = newSprite
+        snapshotPhysicsState = state.state
+        scheduleAnchorMeasure()
+        scheduleAnchorMeasure(120)
+      }
+
+      let dx = state.vx
+      let dy = state.vy
+      if (
+        state.surface === 'window'
+        && edge.activeWindow
+        && edge.activeWindow.windowId === state.surfaceWindowId
+      ) {
+        if (
+          beforeSurface === 'window'
+          && state.lastWindowX !== null
+          && state.lastWindowY !== null
+        ) {
+          const wdx = edge.activeWindow.rect.x - state.lastWindowX
+          const wdy = -(edge.activeWindow.rect.y - state.lastWindowY)
+          if (Math.abs(wdx) > 300 || Math.abs(wdy) > 300) {
+            detachFromWindow(state)
+          } else {
+            dx += wdx
+            dy += wdy
+          }
+        }
+        state.lastWindowX = edge.activeWindow.rect.x
+        state.lastWindowY = edge.activeWindow.rect.y
+        state.lastWindowW = edge.activeWindow.rect.width
+        state.lastWindowH = edge.activeWindow.rect.height
+      }
+
+      if (dx !== 0 || dy !== 0) {
+        await invoke('move_mini_by', { dx, dy })
+      }
+    } catch {
+      // Transient IPC errors — drop the tick
+    } finally {
+      tickInFlight = false
+    }
+  }
+
+  function start() {
+    if (!currentOpts.enabled || !currentOpts.pet?.physics?.enabled) return
+    cancelled = false
+    invalidateMonitorCache()
+    invalidateFloorCache()
+    invalidateActiveWindowCache()
+    resetRuntimeSpritePadCSS()
+    invoke('set_sprite_pad_fractions', { resetPx: true }).catch(() => {})
+    if (currentOpts.pet) {
+      scheduleAnchorMeasure()
+      scheduleAnchorMeasure(120)
+    }
+    intervalId = setInterval(tick, TICK_MS)
+  }
+
+  function stop() {
+    cancelled = true
+    if (intervalId) {
+      clearInterval(intervalId)
+      intervalId = null
+    }
+  }
+
+  return {
+    beginThrow,
+    setPaused,
+    setPinched,
+    getSpriteAnimationName,
+    getPhysicsState,
+    get spriteName() { return snapshotSpriteName },
+    get physicsState() { return snapshotPhysicsState },
+    updateOpts,
+    start,
+    stop,
+  }
+}

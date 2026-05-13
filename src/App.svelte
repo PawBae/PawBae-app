@@ -1,43 +1,8 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
-  import { loadDefaultCodexPet, type CodexPet, type CodexPetState } from './lib/codexPet';
-  import SpritePet from './lib/SpritePet.svelte';
-
-  let pet = $state<CodexPet | null>(null);
-  let petState = $state<CodexPetState>('idle');
-
-  onMount(async () => {
-    pet = await loadDefaultCodexPet();
-  });
-
-  function handleClick() {
-    if (!pet) return;
-    if (pet.animations['jumping']) {
-      petState = 'jumping';
-    }
-  }
-
-  function handleOneShotEnd() {
-    petState = 'idle';
-  }
+  import Main from './lib/Main.svelte';
 </script>
 
-<main data-tauri-drag-region>
-  {#if pet}
-    <!-- svelte-ignore a11y_click_events_have_key_events -->
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="pet-container" onclick={handleClick}>
-      <SpritePet 
-        {pet} 
-        state={petState} 
-        size={200} 
-        onOneShotEnd={handleOneShotEnd}
-      />
-    </div>
-  {:else}
-    <div class="loading">Loading...</div>
-  {/if}
-</main>
+<Main />
 
 <style>
   :global(html, body) {
@@ -47,29 +12,24 @@
     background: transparent;
     width: 100%;
     height: 100%;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    color: #fff;
   }
 
-  main {
-    width: 100vw;
-    height: 100vh;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: grab;
+  :global(*) {
+    box-sizing: border-box;
   }
 
-  main:active {
-    cursor: grabbing;
+  :global(::-webkit-scrollbar) {
+    width: 4px;
   }
 
-  .pet-container {
-    cursor: pointer;
-    user-select: none;
-    -webkit-user-drag: none;
+  :global(::-webkit-scrollbar-track) {
+    background: transparent;
   }
 
-  .loading {
-    color: white;
-    font-family: sans-serif;
+  :global(::-webkit-scrollbar-thumb) {
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: 2px;
   }
 </style>
