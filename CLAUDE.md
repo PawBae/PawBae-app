@@ -211,8 +211,8 @@ Mini.tsx has multiple polling loops (`fetchAgents` 5s, `pollHealth` 1s, `fetchAl
 When modifying the macOS update flow, keep these rules in mind:
 
 1. **The app no longer checks GitHub Releases directly.** `check_for_update()` in `frontend/src-tauri/src/lib.rs` reads a website-managed manifest instead. In dev it uses `http://[::1]:4321/update/latest.json`; in production it uses `https://www.oc-claw.ai/update/latest.json`.
-2. **The website manifest is the release gate.** `website/public/update/latest.json` controls which version the app sees and which DMG it downloads. Do not assume the latest GitHub Release should automatically be offered to users.
-3. **The website download button is a separate lever.** `website/src/components/Hero.astro` can intentionally stay on an older DMG while `latest.json` points somewhere else during staged rollouts or updater testing. Do not silently “sync” them unless the user explicitly wants that.
+2. **The website manifest is the release gate.** `public/update/latest.json` in the sibling `agent-pet/website` repo (https://github.com/agent-pet/website) controls which version the app sees and which DMG it downloads. Do not assume the latest GitHub Release should automatically be offered to users.
+3. **The website download button is a separate lever.** `src/components/Hero.astro` in `agent-pet/website` can intentionally stay on an older DMG while `latest.json` points somewhere else during staged rollouts or updater testing. Do not silently “sync” them unless the user explicitly wants that.
 4. **Dev update checks must bypass system proxies.** On macOS, localhost requests can be forwarded through the system proxy and return `502`. The dev update client in Rust must keep using `no_proxy()` for local manifest checks.
 5. **The UI can only show progress during the download phase.** The app downloads the DMG first, emits `update-progress` events, then spawns a detached helper script, exits, and lets the helper replace `/Applications/oc-claw.app` and relaunch. After the app exits there is no in-app UI, so that behavior is expected.
 6. **The helper installer is the source of truth for the swap flow.** It mounts the downloaded DMG, finds the `.app` bundle inside, copies it into `/Applications`, clears extended attributes, and relaunches the app. If update installation breaks, inspect the helper flow before changing the UI.
@@ -231,15 +231,15 @@ When cutting a new release (e.g. v1.6.1):
 3. **Create / upload to GitHub Release**:
    - Create: `gh release create v<ver> --title "v<ver>" --notes "v<ver> release"` (skip if tag already exists).
    - Upload: `gh release upload v<ver> <path-to-installer> --clobber`.
-4. **Update website manifests** (three places):
-   - `website/public/update/latest.json` — update `version` and `url` for each platform. This controls in-app update detection.
-   - `website/src/components/Hero.astro` — update the Windows download URL in the `<script>` block (the `btn.setAttribute('href', ...)` line). The macOS URL is in the `<a>` tag's `href` attribute.
-5. **Commit & push** the website changes, then deploy the website so `oc-claw.ai/update/latest.json` serves the new version.
+4. **Update website manifests** in the sibling `agent-pet/website` repo (https://github.com/agent-pet/website). Clone it next to PawPet if you haven't (`git clone git@github.com:agent-pet/website.git`). Two files to edit:
+   - `public/update/latest.json` — update `version` and `url` for each platform. This controls in-app update detection.
+   - `src/components/Hero.astro` — update the Windows download URL in the `<script>` block (the `btn.setAttribute('href', ...)` line). The macOS URL is in the `<a>` tag's `href` attribute.
+5. **Commit & push** the website changes (in the website repo), then deploy the website so `oc-claw.ai/update/latest.json` serves the new version. The two repos move independently — you'll have a PawPet commit (version bump) and a separate website commit (manifest bump) per release.
 
 Key files:
-- Version: `frontend/src-tauri/tauri.conf.json`
-- Update manifest: `website/public/update/latest.json`
-- Download buttons: `website/src/components/Hero.astro`
+- Version (this repo): `frontend/src-tauri/tauri.conf.json`
+- Update manifest (sibling repo): `agent-pet/website` → `public/update/latest.json`
+- Download buttons (sibling repo): `agent-pet/website` → `src/components/Hero.astro`
 
 # Comments
 
