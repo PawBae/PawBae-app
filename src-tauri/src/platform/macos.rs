@@ -1,6 +1,11 @@
 //! macOS-specific helpers. Gated by the outer `#[cfg(target_os = "macos")]` in `platform/mod.rs`.
 
+use std::sync::atomic::Ordering;
+use tauri::Manager;
+
 use crate::platform::common::AppWindowInfo;
+#[allow(unused_imports)]
+use crate::state::*;
 
 /// Get the notch half-width (distance from screen center to notch edge) using
 /// macOS 12+ `auxiliaryTopRightArea` API. Falls back to 80pt for older systems
