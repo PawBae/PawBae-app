@@ -2,6 +2,10 @@
 
 PawBae — Svelte 5 + Tauri 2 desktop pet with coding agent monitoring. Pure SPA (not SvelteKit).
 
+# Workflow
+
+- **Never push directly to main.** Always create a PR via `gh pr create`.
+
 # Lessons from Predecessor (oc-claw)
 
 ## Agent Hook System
