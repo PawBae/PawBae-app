@@ -1091,19 +1091,20 @@ async fn close_ssh_master(ssh_host: &str, ssh_user: &str) -> Result<(), String> 
 // Tray label tuple: (show, hide, stroll, quit). The `stroll` slot is
 // populated for every language but only inserted into the tray menu on
 // macOS — Phase 2 pet physics is currently macOS-only.
-fn tray_labels(lang: &str) -> (&'static str, &'static str, &'static str, &'static str) {
+fn tray_labels(lang: &str) -> (&'static str, &'static str, &'static str, &'static str, &'static str) {
     match lang {
-        "zh" => ("显示", "隐藏", "散步模式", "退出"),
-        _ => ("Show", "Hide", "Stroll Mode", "Quit"),
+        "zh" => ("显示", "隐藏", "散步模式", "设置", "退出"),
+        _ => ("Show", "Hide", "Stroll Mode", "Settings", "Quit"),
     }
 }
 
 #[tauri::command]
 fn update_tray_language(app: tauri::AppHandle, lang: String) -> Result<(), String> {
-    let (show_label, hide_label, stroll_label, quit_label) = tray_labels(&lang);
-    let _ = stroll_label; // Silence unused-warning on Windows.
+    let (show_label, hide_label, stroll_label, settings_label, quit_label) = tray_labels(&lang);
+    let _ = stroll_label;
     let show = MenuItem::with_id(&app, "show", show_label, true, None::<&str>).map_err(|e| e.to_string())?;
     let hide = MenuItem::with_id(&app, "hide", hide_label, true, None::<&str>).map_err(|e| e.to_string())?;
+    let settings = MenuItem::with_id(&app, "settings", settings_label, true, None::<&str>).map_err(|e| e.to_string())?;
     let quit = MenuItem::with_id(&app, "quit", quit_label, true, None::<&str>).map_err(|e| e.to_string())?;
     #[cfg(target_os = "macos")]
     let menu = {
@@ -1116,10 +1117,10 @@ fn update_tray_language(app: tauri::AppHandle, lang: String) -> Result<(), Strin
             None::<&str>,
         )
         .map_err(|e| e.to_string())?;
-        Menu::with_items(&app, &[&show, &hide, &stroll, &quit]).map_err(|e| e.to_string())?
+        Menu::with_items(&app, &[&show, &hide, &stroll, &settings, &quit]).map_err(|e| e.to_string())?
     };
     #[cfg(not(target_os = "macos"))]
-    let menu = Menu::with_items(&app, &[&show, &hide, &quit]).map_err(|e| e.to_string())?;
+    let menu = Menu::with_items(&app, &[&show, &hide, &settings, &quit]).map_err(|e| e.to_string())?;
     if let Some(tray) = app.tray_by_id("main") {
         tray.set_menu(Some(menu)).map_err(|e| e.to_string())?;
     }
@@ -12321,10 +12322,11 @@ pub fn run() {
                     else { "en".into() }
                 })
             };
-            let (show_label, hide_label, stroll_label, quit_label) = tray_labels(&initial_lang);
+            let (show_label, hide_label, stroll_label, settings_label, quit_label) = tray_labels(&initial_lang);
             let _ = stroll_label;
             let show = MenuItem::with_id(app, "show", show_label, true, None::<&str>)?;
             let hide = MenuItem::with_id(app, "hide", hide_label, true, None::<&str>)?;
+            let settings = MenuItem::with_id(app, "settings", settings_label, true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", quit_label, true, None::<&str>)?;
             #[cfg(target_os = "macos")]
             let menu = {
@@ -12336,10 +12338,10 @@ pub fn run() {
                     STROLL_MODE_ENABLED.load(Ordering::SeqCst),
                     None::<&str>,
                 )?;
-                Menu::with_items(app, &[&show, &hide, &stroll, &quit])?
+                Menu::with_items(app, &[&show, &hide, &stroll, &settings, &quit])?
             };
             #[cfg(not(target_os = "macos"))]
-            let menu = Menu::with_items(app, &[&show, &hide, &quit])?;
+            let menu = Menu::with_items(app, &[&show, &hide, &settings, &quit])?;
 
             // Use dedicated tray icon (logo-mini: white cat silhouette on transparent bg)
             // instead of the app icon, so it renders correctly in macOS menu bar / Windows tray
@@ -12388,6 +12390,25 @@ pub fn run() {
                             THROW_TRACKING_ENABLED.store(false, Ordering::SeqCst);
                         }
                         let _ = app.emit("stroll-mode-changed", next);
+                    }
+                    "settings" => {
+                        if let Some(win) = app.get_webview_window("main") {
+                            #[cfg(target_os = "windows")]
+                            {
+                                FULLSCREEN_HIDING.store(false, std::sync::atomic::Ordering::SeqCst);
+                                if let Ok(Some(monitor)) = win.primary_monitor() {
+                                    let scale = monitor.scale_factor();
+                                    let sw = monitor.size().width as f64 / scale;
+                                    let ui = win_ui_scale(&monitor);
+                                    let x = sw / 2.0 + (80.0 * ui).round();
+                                    let _ = win.set_position(tauri::LogicalPosition::new(x, 0.0));
+                                }
+                                let _ = win.set_always_on_top(true);
+                            }
+                            let _ = win.show();
+                            let _ = win.set_focus();
+                        }
+                        let _ = app.emit("tray-open-settings", ());
                     }
                     "quit" => {
                         app.exit(0);

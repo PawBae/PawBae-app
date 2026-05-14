@@ -50,6 +50,10 @@
       windowStore.setStrollActive(e.payload);
     }).then((u) => cleanups.push(u));
 
+    listen('tray-open-settings', () => {
+      openSettings();
+    }).then((u) => cleanups.push(u));
+
     return () => {
       for (const fn of cleanups) fn();
       agentStore.stopPolling();
@@ -119,7 +123,7 @@
 </script>
 
 <div class="root" data-tauri-drag-region={windowStore.settingsOpen ? undefined : ''}>
-  <MascotView {pet} {voiceRecording} {voiceText} {voiceError} onOpenSettings={openSettings} />
+  <MascotView {pet} {voiceRecording} {voiceText} {voiceError} />
   <Panel />
 
   <Onboarding open={showOnboarding} onSelect={handleModeSelect} />

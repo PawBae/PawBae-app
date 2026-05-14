@@ -16,13 +16,11 @@
     voiceRecording = false,
     voiceText = '',
     voiceError = '',
-    onOpenSettings,
   }: {
     pet: CodexPet | null;
     voiceRecording?: boolean;
     voiceText?: string;
     voiceError?: string;
-    onOpenSettings?: () => void;
   } = $props();
 
   const isWindows = typeof navigator !== 'undefined' && navigator.userAgent.includes('Windows');
@@ -108,10 +106,6 @@
     }
   }
 
-  function handleContextMenu(e: MouseEvent) {
-    e.preventDefault();
-    onOpenSettings?.();
-  }
 </script>
 
 <!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -120,7 +114,7 @@
   class="mascot-view"
   data-tauri-drag-region={windowStore.settingsOpen ? undefined : ''}
   onclick={handleClick}
-  oncontextmenu={handleContextMenu}
+  oncontextmenu={(e) => e.preventDefault()}
   style="width: {mascotSize}px; height: {mascotSize}px;"
 >
   {#if pet}
