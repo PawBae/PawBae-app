@@ -7,6 +7,16 @@ use std::time::SystemTime;
 mod state;
 use crate::state::*;
 
+mod platform;
+#[cfg(target_os = "macos")]
+#[allow(unused_imports)]
+use crate::platform::macos::*;
+#[cfg(target_os = "windows")]
+#[allow(unused_imports)]
+use crate::platform::windows::*;
+#[allow(unused_imports)]
+use crate::platform::common::*;
+
 #[cfg(target_os = "macos")]
 mod speech;
 
