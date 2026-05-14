@@ -108,6 +108,10 @@ class PetStore {
   }
 
   startPomodoro(durationMin: number = 25) {
+    if (this.pomodoroInterval) {
+      clearInterval(this.pomodoroInterval);
+      this.pomodoroInterval = null;
+    }
     const duration = durationMin * 60;
     this.pomodoro = {
       active: true,

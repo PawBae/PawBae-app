@@ -26,40 +26,49 @@
 
   async function toggleClaudeCode(val: boolean) {
     enableClaudeCode = val;
-    await settingsStore.setEnableClaudeCode(val);
     if (val) {
       try {
         await invoke('install_claude_hooks');
         hookStatus = $_('settings.hookInstalled');
+        await settingsStore.setEnableClaudeCode(val);
       } catch (e: any) {
+        enableClaudeCode = false;
         hookStatus = `${$_('settings.hookFailed')} ${String(e)}`;
       }
+    } else {
+      await settingsStore.setEnableClaudeCode(val);
     }
   }
 
   async function toggleCodex(val: boolean) {
     enableCodex = val;
-    await settingsStore.setEnableCodex(val);
     if (val) {
       try {
         await invoke('install_claude_hooks');
         codexHookStatus = $_('settings.hookInstalled');
+        await settingsStore.setEnableCodex(val);
       } catch (e: any) {
+        enableCodex = false;
         codexHookStatus = `${$_('settings.hookFailed')} ${String(e)}`;
       }
+    } else {
+      await settingsStore.setEnableCodex(val);
     }
   }
 
   async function toggleCursor(val: boolean) {
     enableCursor = val;
-    await settingsStore.setEnableCursor(val);
     if (val) {
       try {
         await invoke('install_cursor_hooks');
         cursorHookStatus = $_('settings.hookInstalled');
+        await settingsStore.setEnableCursor(val);
       } catch (e: any) {
+        enableCursor = false;
         cursorHookStatus = `${$_('settings.hookFailed')} ${String(e)}`;
       }
+    } else {
+      await settingsStore.setEnableCursor(val);
     }
   }
 </script>
