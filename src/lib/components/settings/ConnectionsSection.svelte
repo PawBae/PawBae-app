@@ -53,18 +53,22 @@
     try {
       if (conn.type === 'remote') {
         await invoke('reset_ssh', { sshHost: conn.host, sshUser: conn.user }).catch(() => {});
-        const result = (await invoke('get_agents', { mode: 'remote', sshHost: conn.host, sshUser: conn.user })) as { length: number };
+        const raw: unknown = await invoke('get_agents', { mode: 'remote', sshHost: conn.host, sshUser: conn.user });
+        const agents = Array.isArray(raw) ? raw : [];
         let keyInfo = '';
         try {
-          const key = (await invoke('get_ssh_key_info', { sshHost: conn.host, sshUser: conn.user })) as string | null;
-          if (key) keyInfo = ` · ${$_('settings.key')} ${key}`;
+          const key: unknown = await invoke('get_ssh_key_info', { sshHost: conn.host, sshUser: conn.user });
+          if (typeof key === 'string' && key) keyInfo = ` · ${$_('settings.key')} ${key}`;
         } catch {}
-        testResult = { idx, type: 'success', msg: `${result.length} ${$_('settings.agents')}${keyInfo}` };
+        testResult = { idx, type: 'success', msg: `${agents.length} ${$_('settings.agents')}${keyInfo}` };
       } else {
         const store = await settingsStore.getStore();
         const agentId = ((await store.get('tracked_agent')) as string) || 'main';
-        const result = (await invoke('get_status', { gatewayUrl: 'http://localhost:4446', token: '', agentId })) as { sessions: unknown[] };
-        testResult = { idx, type: 'success', msg: `${result.sessions.length} ${$_('settings.sessions')}` };
+        const raw: unknown = await invoke('get_status', { gatewayUrl: 'http://localhost:4446', token: '', agentId });
+        const sessions = (raw && typeof raw === 'object' && 'sessions' in raw && Array.isArray((raw as Record<string, unknown>).sessions))
+          ? (raw as Record<string, unknown>).sessions as unknown[]
+          : [];
+        testResult = { idx, type: 'success', msg: `${sessions.length} ${$_('settings.sessions')}` };
       }
       setTimeout(() => { if (testResult?.idx === idx) testResult = null; }, 3000);
     } catch (e: unknown) {
