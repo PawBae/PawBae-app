@@ -1,8 +1,10 @@
 <script lang="ts">
+  import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import MascotView from './MascotView.svelte';
   import Panel from './Panel.svelte';
   import Onboarding from './Onboarding.svelte';
+  import SettingsPanel from './SettingsPanel.svelte';
   import UpdateModal from './UpdateModal.svelte';
   import type { UpdateModalInfo } from './UpdateModal.svelte';
   import { loadCodexPets, loadDefaultCodexPet } from './codexPet';
@@ -73,8 +75,6 @@
 
     if (!settingsStore.appMode) {
       showOnboarding = true;
-    } else {
-      startModePolling();
     }
   }
 
@@ -82,21 +82,49 @@
     if (settingsStore.appMode === 'coding') {
       agentStore.startPolling();
       sessionStore.startPolling();
+    } else {
+      agentStore.stopPolling();
+      sessionStore.stopPolling();
     }
   }
 
   async function handleModeSelect(mode: AppMode) {
     showOnboarding = false;
     await settingsStore.setAppMode(mode);
-    startModePolling();
+  }
+
+  $effect(() => {
+    if (settingsStore.appMode) startModePolling();
+  });
+
+  async function openSettings() {
+    if (windowStore.settingsOpen) return;
+    windowStore.setSettingsOpen(true);
+    try {
+      await invoke('set_mini_size', { restore: false });
+    } catch (e) {
+      console.warn('[settings] set_mini_size failed:', e);
+    }
+  }
+
+  async function closeSettings() {
+    if (!windowStore.settingsOpen) return;
+    windowStore.setSettingsOpen(false);
+    try {
+      await invoke('set_mini_size', { restore: true, mascotScale: settingsStore.mascotScale });
+    } catch (e) {
+      console.warn('[settings] restore size failed:', e);
+    }
   }
 </script>
 
-<div class="root" data-tauri-drag-region>
-  <MascotView {pet} {voiceRecording} {voiceText} {voiceError} />
+<div class="root" data-tauri-drag-region={windowStore.settingsOpen ? undefined : ''}>
+  <MascotView {pet} {voiceRecording} {voiceText} {voiceError} onOpenSettings={openSettings} />
   <Panel />
 
   <Onboarding open={showOnboarding} onSelect={handleModeSelect} />
+
+  <SettingsPanel open={windowStore.settingsOpen} onClose={closeSettings} />
 
   <UpdateModal
     open={updateOpen}

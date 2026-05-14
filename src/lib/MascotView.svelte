@@ -16,11 +16,13 @@
     voiceRecording = false,
     voiceText = '',
     voiceError = '',
+    onOpenSettings,
   }: {
     pet: CodexPet | null;
     voiceRecording?: boolean;
     voiceText?: string;
     voiceError?: string;
+    onOpenSettings?: () => void;
   } = $props();
 
   const isWindows = typeof navigator !== 'undefined' && navigator.userAgent.includes('Windows');
@@ -56,10 +58,11 @@
     };
   });
 
-  // Physics loop — reacts to pet prop changing from null to a loaded pet
+  // Physics loop — paused when settings panel is open
   $effect(() => {
     const currentPet = pet;
     if (!currentPet?.physics?.enabled) return;
+    if (windowStore.settingsOpen) return;
 
     invoke('set_stroll_mode', { enabled: true }).catch(() => {});
     invoke('set_throw_tracking', { enabled: true }).catch(() => {});
@@ -107,9 +110,7 @@
 
   function handleContextMenu(e: MouseEvent) {
     e.preventDefault();
-    if (settingsStore.appMode === 'pet') {
-      // TODO: open pet context menu
-    }
+    onOpenSettings?.();
   }
 </script>
 
@@ -117,7 +118,7 @@
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
   class="mascot-view"
-  data-tauri-drag-region
+  data-tauri-drag-region={windowStore.settingsOpen ? undefined : ''}
   onclick={handleClick}
   oncontextmenu={handleContextMenu}
   style="width: {mascotSize}px; height: {mascotSize}px;"

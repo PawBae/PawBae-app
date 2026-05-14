@@ -14,6 +14,13 @@ let enableCursor = $state(true);
 let language = $state('en');
 let strollEnabled = $state(true);
 let panelMaxHeight = $state(400);
+let notifySound = $state<'default' | 'manbo'>('default');
+let waitingSound = $state(true);
+let autoCloseCompletion = $state(false);
+let autoExpandOnTask = $state(true);
+let hoverDelay = $state(0.3);
+let petSfxEnabled = $state(true);
+let petIdleIntervalMin = $state(2);
 
 let miniPetId = $state<string>('yoonie');
 let petQueue = $state<string[]>([]);
@@ -45,6 +52,13 @@ async function loadSettings() {
   language = ((await store.get('pawbae-lang')) as string) || 'en';
   strollEnabled = ((await store.get('stroll_mode_enabled')) as boolean) ?? true;
   panelMaxHeight = ((await store.get('panel_max_height')) as number) ?? 400;
+  notifySound = ((await store.get('notify_sound')) as 'default' | 'manbo') || 'default';
+  waitingSound = ((await store.get('waiting_sound')) as boolean) ?? true;
+  autoCloseCompletion = ((await store.get('auto_close_completion')) as boolean) ?? false;
+  autoExpandOnTask = ((await store.get('auto_expand_on_task')) as boolean) ?? true;
+  hoverDelay = ((await store.get('hover_delay')) as number) ?? 0.3;
+  petSfxEnabled = ((await store.get('pet_sfx_enabled')) as boolean) ?? true;
+  petIdleIntervalMin = ((await store.get('pet_idle_interval_min')) as number) ?? 2;
   miniPetId = ((await store.get('mini_pet_id')) as string) || 'yoonie';
   petQueue = ((await store.get('pet_queue')) as string[]) || [];
   ocConnections = ((await store.get('oc_connections')) as OcConnection[]) || [{ id: 'local', type: 'local' }];
@@ -116,6 +130,46 @@ async function setStrollEnabled(v: boolean) {
   await saveSetting('stroll_mode_enabled', v);
 }
 
+async function setPanelMaxHeight(v: number) {
+  panelMaxHeight = v;
+  await saveSetting('panel_max_height', v);
+}
+
+async function setNotifySound(v: 'default' | 'manbo') {
+  notifySound = v;
+  await saveSetting('notify_sound', v);
+}
+
+async function setWaitingSound(v: boolean) {
+  waitingSound = v;
+  await saveSetting('waiting_sound', v);
+}
+
+async function setAutoCloseCompletion(v: boolean) {
+  autoCloseCompletion = v;
+  await saveSetting('auto_close_completion', v);
+}
+
+async function setAutoExpandOnTask(v: boolean) {
+  autoExpandOnTask = v;
+  await saveSetting('auto_expand_on_task', v);
+}
+
+async function setHoverDelay(v: number) {
+  hoverDelay = v;
+  await saveSetting('hover_delay', v);
+}
+
+async function setPetSfxEnabled(v: boolean) {
+  petSfxEnabled = v;
+  await saveSetting('pet_sfx_enabled', v);
+}
+
+async function setPetIdleIntervalMin(v: number) {
+  petIdleIntervalMin = v;
+  await saveSetting('pet_idle_interval_min', v);
+}
+
 async function setMiniPetId(v: string) {
   miniPetId = v;
   await saveSetting('mini_pet_id', v);
@@ -145,6 +199,13 @@ export const settingsStore = {
   get language() { return language; },
   get strollEnabled() { return strollEnabled; },
   get panelMaxHeight() { return panelMaxHeight; },
+  get notifySound() { return notifySound; },
+  get waitingSound() { return waitingSound; },
+  get autoCloseCompletion() { return autoCloseCompletion; },
+  get autoExpandOnTask() { return autoExpandOnTask; },
+  get hoverDelay() { return hoverDelay; },
+  get petSfxEnabled() { return petSfxEnabled; },
+  get petIdleIntervalMin() { return petIdleIntervalMin; },
   get miniPetId() { return miniPetId; },
   get petQueue() { return petQueue; },
   get ocConnections() { return ocConnections; },
@@ -161,6 +222,14 @@ export const settingsStore = {
   setEnableCursor,
   setLanguage,
   setStrollEnabled,
+  setPanelMaxHeight,
+  setNotifySound,
+  setWaitingSound,
+  setAutoCloseCompletion,
+  setAutoExpandOnTask,
+  setHoverDelay,
+  setPetSfxEnabled,
+  setPetIdleIntervalMin,
   setMiniPetId,
   setPetQueue,
   setOcConnections,
