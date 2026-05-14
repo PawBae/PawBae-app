@@ -17,6 +17,10 @@ use crate::platform::windows::*;
 #[allow(unused_imports)]
 use crate::platform::common::*;
 
+mod commands;
+#[allow(unused_imports)]
+use crate::commands::*;
+
 #[cfg(target_os = "macos")]
 mod speech;
 
@@ -58,7 +62,7 @@ use libc;
 
 /// Apply CREATE_NO_WINDOW on Windows to prevent console popups from child processes.
 #[cfg(windows)]
-fn hide_window_cmd(cmd: &mut std::process::Command) {
+pub(crate) fn hide_window_cmd(cmd: &mut std::process::Command) {
     use std::os::windows::process::CommandExt;
     const CREATE_NO_WINDOW: u32 = 0x08000000;
     cmd.creation_flags(CREATE_NO_WINDOW);
@@ -1000,45 +1004,11 @@ async fn close_ssh_master(ssh_host: &str, ssh_user: &str) -> Result<(), String> 
 // Tray label tuple: (show, hide, stroll, quit). The `stroll` slot is
 // populated for every language but only inserted into the tray menu on
 // macOS — Phase 2 pet physics is currently macOS-only.
-fn tray_labels(lang: &str) -> (&'static str, &'static str, &'static str, &'static str, &'static str) {
+pub(crate) fn tray_labels(lang: &str) -> (&'static str, &'static str, &'static str, &'static str, &'static str) {
     match lang {
         "zh" => ("显示", "隐藏", "散步模式", "设置", "退出"),
         _ => ("Show", "Hide", "Stroll Mode", "Settings", "Quit"),
     }
-}
-
-#[tauri::command]
-fn update_tray_language(app: tauri::AppHandle, lang: String) -> Result<(), String> {
-    let (show_label, hide_label, stroll_label, settings_label, quit_label) = tray_labels(&lang);
-    let _ = stroll_label;
-    let show = MenuItem::with_id(&app, "show", show_label, true, None::<&str>).map_err(|e| e.to_string())?;
-    let hide = MenuItem::with_id(&app, "hide", hide_label, true, None::<&str>).map_err(|e| e.to_string())?;
-    let settings = MenuItem::with_id(&app, "settings", settings_label, true, None::<&str>).map_err(|e| e.to_string())?;
-    let quit = MenuItem::with_id(&app, "quit", quit_label, true, None::<&str>).map_err(|e| e.to_string())?;
-    #[cfg(target_os = "macos")]
-    let menu = {
-        let stroll = CheckMenuItem::with_id(
-            &app,
-            "stroll",
-            stroll_label,
-            true,
-            STROLL_MODE_ENABLED.load(Ordering::SeqCst),
-            None::<&str>,
-        )
-        .map_err(|e| e.to_string())?;
-        Menu::with_items(&app, &[&show, &hide, &stroll, &settings, &quit]).map_err(|e| e.to_string())?
-    };
-    #[cfg(not(target_os = "macos"))]
-    let menu = Menu::with_items(&app, &[&show, &hide, &settings, &quit]).map_err(|e| e.to_string())?;
-    if let Some(tray) = app.tray_by_id("main") {
-        tray.set_menu(Some(menu)).map_err(|e| e.to_string())?;
-    }
-    Ok(())
-}
-
-#[tauri::command]
-fn exit_app(app: tauri::AppHandle) {
-    app.exit(0);
 }
 
 /// Returns the SSH key path that was used to authenticate a connection,
@@ -6904,25 +6874,6 @@ async fn open_detail_panel(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// Proxy a POST request to bypass CORS restrictions in the webview.
-#[tauri::command]
-async fn proxy_post(url: String, body: String) -> Result<String, String> {
-    let client = reqwest::Client::new();
-    let resp = client
-        .post(&url)
-        .header("Content-Type", "application/json")
-        .body(body)
-        .send()
-        .await
-        .map_err(|e| format!("request failed: {}", e))?;
-    let status = resp.status().as_u16();
-    let text = resp.text().await.map_err(|e| format!("read body: {}", e))?;
-    if status >= 400 {
-        return Err(format!("HTTP {}: {}", status, text));
-    }
-    Ok(text)
-}
-
 // ─── Play system sound ───
 #[tauri::command]
 async fn play_sound(name: String) -> Result<(), String> {
@@ -7877,26 +7828,6 @@ async fn get_claude_stats(source: Option<String>) -> Result<ClaudeStats, String>
     })
 }
 
-#[tauri::command]
-async fn open_url(url: String) -> Result<(), String> {
-    #[cfg(target_os = "macos")]
-    { std::process::Command::new("open").arg(&url).spawn().map_err(|e| e.to_string())?; }
-    #[cfg(target_os = "windows")]
-    {
-        // `cmd /C start ""` opens the URL in the default browser, but cmd
-        // itself is a console app so without CREATE_NO_WINDOW the user
-        // sees a black console flash next to the freshly opened browser
-        // tab. Hide it.
-        let mut cmd = std::process::Command::new("cmd");
-        cmd.args(["/C", "start", "", &url]);
-        hide_window_cmd(&mut cmd);
-        cmd.spawn().map_err(|e| e.to_string())?;
-    }
-    #[cfg(target_os = "linux")]
-    { std::process::Command::new("xdg-open").arg(&url).spawn().map_err(|e| e.to_string())?; }
-    Ok(())
-}
-
 #[derive(Debug, Serialize)]
 pub struct CodexPetMeta {
     pub id: String,
@@ -7985,14 +7916,6 @@ async fn list_custom_codex_pets() -> Result<Vec<CodexPetMeta>, String> {
     }
     out.sort_by(|a, b| a.display_name.to_lowercase().cmp(&b.display_name.to_lowercase()));
     Ok(out)
-}
-
-/// Forward a frontend diagnostic line to the dev terminal so debugging
-/// modal/blur/exit paths doesn't require opening webview DevTools.
-#[tauri::command]
-async fn debug_log(scope: String, msg: String) -> Result<(), String> {
-    log::info!("[fe:{}] {}", scope, msg);
-    Ok(())
 }
 
 /// Spawn a demo-mode mini mascot window. Each window runs the bundled
@@ -8339,24 +8262,6 @@ fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> Result<()
     Ok(())
 }
 
-/// Activate a macOS app by its name (e.g. "Feishu", "Telegram", "Lark").
-#[tauri::command]
-async fn activate_app(app_name: String) -> Result<String, String> {
-    #[cfg(target_os = "macos")]
-    {
-        let script = format!(r#"tell application "{}" to activate"#, app_name);
-        std::process::Command::new("osascript")
-            .args(["-e", &script])
-            .output()
-            .map_err(|e| e.to_string())?;
-        Ok(format!("Activated {}", app_name))
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        Err(format!("activate_app not supported on this platform"))
-    }
-}
-
 fn cwd_matches_workspace_root(cwd: &str, workspace_root: &str) -> bool {
     if cwd.is_empty() || workspace_root.is_empty() {
         return false;
@@ -8565,7 +8470,7 @@ fn resolve_cursor_window_binding(
 }
 
 #[cfg(target_os = "macos")]
-fn check_accessibility_permission() -> bool {
+pub(crate) fn check_accessibility_permission() -> bool {
     extern "C" {
         fn AXIsProcessTrusted() -> bool;
     }
@@ -8573,57 +8478,8 @@ fn check_accessibility_permission() -> bool {
 }
 
 #[cfg(not(target_os = "macos"))]
-fn check_accessibility_permission() -> bool {
+pub(crate) fn check_accessibility_permission() -> bool {
     true
-}
-
-#[tauri::command]
-async fn check_ax_permission() -> Result<bool, String> {
-    Ok(check_accessibility_permission())
-}
-
-#[tauri::command]
-async fn request_ax_permission() -> Result<(), String> {
-    #[cfg(target_os = "macos")]
-    {
-        use std::ffi::c_void;
-
-        #[link(name = "CoreFoundation", kind = "framework")]
-        extern "C" {
-            fn CFStringCreateWithCString(alloc: *const c_void, c_str: *const u8, encoding: u32) -> *const c_void;
-            fn CFDictionaryCreate(
-                alloc: *const c_void, keys: *const *const c_void, values: *const *const c_void,
-                count: isize, key_cbs: *const c_void, val_cbs: *const c_void,
-            ) -> *const c_void;
-            fn CFRelease(cf: *const c_void);
-            static kCFTypeDictionaryKeyCallBacks: c_void;
-            static kCFTypeDictionaryValueCallBacks: c_void;
-            static kCFBooleanTrue: *const c_void;
-        }
-
-        #[link(name = "ApplicationServices", kind = "framework")]
-        extern "C" {
-            fn AXIsProcessTrustedWithOptions(options: *const c_void) -> bool;
-        }
-
-        unsafe {
-            let key = CFStringCreateWithCString(
-                std::ptr::null(),
-                b"AXTrustedCheckOptionPrompt\0".as_ptr(),
-                0x08000100, // kCFStringEncodingUTF8
-            );
-            let keys = [key];
-            let values = [kCFBooleanTrue];
-            let dict = CFDictionaryCreate(
-                std::ptr::null(), keys.as_ptr(), values.as_ptr(), 1,
-                &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks,
-            );
-            AXIsProcessTrustedWithOptions(dict);
-            CFRelease(dict);
-            CFRelease(key);
-        }
-    }
-    Ok(())
 }
 
 #[cfg(target_os = "macos")]
@@ -11798,34 +11654,6 @@ fn build_asset_response(
                 .body(Vec::new())
                 .unwrap()
         }
-    }
-}
-
-#[tauri::command]
-async fn voice_toggle() -> Result<(), String> {
-    #[cfg(target_os = "macos")]
-    {
-        if speech::is_recording() {
-            speech::stop_recording()
-        } else {
-            speech::start_recording()
-        }
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        Err("Voice input not supported on this platform".into())
-    }
-}
-
-#[tauri::command]
-fn voice_is_recording() -> bool {
-    #[cfg(target_os = "macos")]
-    {
-        speech::is_recording()
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        false
     }
 }
 
