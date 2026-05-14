@@ -1,19 +1,19 @@
 <script lang="ts">
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
-  import MascotView from './MascotView.svelte';
-  import Panel from './Panel.svelte';
-  import Onboarding from './Onboarding.svelte';
-  import SettingsPanel from './settings/SettingsPanel.svelte';
-  import UpdateModal from './UpdateModal.svelte';
-  import { loadCodexPets, loadDefaultCodexPet } from '../utils/codex-pet';
-  import type { CodexPet } from '../utils/codex-pet';
-  import type { AppMode, UpdateModalInfo } from '../types';
+  import { agentStore } from '../stores/agents.svelte';
+  import { petStore } from '../stores/pet.svelte';
+  import { sessionStore } from '../stores/sessions.svelte';
   import { settingsStore } from '../stores/settings.svelte';
   import { windowStore } from '../stores/window.svelte';
-  import { agentStore } from '../stores/agents.svelte';
-  import { sessionStore } from '../stores/sessions.svelte';
-  import { petStore } from '../stores/pet.svelte';
+  import type { AppMode, UpdateModalInfo } from '../types';
+  import type { CodexPet } from '../utils/codex-pet';
+  import { loadCodexPets, loadDefaultCodexPet } from '../utils/codex-pet';
+  import MascotView from './MascotView.svelte';
+  import Onboarding from './Onboarding.svelte';
+  import Panel from './Panel.svelte';
+  import SettingsPanel from './settings/SettingsPanel.svelte';
+  import UpdateModal from './UpdateModal.svelte';
 
   let pet = $state<CodexPet | null>(null);
   let showOnboarding = $state(false);

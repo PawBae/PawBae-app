@@ -1,15 +1,15 @@
 <script lang="ts">
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
-  import MiniPetMascot from './MiniPetMascot.svelte';
-  import VoiceBubble from './VoiceBubble.svelte';
+  import { agentStore } from '../stores/agents.svelte';
+  import { petStore } from '../stores/pet.svelte';
+  import { settingsStore } from '../stores/settings.svelte';
+  import { windowStore } from '../stores/window.svelte';
   import type { CodexPet, CodexPetState } from '../utils/codex-pet';
   import { petStateToCodexState } from '../utils/codex-pet';
   import { createPhysicsLoop } from '../utils/pet-physics';
-  import { windowStore } from '../stores/window.svelte';
-  import { petStore } from '../stores/pet.svelte';
-  import { agentStore } from '../stores/agents.svelte';
-  import { settingsStore } from '../stores/settings.svelte';
+  import MiniPetMascot from './MiniPetMascot.svelte';
+  import VoiceBubble from './VoiceBubble.svelte';
 
   interface MascotViewProps {
     pet: CodexPet | null;

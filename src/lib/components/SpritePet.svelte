@@ -1,10 +1,10 @@
 <script lang="ts">
   import {
-    fpsFor,
-    loopRestMsFor,
     animationFor,
     type CodexPet,
     type CodexPetState,
+    fpsFor,
+    loopRestMsFor,
   } from '../utils/codex-pet';
 
   interface Props {

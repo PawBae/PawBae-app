@@ -1,7 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import type {
   AgentInfo,
-  AgentHealth,
   AgentMetrics,
   HealthResult,
   MiniSessionInfo,

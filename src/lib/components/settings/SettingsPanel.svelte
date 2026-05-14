@@ -1,13 +1,13 @@
 <script lang="ts">
   import { _ } from 'svelte-i18n';
   import { settingsStore } from '../../stores/settings.svelte';
-  import AppModeSection from './AppModeSection.svelte';
-  import PetSettingsSection from './PetSettingsSection.svelte';
-  import ConnectionsSection from './ConnectionsSection.svelte';
-  import IntegrationToggles from './IntegrationToggles.svelte';
-  import DisplaySection from './DisplaySection.svelte';
-  import SoundSection from './SoundSection.svelte';
   import AboutSection from './AboutSection.svelte';
+  import AppModeSection from './AppModeSection.svelte';
+  import ConnectionsSection from './ConnectionsSection.svelte';
+  import DisplaySection from './DisplaySection.svelte';
+  import IntegrationToggles from './IntegrationToggles.svelte';
+  import PetSettingsSection from './PetSettingsSection.svelte';
+  import SoundSection from './SoundSection.svelte';
 
   let {
     open = false,
