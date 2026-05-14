@@ -1,8 +1,8 @@
 <script lang="ts">
   import { invoke } from '@tauri-apps/api/core';
   import { _ } from 'svelte-i18n';
-  import { settingsStore } from '../../stores/settings.svelte';
   import { agentStore } from '../../stores/agents.svelte';
+  import { settingsStore } from '../../stores/settings.svelte';
   import type { OcConnection } from '../../types';
 
   let { open }: { open: boolean } = $props();
@@ -53,21 +53,21 @@
     try {
       if (conn.type === 'remote') {
         await invoke('reset_ssh', { sshHost: conn.host, sshUser: conn.user }).catch(() => {});
-        const result: any = await invoke('get_agents', { mode: 'remote', sshHost: conn.host, sshUser: conn.user });
+        const result = (await invoke('get_agents', { mode: 'remote', sshHost: conn.host, sshUser: conn.user })) as { length: number };
         let keyInfo = '';
         try {
-          const key = await invoke('get_ssh_key_info', { sshHost: conn.host, sshUser: conn.user }) as string | null;
+          const key = (await invoke('get_ssh_key_info', { sshHost: conn.host, sshUser: conn.user })) as string | null;
           if (key) keyInfo = ` · ${$_('settings.key')} ${key}`;
         } catch {}
         testResult = { idx, type: 'success', msg: `${result.length} ${$_('settings.agents')}${keyInfo}` };
       } else {
         const store = await settingsStore.getStore();
         const agentId = ((await store.get('tracked_agent')) as string) || 'main';
-        const result: any = await invoke('get_status', { gatewayUrl: 'http://localhost:4446', token: '', agentId });
+        const result = (await invoke('get_status', { gatewayUrl: 'http://localhost:4446', token: '', agentId })) as { sessions: unknown[] };
         testResult = { idx, type: 'success', msg: `${result.sessions.length} ${$_('settings.sessions')}` };
       }
       setTimeout(() => { if (testResult?.idx === idx) testResult = null; }, 3000);
-    } catch (e: any) {
+    } catch (e: unknown) {
       testResult = { idx, type: 'error', msg: String(e) };
     }
     testingIdx = null;
@@ -103,7 +103,7 @@
               </span>
             </div>
             <button class="delete-btn" onclick={() => deleteConnection(idx)}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" role="img" aria-label="Delete">
                 <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
               </svg>
             </button>

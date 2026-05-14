@@ -1,9 +1,9 @@
 <script lang="ts">
-  import { windowStore } from '../stores/window.svelte';
-  import { settingsStore } from '../stores/settings.svelte';
   import { agentStore } from '../stores/agents.svelte';
-  import { sessionStore } from '../stores/sessions.svelte';
   import { petStore } from '../stores/pet.svelte';
+  import { sessionStore } from '../stores/sessions.svelte';
+  import { settingsStore } from '../stores/settings.svelte';
+  import { windowStore } from '../stores/window.svelte';
 
   let {
     class: className = '',

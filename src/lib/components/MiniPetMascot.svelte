@@ -1,6 +1,6 @@
 <script lang="ts">
-  import SpritePet from './SpritePet.svelte';
   import type { CodexPet, CodexPetState } from '../utils/codex-pet';
+  import SpritePet from './SpritePet.svelte';
 
   interface MiniPetMascotProps {
     pet: CodexPet;

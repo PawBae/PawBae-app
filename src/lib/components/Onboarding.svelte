@@ -1,8 +1,8 @@
 <script lang="ts">
-  import SpritePet from './SpritePet.svelte';
-  import { loadDefaultCodexPet } from '../utils/codex-pet';
-  import type { CodexPet } from '../utils/codex-pet';
   import type { AppMode } from '../types';
+  import type { CodexPet } from '../utils/codex-pet';
+  import { loadDefaultCodexPet } from '../utils/codex-pet';
+  import SpritePet from './SpritePet.svelte';
 
   interface OnboardingProps {
     open?: boolean;

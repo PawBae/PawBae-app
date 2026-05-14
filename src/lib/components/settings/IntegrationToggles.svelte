@@ -31,7 +31,7 @@
         await invoke('install_claude_hooks');
         hookStatus = $_('settings.hookInstalled');
         await settingsStore.setEnableClaudeCode(val);
-      } catch (e: any) {
+      } catch (e: unknown) {
         enableClaudeCode = false;
         hookStatus = `${$_('settings.hookFailed')} ${String(e)}`;
       }
@@ -47,7 +47,7 @@
         await invoke('install_claude_hooks');
         codexHookStatus = $_('settings.hookInstalled');
         await settingsStore.setEnableCodex(val);
-      } catch (e: any) {
+      } catch (e: unknown) {
         enableCodex = false;
         codexHookStatus = `${$_('settings.hookFailed')} ${String(e)}`;
       }
@@ -63,7 +63,7 @@
         await invoke('install_cursor_hooks');
         cursorHookStatus = $_('settings.hookInstalled');
         await settingsStore.setEnableCursor(val);
-      } catch (e: any) {
+      } catch (e: unknown) {
         enableCursor = false;
         cursorHookStatus = `${$_('settings.hookFailed')} ${String(e)}`;
       }

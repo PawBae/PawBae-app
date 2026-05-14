@@ -43,7 +43,12 @@ class WindowStore {
 
   async getMonitorRect(): Promise<{ x: number; y: number; w: number; h: number } | null> {
     try {
-      return (await invoke('get_mini_monitor_rect')) as { x: number; y: number; w: number; h: number };
+      return (await invoke('get_mini_monitor_rect')) as {
+        x: number;
+        y: number;
+        w: number;
+        h: number;
+      };
     } catch {
       return null;
     }

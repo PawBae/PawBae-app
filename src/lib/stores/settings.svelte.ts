@@ -60,7 +60,9 @@ class SettingsStore {
     this.petIdleIntervalMin = ((await store.get('pet_idle_interval_min')) as number) ?? 2;
     this.miniPetId = ((await store.get('mini_pet_id')) as string) || 'yoonie';
     this.petQueue = ((await store.get('pet_queue')) as string[]) || [];
-    this.ocConnections = ((await store.get('oc_connections')) as OcConnection[]) || [{ id: 'local', type: 'local' }];
+    this.ocConnections = ((await store.get('oc_connections')) as OcConnection[]) || [
+      { id: 'local', type: 'local' },
+    ];
   }
 
   private async saveSetting(key: string, value: unknown) {

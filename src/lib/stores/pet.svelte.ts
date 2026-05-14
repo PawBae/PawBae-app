@@ -1,4 +1,4 @@
-import type { PetData, PetAction, PomodoroState } from '../types';
+import type { PetAction, PetData, PomodoroState } from '../types';
 
 export const HUNGER_MAX = 100;
 export const HUNGER_INIT = 100;
@@ -123,7 +123,7 @@ class PetStore {
     this.currentAction = 'work';
 
     this.pomodoroInterval = setInterval(() => {
-      if (!this.pomodoro || !this.pomodoro.active) return;
+      if (!this.pomodoro?.active) return;
       const elapsed = Math.floor((Date.now() - this.pomodoro.startedAt) / 1000);
       const remaining = Math.max(0, this.pomodoro.duration - elapsed);
       const earnedCoins = Math.floor(elapsed / 60) * POMODORO_COINS_PER_MIN;

@@ -5,7 +5,7 @@
 <Main />
 
 <style>
-  :global(html, body) {
+  :global(html), :global(body) {
     margin: 0;
     padding: 0;
     overflow: hidden;

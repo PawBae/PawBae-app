@@ -50,7 +50,7 @@
           ? `${$_('settings.newVersionFound')} v${info.latest}`
           : $_('settings.alreadyLatest');
       }
-    } catch (e: any) {
+    } catch (e: unknown) {
       if (showFeedback) {
         updateCheckResult = 'error';
         updateCheckMsg = `${$_('settings.checkFailed')}${String(e)}`;
@@ -72,13 +72,13 @@
       updateRunResult = 'success';
       updateRunMsg = $_('settings.downloadComplete');
       setTimeout(() => {
-        invoke('exit_app').catch((e: any) => {
+        invoke('exit_app').catch((e: unknown) => {
           updating = false;
           updateRunResult = 'error';
           updateRunMsg = `${$_('settings.exitFailed')}${String(e)}`;
         });
       }, 600);
-    } catch (e: any) {
+    } catch (e: unknown) {
       updateProgress = null;
       updateProgressMsg = '';
       updateRunResult = 'error';
