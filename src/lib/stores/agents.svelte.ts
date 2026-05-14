@@ -49,8 +49,8 @@ class AgentStore {
             if (conn.type === 'remote') {
               this.agentConnMap.set(uniqueId, {
                 mode: 'remote',
-                sshHost: conn.host!,
-                sshUser: conn.user!,
+                sshHost: conn.host ?? '',
+                sshUser: conn.user ?? '',
               });
             }
             newAgents.push({ ...a, id: uniqueId });

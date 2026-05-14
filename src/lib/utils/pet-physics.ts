@@ -274,7 +274,7 @@ function step(s: MutablePhysicsState, edge: EdgeState) {
 // Walking off the side of a title bar is a fall, not a wall transition
 // — there is no wall above the title bar in the screen world.
 function stepOnWindow(s: MutablePhysicsState, edge: EdgeState) {
-  const w = edge.activeWindow!;
+  const w = edge.activeWindow as NonNullable<typeof edge.activeWindow>;
   switch (s.state) {
     case 'on_floor': {
       if (s.ticksInState === 1) {

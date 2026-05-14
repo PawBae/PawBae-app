@@ -53,21 +53,21 @@
     try {
       if (conn.type === 'remote') {
         await invoke('reset_ssh', { sshHost: conn.host, sshUser: conn.user }).catch(() => {});
-        const result: any = await invoke('get_agents', { mode: 'remote', sshHost: conn.host, sshUser: conn.user });
+        const result = (await invoke('get_agents', { mode: 'remote', sshHost: conn.host, sshUser: conn.user })) as { length: number };
         let keyInfo = '';
         try {
-          const key = await invoke('get_ssh_key_info', { sshHost: conn.host, sshUser: conn.user }) as string | null;
+          const key = (await invoke('get_ssh_key_info', { sshHost: conn.host, sshUser: conn.user })) as string | null;
           if (key) keyInfo = ` · ${$_('settings.key')} ${key}`;
         } catch {}
         testResult = { idx, type: 'success', msg: `${result.length} ${$_('settings.agents')}${keyInfo}` };
       } else {
         const store = await settingsStore.getStore();
         const agentId = ((await store.get('tracked_agent')) as string) || 'main';
-        const result: any = await invoke('get_status', { gatewayUrl: 'http://localhost:4446', token: '', agentId });
+        const result = (await invoke('get_status', { gatewayUrl: 'http://localhost:4446', token: '', agentId })) as { sessions: unknown[] };
         testResult = { idx, type: 'success', msg: `${result.sessions.length} ${$_('settings.sessions')}` };
       }
       setTimeout(() => { if (testResult?.idx === idx) testResult = null; }, 3000);
-    } catch (e: any) {
+    } catch (e: unknown) {
       testResult = { idx, type: 'error', msg: String(e) };
     }
     testingIdx = null;
