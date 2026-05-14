@@ -5,7 +5,7 @@
     animationFor,
     type CodexPet,
     type CodexPetState,
-  } from './codexPet';
+  } from '../utils/codex-pet';
 
   interface Props {
     pet: CodexPet;

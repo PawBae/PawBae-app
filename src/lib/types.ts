@@ -133,3 +133,11 @@ export interface MiniSessionInfo {
   preview?: string;
   active: boolean;
 }
+
+export interface UpdateModalInfo {
+  current: string;
+  latest: string;
+  hasUpdate: boolean;
+  url?: string;
+  notes?: string;
+}

@@ -18,7 +18,7 @@
 
 import { invoke } from '@tauri-apps/api/core'
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow'
-import { animationFor, type CodexPet, type CodexPetState } from './codexPet'
+import { animationFor, type CodexPet, type CodexPetState } from './codex-pet'
 
 export interface MonitorRect {
   // Origin (bottom-left on macOS, top-left on Windows).

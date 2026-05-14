@@ -1,16 +1,18 @@
 <script lang="ts">
   import SpritePet from './SpritePet.svelte';
-  import { loadDefaultCodexPet } from './codexPet';
-  import type { CodexPet } from './codexPet';
-  import type { AppMode } from './types';
+  import { loadDefaultCodexPet } from '../utils/codex-pet';
+  import type { CodexPet } from '../utils/codex-pet';
+  import type { AppMode } from '../types';
+
+  interface OnboardingProps {
+    open?: boolean;
+    onSelect: (mode: AppMode) => void;
+  }
 
   let {
     open = false,
     onSelect,
-  }: {
-    open?: boolean;
-    onSelect: (mode: AppMode) => void;
-  } = $props();
+  }: OnboardingProps = $props();
 
   let previewPet = $state<CodexPet | null>(null);
 

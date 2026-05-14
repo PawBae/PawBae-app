@@ -12,7 +12,7 @@
 // `move_mini_by(dx, dy)` in top-down coords.
 
 import { invoke } from '@tauri-apps/api/core'
-import type { CodexPet } from './codexPet'
+import type { CodexPet } from './codex-pet'
 import {
   detectEdges,
   invalidateMonitorCache,
@@ -22,7 +22,7 @@ import {
   setRuntimeSpritePadCSS,
   resetRuntimeSpritePadCSS,
   type EdgeState,
-} from './edgeDetect'
+} from './edge-detect'
 
 export type PhysicsState =
   | 'on_floor'

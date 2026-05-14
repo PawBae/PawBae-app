@@ -34,140 +34,131 @@ function defaultPetData(): PetData {
   };
 }
 
-let petData = $state<PetData>(defaultPetData());
-let currentAction = $state<PetAction>('idle');
-let pomodoro = $state<PomodoroState | null>(null);
-let pomodoroInterval: ReturnType<typeof setInterval> | null = null;
+class PetStore {
+  petData = $state<PetData>(defaultPetData());
+  currentAction = $state<PetAction>('idle');
+  pomodoro = $state<PomodoroState | null>(null);
+  private pomodoroInterval: ReturnType<typeof setInterval> | null = null;
 
-function applyDecay() {
-  const now = Date.now();
-  const hours = (now - petData.lastTickAt) / 3_600_000;
-  if (hours < 0.01) return;
+  applyDecay() {
+    const now = Date.now();
+    const hours = (now - this.petData.lastTickAt) / 3_600_000;
+    if (hours < 0.01) return;
 
-  const hungerDecay = HUNGER_DECAY_PER_HOUR * hours;
-  const newHunger = Math.max(HUNGER_OFFLINE_FLOOR, petData.hunger - hungerDecay);
+    const hungerDecay = HUNGER_DECAY_PER_HOUR * hours;
+    const newHunger = Math.max(HUNGER_OFFLINE_FLOOR, this.petData.hunger - hungerDecay);
 
-  let affectionDecay = (AFFECTION_DECAY_PER_DAY / 24) * hours;
-  if (newHunger < 30) {
-    affectionDecay += AFFECTION_HUNGRY_DECAY_PER_HOUR * hours;
-  }
-  const newAffection = Math.max(AFFECTION_OFFLINE_FLOOR, petData.affection - affectionDecay);
-
-  petData = {
-    ...petData,
-    hunger: Math.round(newHunger * 10) / 10,
-    affection: Math.round(newAffection * 10) / 10,
-    lastTickAt: now,
-  };
-}
-
-function applyFeed(amount: number = 20) {
-  const wasHungry = petData.hunger < 30;
-  const newHunger = Math.min(HUNGER_MAX, petData.hunger + amount);
-  const affectionBonus = wasHungry ? AFFECTION_FEED_HUNGRY : 0;
-  petData = {
-    ...petData,
-    hunger: newHunger,
-    affection: Math.min(AFFECTION_MAX, petData.affection + affectionBonus),
-    coins: Math.max(0, petData.coins - 5),
-    lastTickAt: Date.now(),
-  };
-  currentAction = 'eat';
-  setTimeout(() => {
-    if (currentAction === 'eat') currentAction = 'idle';
-  }, 3000);
-}
-
-function applyHeadpat() {
-  const today = todayStr();
-  let count = petData.headpatDate === today ? petData.headpatToday : 0;
-  if (count >= AFFECTION_HEADPAT_DAILY_LIMIT) return;
-  count++;
-  petData = {
-    ...petData,
-    affection: Math.min(AFFECTION_MAX, petData.affection + AFFECTION_HEADPAT),
-    headpatToday: count,
-    headpatDate: today,
-  };
-  currentAction = 'headpat';
-  setTimeout(() => {
-    if (currentAction === 'headpat') currentAction = 'idle';
-  }, 2000);
-}
-
-function claimDailyGift() {
-  const today = todayStr();
-  if (petData.lastDailyGift === today) return false;
-  petData = {
-    ...petData,
-    coins: petData.coins + 50,
-    lastDailyGift: today,
-  };
-  return true;
-}
-
-function startPomodoro(durationMin: number = 25) {
-  const duration = durationMin * 60;
-  pomodoro = {
-    active: true,
-    duration,
-    remaining: duration,
-    startedAt: Date.now(),
-  };
-  petData = { ...petData, pomodoroCoins: 0 };
-  currentAction = 'work';
-
-  pomodoroInterval = setInterval(() => {
-    if (!pomodoro || !pomodoro.active) return;
-    const elapsed = Math.floor((Date.now() - pomodoro.startedAt) / 1000);
-    const remaining = Math.max(0, pomodoro.duration - elapsed);
-    const earnedCoins = Math.floor(elapsed / 60) * POMODORO_COINS_PER_MIN;
-
-    pomodoro = { ...pomodoro, remaining };
-    petData = { ...petData, pomodoroCoins: earnedCoins };
-
-    if (remaining <= 0) {
-      stopPomodoro();
+    let affectionDecay = (AFFECTION_DECAY_PER_DAY / 24) * hours;
+    if (newHunger < 30) {
+      affectionDecay += AFFECTION_HUNGRY_DECAY_PER_HOUR * hours;
     }
-  }, 1000);
-}
+    const newAffection = Math.max(AFFECTION_OFFLINE_FLOOR, this.petData.affection - affectionDecay);
 
-function stopPomodoro() {
-  if (pomodoroInterval) {
-    clearInterval(pomodoroInterval);
-    pomodoroInterval = null;
-  }
-  if (pomodoro) {
-    petData = {
-      ...petData,
-      coins: petData.coins + petData.pomodoroCoins,
-      pomodoroCoins: 0,
+    this.petData = {
+      ...this.petData,
+      hunger: Math.round(newHunger * 10) / 10,
+      affection: Math.round(newAffection * 10) / 10,
+      lastTickAt: now,
     };
   }
-  pomodoro = null;
-  currentAction = 'idle';
+
+  applyFeed(amount: number = 20) {
+    const wasHungry = this.petData.hunger < 30;
+    const newHunger = Math.min(HUNGER_MAX, this.petData.hunger + amount);
+    const affectionBonus = wasHungry ? AFFECTION_FEED_HUNGRY : 0;
+    this.petData = {
+      ...this.petData,
+      hunger: newHunger,
+      affection: Math.min(AFFECTION_MAX, this.petData.affection + affectionBonus),
+      coins: Math.max(0, this.petData.coins - 5),
+      lastTickAt: Date.now(),
+    };
+    this.currentAction = 'eat';
+    setTimeout(() => {
+      if (this.currentAction === 'eat') this.currentAction = 'idle';
+    }, 3000);
+  }
+
+  applyHeadpat() {
+    const today = todayStr();
+    let count = this.petData.headpatDate === today ? this.petData.headpatToday : 0;
+    if (count >= AFFECTION_HEADPAT_DAILY_LIMIT) return;
+    count++;
+    this.petData = {
+      ...this.petData,
+      affection: Math.min(AFFECTION_MAX, this.petData.affection + AFFECTION_HEADPAT),
+      headpatToday: count,
+      headpatDate: today,
+    };
+    this.currentAction = 'headpat';
+    setTimeout(() => {
+      if (this.currentAction === 'headpat') this.currentAction = 'idle';
+    }, 2000);
+  }
+
+  claimDailyGift() {
+    const today = todayStr();
+    if (this.petData.lastDailyGift === today) return false;
+    this.petData = {
+      ...this.petData,
+      coins: this.petData.coins + 50,
+      lastDailyGift: today,
+    };
+    return true;
+  }
+
+  startPomodoro(durationMin: number = 25) {
+    const duration = durationMin * 60;
+    this.pomodoro = {
+      active: true,
+      duration,
+      remaining: duration,
+      startedAt: Date.now(),
+    };
+    this.petData = { ...this.petData, pomodoroCoins: 0 };
+    this.currentAction = 'work';
+
+    this.pomodoroInterval = setInterval(() => {
+      if (!this.pomodoro || !this.pomodoro.active) return;
+      const elapsed = Math.floor((Date.now() - this.pomodoro.startedAt) / 1000);
+      const remaining = Math.max(0, this.pomodoro.duration - elapsed);
+      const earnedCoins = Math.floor(elapsed / 60) * POMODORO_COINS_PER_MIN;
+
+      this.pomodoro = { ...this.pomodoro, remaining };
+      this.petData = { ...this.petData, pomodoroCoins: earnedCoins };
+
+      if (remaining <= 0) {
+        this.stopPomodoro();
+      }
+    }, 1000);
+  }
+
+  stopPomodoro() {
+    if (this.pomodoroInterval) {
+      clearInterval(this.pomodoroInterval);
+      this.pomodoroInterval = null;
+    }
+    if (this.pomodoro) {
+      this.petData = {
+        ...this.petData,
+        coins: this.petData.coins + this.petData.pomodoroCoins,
+        pomodoroCoins: 0,
+      };
+    }
+    this.pomodoro = null;
+    this.currentAction = 'idle';
+  }
+
+  setAction(action: PetAction) {
+    this.currentAction = action;
+  }
+
+  loadPetData(data: PetData) {
+    this.petData = data;
+    this.applyDecay();
+  }
+
+  defaultPetData = defaultPetData;
 }
 
-function setAction(action: PetAction) {
-  currentAction = action;
-}
-
-function loadPetData(data: PetData) {
-  petData = data;
-  applyDecay();
-}
-
-export const petStore = {
-  get petData() { return petData; },
-  get currentAction() { return currentAction; },
-  get pomodoro() { return pomodoro; },
-  applyFeed,
-  applyHeadpat,
-  applyDecay,
-  claimDailyGift,
-  startPomodoro,
-  stopPomodoro,
-  setAction,
-  loadPetData,
-  defaultPetData,
-};
+export const petStore = new PetStore();

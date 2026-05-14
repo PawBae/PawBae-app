@@ -1,17 +1,19 @@
 <script lang="ts">
+  interface VoiceBubbleProps {
+    visible?: boolean;
+    text?: string;
+    recording?: boolean;
+    error?: string;
+    petMode?: boolean;
+  }
+
   let {
     visible = false,
     text = '',
     recording = false,
     error = '',
     petMode = false,
-  }: {
-    visible?: boolean;
-    text?: string;
-    recording?: boolean;
-    error?: string;
-    petMode?: boolean;
-  } = $props();
+  }: VoiceBubbleProps = $props();
 
   const show = $derived(visible && (recording || text || error));
 </script>

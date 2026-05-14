@@ -1,10 +1,16 @@
 <script lang="ts">
-  export interface UpdateModalInfo {
-    current: string;
-    latest: string;
-    hasUpdate: boolean;
-    url?: string;
-    notes?: string;
+  import type { UpdateModalInfo } from '../types';
+
+  interface UpdateModalProps {
+    open?: boolean;
+    phase?: 'available' | 'downloading' | 'ready_to_restart';
+    info?: UpdateModalInfo | null;
+    progress?: number | null;
+    progressStage?: string;
+    onLater: () => void;
+    onSkipVersion: () => void;
+    onUpdateNow: () => void;
+    onRestartNow: () => void;
   }
 
   let {
@@ -17,17 +23,7 @@
     onSkipVersion,
     onUpdateNow,
     onRestartNow,
-  }: {
-    open?: boolean;
-    phase?: 'available' | 'downloading' | 'ready_to_restart';
-    info?: UpdateModalInfo | null;
-    progress?: number | null;
-    progressStage?: string;
-    onLater: () => void;
-    onSkipVersion: () => void;
-    onUpdateNow: () => void;
-    onRestartNow: () => void;
-  } = $props();
+  }: UpdateModalProps = $props();
 
   const noteLines = $derived(
     info?.notes?.split('\n').filter((l) => l.trim()) || []

@@ -1,6 +1,18 @@
 <script lang="ts">
   import SpritePet from './SpritePet.svelte';
-  import type { CodexPet, CodexPetState } from './codexPet';
+  import type { CodexPet, CodexPetState } from '../utils/codex-pet';
+
+  interface MiniPetMascotProps {
+    pet: CodexPet;
+    baseState: CodexPetState;
+    size: number;
+    enableHoverJump?: boolean;
+    externalHover?: boolean;
+    useExternalHover?: boolean;
+    suppressHover?: boolean;
+    class?: string;
+    style?: string;
+  }
 
   let {
     pet,
@@ -12,17 +24,7 @@
     suppressHover = false,
     class: className = '',
     style = '',
-  }: {
-    pet: CodexPet;
-    baseState: CodexPetState;
-    size: number;
-    enableHoverJump?: boolean;
-    externalHover?: boolean;
-    useExternalHover?: boolean;
-    suppressHover?: boolean;
-    class?: string;
-    style?: string;
-  } = $props();
+  }: MiniPetMascotProps = $props();
 
   let internalHover = $state(false);
   let showJump = $state(false);

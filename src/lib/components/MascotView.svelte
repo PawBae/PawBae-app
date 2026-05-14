@@ -3,25 +3,27 @@
   import { listen } from '@tauri-apps/api/event';
   import MiniPetMascot from './MiniPetMascot.svelte';
   import VoiceBubble from './VoiceBubble.svelte';
-  import type { CodexPet, CodexPetState } from './codexPet';
-  import { petStateToCodexState } from './codexPet';
-  import { createPhysicsLoop } from './petPhysics';
-  import { windowStore } from './stores/window.svelte';
-  import { petStore } from './stores/pet.svelte';
-  import { agentStore } from './stores/agents.svelte';
-  import { settingsStore } from './stores/settings.svelte';
+  import type { CodexPet, CodexPetState } from '../utils/codex-pet';
+  import { petStateToCodexState } from '../utils/codex-pet';
+  import { createPhysicsLoop } from '../utils/pet-physics';
+  import { windowStore } from '../stores/window.svelte';
+  import { petStore } from '../stores/pet.svelte';
+  import { agentStore } from '../stores/agents.svelte';
+  import { settingsStore } from '../stores/settings.svelte';
+
+  interface MascotViewProps {
+    pet: CodexPet | null;
+    voiceRecording?: boolean;
+    voiceText?: string;
+    voiceError?: string;
+  }
 
   let {
     pet,
     voiceRecording = false,
     voiceText = '',
     voiceError = '',
-  }: {
-    pet: CodexPet | null;
-    voiceRecording?: boolean;
-    voiceText?: string;
-    voiceError?: string;
-  } = $props();
+  }: MascotViewProps = $props();
 
   const isWindows = typeof navigator !== 'undefined' && navigator.userAgent.includes('Windows');
 
@@ -45,11 +47,17 @@
     if (!isWindows) {
       invoke('set_efficiency_hover_tracking', { active: true }).catch(() => {});
     }
-    const unlisten = listen<boolean>('mini-mascot-hover', (e) => {
+    let disposed = false;
+    let unlisten: (() => void) | null = null;
+    listen<boolean>('mini-mascot-hover', (e) => {
       windowStore.setMascotHover(e.payload);
+    }).then((u) => {
+      if (disposed) u();
+      else unlisten = u;
     });
     return () => {
-      unlisten.then((u) => u());
+      disposed = true;
+      unlisten?.();
       if (!isWindows) {
         invoke('set_efficiency_hover_tracking', { active: false }).catch(() => {});
       }
@@ -75,24 +83,33 @@
       physicsSprite = loop.spriteName;
     }, 30);
 
-    const unlisteners: Promise<() => void>[] = [
-      listen('mini-mascot-drag-start', () => {
-        loop.setPinched(true);
-      }),
-      listen('mini-mascot-drag-end', () => {
-        loop.setPinched(false);
-      }),
-      listen<{ vx: number; vy: number }>('mini-mascot-drag-throw', (e) => {
-        loop.setPinched(false);
-        loop.beginThrow(e.payload.vx, e.payload.vy);
-      }),
-    ];
+    let disposed = false;
+    const listenerCleanups: (() => void)[] = [];
+
+    function addListener<T>(event: string, handler: (e: { payload: T }) => void) {
+      listen<T>(event, handler).then((u) => {
+        if (disposed) u();
+        else listenerCleanups.push(u);
+      });
+    }
+
+    addListener('mini-mascot-drag-start', () => {
+      loop.setPinched(true);
+    });
+    addListener('mini-mascot-drag-end', () => {
+      loop.setPinched(false);
+    });
+    addListener<{ vx: number; vy: number }>('mini-mascot-drag-throw', (e) => {
+      loop.setPinched(false);
+      loop.beginThrow(e.payload.vx, e.payload.vy);
+    });
 
     return () => {
+      disposed = true;
       loop.stop();
       clearInterval(spriteInterval);
       physicsSprite = null;
-      for (const p of unlisteners) p.then((u) => u());
+      for (const fn of listenerCleanups) fn();
       invoke('set_stroll_mode', { enabled: false }).catch(() => {});
       invoke('set_throw_tracking', { enabled: false }).catch(() => {});
     };
