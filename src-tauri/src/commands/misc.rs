@@ -1,9 +1,4 @@
-//! Miscellaneous Tauri commands extracted from `lib.rs` during Phase 3.
-//!
-//! Pure relocation, zero behavior change. Each command's body is identical
-//! to its `lib.rs` original; only the visibility was widened to `pub` so
-//! `tauri::generate_handler!` in `lib.rs` can resolve the names via
-//! `use crate::commands::*;`.
+//! Miscellaneous Tauri commands.
 
 #[cfg(target_os = "macos")]
 use std::sync::atomic::Ordering;
@@ -17,7 +12,7 @@ use crate::state::STROLL_MODE_ENABLED;
 
 #[tauri::command]
 pub fn update_tray_language(app: tauri::AppHandle, lang: String) -> Result<(), String> {
-    let (show_label, hide_label, stroll_label, settings_label, quit_label) = crate::tray_labels(&lang);
+    let (show_label, hide_label, stroll_label, settings_label, quit_label) = crate::tray::tray_labels(&lang);
     let _ = stroll_label;
     let show = MenuItem::with_id(&app, "show", show_label, true, None::<&str>).map_err(|e| e.to_string())?;
     let hide = MenuItem::with_id(&app, "hide", hide_label, true, None::<&str>).map_err(|e| e.to_string())?;

@@ -3,8 +3,25 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+use tauri::Manager;
+
 use crate::commands::hook::process_claude_event;
 use crate::state::{ClaudeSession, ClaudeState, PendingPermissions};
+
+/// Spawn the Claude IPC socket server and (on non-Windows) the Cursor socket server.
+pub(crate) fn init(app: &tauri::App) {
+    let claude_state = app.state::<ClaudeState>();
+    let sessions_arc = Arc::clone(&claude_state.sessions);
+    let pending_arc = Arc::clone(&claude_state.pending_permissions);
+    start_claude_socket_server(sessions_arc, pending_arc, app.handle().clone());
+
+    // Cursor integration is disabled on Windows, so skip the server there.
+    #[cfg(not(target_os = "windows"))]
+    {
+        let sessions_arc = Arc::clone(&claude_state.sessions);
+        start_cursor_socket_server(sessions_arc, app.handle().clone());
+    }
+}
 
 #[tauri::command]
 pub async fn resolve_claude_permission(

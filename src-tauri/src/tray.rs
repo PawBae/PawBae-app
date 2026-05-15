@@ -11,12 +11,21 @@ use tauri::{Emitter, Manager};
 
 #[cfg(target_os = "macos")]
 use crate::state::{STROLL_MODE_ENABLED, THROW_TRACKING_ENABLED};
-use crate::tray_labels;
 
 #[cfg(target_os = "windows")]
 use crate::state::FULLSCREEN_HIDING;
 #[cfg(target_os = "windows")]
-use crate::win_ui_scale;
+use crate::platform::windows::win_ui_scale;
+
+// Tray label tuple: (show, hide, stroll, settings, quit). The `stroll` slot is
+// populated for every language but only inserted into the tray menu on
+// macOS — Phase 2 pet physics is currently macOS-only.
+pub(crate) fn tray_labels(lang: &str) -> (&'static str, &'static str, &'static str, &'static str, &'static str) {
+    match lang {
+        "zh" => ("显示", "隐藏", "散步模式", "设置", "退出"),
+        _ => ("Show", "Hide", "Stroll Mode", "Settings", "Quit"),
+    }
+}
 
 pub(crate) fn init<R: tauri::Runtime>(app: &mut tauri::App<R>) -> tauri::Result<()> {
     // System tray — use saved language, fallback to system language

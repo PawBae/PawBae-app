@@ -1,6 +1,4 @@
 //! Module-scope statics, managed-state types, and shared global helpers.
-//!
-//! Extracted from `lib.rs` during the Phase 1 modular refactor (pure relocation).
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
