@@ -718,6 +718,7 @@ fn _get_system_now_playing_is_playing_unused() -> Option<bool> {
         unsafe extern "C" fn(DispatchQueue, &block2::Block<dyn Fn(*const c_void)>);
     type DispatchGetGlobalQueueFn = unsafe extern "C" fn(isize, usize) -> DispatchQueue;
 
+    #[allow(dead_code, clashing_extern_declarations)]
     #[link(name = "CoreFoundation", kind = "framework")]
     unsafe extern "C" {
         fn CFDictionaryGetValue(dict: *const c_void, key: *const c_void) -> *const c_void;
@@ -1083,6 +1084,7 @@ fn is_audio_output_active() -> bool {
         element: u32,
     }
 
+    #[allow(dead_code)]
     #[link(name = "CoreAudio", kind = "framework")]
     unsafe extern "C" {
         fn AudioObjectGetPropertyData(
