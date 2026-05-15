@@ -21,16 +21,16 @@ mod session_watcher;
 mod socket;
 use crate::socket::resolve_claude_permission;
 
-mod ssh;
-pub(crate) use crate::ssh::{
+mod ssh_core;
+pub(crate) use crate::ssh_core::{
     close_ssh_master, ssh_backoff_reset, ssh_exec, ssh_is_agent_active, ssh_read_file,
 };
 
 mod lsof;
 pub(crate) use crate::lsof::{lsof_active_agents, lsof_open_jsonl_paths};
 
-mod agent;
-pub(crate) use crate::agent::{
+mod agent_gateway;
+pub(crate) use crate::agent_gateway::{
     build_agent_health_from_meta, check_agent_active_from_lines, extract_sessions, invoke_tool,
     is_remote_session_active, is_session_active, remote_sessions_json_path, sessions_json_path,
 };
@@ -44,8 +44,8 @@ pub(crate) use crate::mascot::{
 #[cfg(target_os = "macos")]
 pub(crate) use crate::mascot::{collapsed_x, current_sprite_pad};
 
-mod pet;
-pub(crate) use crate::pet::{
+mod pet_core;
+pub(crate) use crate::pet_core::{
     efficiency_hover_poll, is_codex_internal_utility_session, reassert_mini_floating,
 };
 
