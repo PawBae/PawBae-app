@@ -5,12 +5,15 @@
 //! `generate_handler!` macro in lib.rs continues to reference them by
 //! unqualified name.
 
+pub mod agent;
 pub mod codex_pet;
 pub mod media;
 pub mod misc;
 pub mod ssh;
 pub mod update;
 
+#[allow(unused_imports)]
+pub use agent::*;
 #[allow(unused_imports)]
 pub use codex_pet::*;
 #[allow(unused_imports)]
