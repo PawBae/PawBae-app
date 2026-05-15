@@ -41,6 +41,8 @@ pub(crate) use crate::mascot::{
     COLLAPSED_MASCOT_BASE_H, COLLAPSED_MASCOT_BASE_W, LARGE_MASCOT_SIZE_MULTIPLIER,
     MASCOT_TOP_INSET,
 };
+#[cfg(target_os = "macos")]
+pub(crate) use crate::mascot::{collapsed_x, current_sprite_pad};
 
 mod pet;
 pub(crate) use crate::pet::{
