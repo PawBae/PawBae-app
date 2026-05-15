@@ -42,7 +42,7 @@ pub(crate) fn claude_session_file_path(session_id: &str, cwd: &str) -> PathBuf {
     #[cfg(windows)]
     let project_dir = cwd.replace(['/', '\\', ':', '.'], "-");
     #[cfg(not(windows))]
-    let project_dir = cwd.replace('/', "-").replace('.', "-");
+    let project_dir = cwd.replace(['/', '.'], "-");
     home.join(".claude")
         .join("projects")
         .join(project_dir)

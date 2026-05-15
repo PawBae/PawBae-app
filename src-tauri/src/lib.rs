@@ -39,9 +39,6 @@ mod terminal;
 #[cfg(target_os = "macos")]
 mod speech;
 
-#[cfg(unix)]
-use libc;
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     setup::init_webview2_env();

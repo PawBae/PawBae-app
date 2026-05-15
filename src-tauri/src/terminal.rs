@@ -1,8 +1,5 @@
 //! Terminal/frontmost-app detection helpers.
 
-#[cfg(unix)]
-use libc;
-
 /// Check whether a process with the given PID is still alive.
 /// Uses kill(pid, 0) on Unix — a zero-cost syscall that checks existence
 /// without sending any signal. On Windows, uses OpenProcess.

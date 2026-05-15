@@ -1,6 +1,8 @@
 //! lsof-based active-agent / active-jsonl detection (Unix); modtime fallback on Windows.
 
+#[cfg(windows)]
 use std::path::PathBuf;
+#[cfg(windows)]
 use std::time::SystemTime;
 
 use crate::app_init::home_dir_string;

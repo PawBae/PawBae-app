@@ -225,6 +225,7 @@ pub async fn close_mini(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 #[tauri::command]
+#[allow(unused_variables)]
 pub async fn get_ui_scale(app: tauri::AppHandle) -> Result<f64, String> {
     #[cfg(target_os = "windows")]
     {
@@ -707,7 +708,7 @@ pub async fn set_mini_expanded(
                     }
                     let (final_x, final_y, final_w, final_h) = if expanded {
                         let win_w = if efficiency.unwrap_or(false) { 600.0 } else { 500.0 };
-                        let win_h = max_height.unwrap_or(350.0).max(200.0).min(500.0);
+                        let win_h = max_height.unwrap_or(350.0).clamp(200.0, 500.0);
                         let x = sx + (sw - win_w) / 2.0;
                         // Expanded panel hugs the top of the screen (its window
                         // level is high enough to draw over the menu bar). The
@@ -734,7 +735,7 @@ pub async fn set_mini_expanded(
                         } else {
                             collapsed_mascot_window_size(mascot_scale)
                         };
-                        let (mut x, mut y) = if keep_position.unwrap_or(false) {
+                        let (x, mut y) = if keep_position.unwrap_or(false) {
                             let cur: NSRect = unsafe { msg_send![obj, frame] };
                             (cur.origin.x, cur.origin.y + cur.size.height - win_h)
                         } else if large_mascot.unwrap_or(false) {
@@ -1022,7 +1023,7 @@ pub async fn set_mini_size(
                                     // queue with a
                                     // short delay lets the compositor
                                     // finish compositing the new frame.
-                                    pet_context_schedule_restore_alpha(ns_win as *mut std::ffi::c_void);
+                                    pet_context_schedule_restore_alpha(ns_win);
                                     return;
                                 }
                             }
@@ -1050,7 +1051,7 @@ pub async fn set_mini_size(
                             if let Ok(mut f) = MINI_WINDOW_FRAME.lock() {
                                 *f = Some((x, y, target_w, target_h));
                             }
-                            pet_context_schedule_restore_alpha(ns_win as *mut std::ffi::c_void);
+                            pet_context_schedule_restore_alpha(ns_win);
                             return;
                         } else {
                             let current: NSRect = unsafe { msg_send![obj, frame] };
@@ -1084,7 +1085,7 @@ pub async fn set_mini_size(
                             if let Ok(mut f) = MINI_WINDOW_FRAME.lock() {
                                 *f = Some((x, y, win_w, win_h));
                             }
-                            pet_context_schedule_restore_alpha(ns_win as *mut std::ffi::c_void);
+                            pet_context_schedule_restore_alpha(ns_win);
                             return;
                         }
                     }

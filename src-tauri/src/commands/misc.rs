@@ -143,13 +143,14 @@ pub async fn check_ax_permission() -> Result<bool, String> {
 pub async fn request_ax_permission() -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
-        use std::ffi::c_void;
+        use std::ffi::{c_char, c_void};
 
+        #[allow(clashing_extern_declarations)]
         #[link(name = "CoreFoundation", kind = "framework")]
         extern "C" {
             fn CFStringCreateWithCString(
                 alloc: *const c_void,
-                c_str: *const u8,
+                c_str: *const c_char,
                 encoding: u32,
             ) -> *const c_void;
             fn CFDictionaryCreate(
@@ -174,7 +175,7 @@ pub async fn request_ax_permission() -> Result<(), String> {
         unsafe {
             let key = CFStringCreateWithCString(
                 std::ptr::null(),
-                b"AXTrustedCheckOptionPrompt\0".as_ptr(),
+                c"AXTrustedCheckOptionPrompt".as_ptr(),
                 0x08000100, // kCFStringEncodingUTF8
             );
             let keys = [key];

@@ -110,7 +110,7 @@ pub(crate) fn init(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error
         let _ = app.handle().run_on_main_thread(move || {
             use objc2::msg_send;
             use objc2::runtime::AnyObject;
-            use objc2_foundation::{NSPoint, NSRect, NSSize};
+            use objc2_foundation::NSRect;
 
             if let Ok(ns_win) = win_clone.ns_window() {
                 let obj = unsafe { &*(ns_win as *mut AnyObject) };

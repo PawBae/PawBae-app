@@ -49,9 +49,12 @@ mod cg_window {
     pub type CFIndex = isize;
 
     #[link(name = "CoreGraphics", kind = "framework")]
-    #[link(name = "CoreFoundation", kind = "framework")]
     extern "C" {
         pub fn CGWindowListCopyWindowInfo(option: u32, relative_to_window: u32) -> CFArrayRef;
+    }
+
+    #[link(name = "CoreFoundation", kind = "framework")]
+    extern "C" {
         pub fn CFArrayGetCount(arr: CFArrayRef) -> CFIndex;
         pub fn CFArrayGetValueAtIndex(arr: CFArrayRef, idx: CFIndex) -> CFTypeRef;
         pub fn CFDictionaryGetValue(d: CFDictionaryRef, key: CFTypeRef) -> CFTypeRef;
@@ -350,6 +353,7 @@ unsafe fn compute_dock_rect_macos() -> Option<(f64, f64, f64, f64)> {
 #[allow(dead_code)]
 fn get_cached_dock_rect_macos() -> Option<(f64, f64, f64, f64)> {
     use std::time::{Duration, Instant};
+    #[allow(clippy::type_complexity)]
     static CACHE: std::sync::Mutex<Option<(Instant, Option<(f64, f64, f64, f64)>)>> =
         std::sync::Mutex::new(None);
     const TTL: Duration = Duration::from_millis(500);
@@ -671,6 +675,7 @@ const MUSIC_APP_BIDS: &[&str] = &[
 pub(crate) fn is_music_app(bid: &str) -> bool {
     MUSIC_APP_BIDS.iter().any(|m| bid.contains(m))
 }
+#[allow(dead_code, clashing_extern_declarations)]
 fn is_music_app_running() -> bool {
     let script = r#"
         set musicBids to {"com.apple.music", "com.spotify.client", "com.netease.163music", "com.tencent.qqmusic", "com.kugou", "com.kuwo", "com.xiami.client", "com.apple.itunes", "com.soda.music", "com.bytedance.soda.music"}
@@ -1058,6 +1063,7 @@ fn _get_system_now_playing_is_playing_unused() -> Option<bool> {
 }
 /// Check if the default audio output device has any audio running.
 /// Used only as a tie-breaker for ambiguous MediaRemote states.
+#[allow(dead_code)]
 fn is_audio_output_active() -> bool {
     #[allow(non_upper_case_globals)]
     const kAudioHardwarePropertyDefaultOutputDevice: u32 = u32::from_be_bytes(*b"dOut");

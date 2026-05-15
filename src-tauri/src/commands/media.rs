@@ -1,9 +1,6 @@
 //! Tauri media commands: system idle time, now-playing detection, system sound playback.
 
 #[cfg(target_os = "macos")]
-use tauri::Manager;
-
-#[cfg(target_os = "macos")]
 use crate::platform::macos::{
     get_frontmost_bundle_id, is_any_music_app_playing, is_browser, is_music_app, is_video_app,
     nowplaying_cli_status,

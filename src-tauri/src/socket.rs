@@ -145,20 +145,18 @@ pub(crate) fn start_cursor_socket_server(
         let state = Arc::clone(&claude_state);
         let app2 = app.clone();
         std::thread::spawn(move || {
-            for stream in listener.incoming() {
-                if let Ok(mut stream) = stream {
-                    let state = Arc::clone(&state);
-                    let app = app2.clone();
-                    std::thread::spawn(move || {
-                        use std::io::Read;
-                        let mut buf = String::new();
-                        let _ = stream.read_to_string(&mut buf);
-                        if !buf.is_empty() {
-                            // Cursor events never block (no PermissionRequest)
-                            process_claude_event(&buf, &state, &app, Some("cursor"));
-                        }
-                    });
-                }
+            for mut stream in listener.incoming().flatten() {
+                let state = Arc::clone(&state);
+                let app = app2.clone();
+                std::thread::spawn(move || {
+                    use std::io::Read;
+                    let mut buf = String::new();
+                    let _ = stream.read_to_string(&mut buf);
+                    if !buf.is_empty() {
+                        // Cursor events never block (no PermissionRequest)
+                        process_claude_event(&buf, &state, &app, Some("cursor"));
+                    }
+                });
             }
         });
     }

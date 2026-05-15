@@ -5,8 +5,6 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use tauri::Emitter;
-#[cfg(target_os = "macos")]
-use tauri::Manager;
 
 use crate::cursor::{cwd_matches_workspace_root, resolve_cursor_window_binding};
 use crate::jsonl_paths::resolve_session_jsonl_path;

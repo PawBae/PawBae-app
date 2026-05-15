@@ -319,7 +319,7 @@ pub async fn set_pet_mode_window(
                             Some((sf.origin.x, sf.origin.y, sf.size.width, sf.size.height))
                         }
                     };
-                    if let Some((sx, sy, sw, sh)) = screen_info {
+                    if let Some((sx, _sy, sw, sh)) = screen_info {
                         let left_pad = 180.0;
                         let top_pad = 100.0;
                         let win_w = (current.size.width + left_pad).min(sw);
@@ -511,7 +511,7 @@ pub async fn set_pet_context_menu(
                                 current.size.height,
                             ));
                         }
-                        pet_context_schedule_restore_alpha(ns_win as *mut std::ffi::c_void);
+                        pet_context_schedule_restore_alpha(ns_win);
                     }
                     let _ = tx.send(());
                 });
@@ -544,7 +544,7 @@ pub async fn set_pet_context_menu(
                                     *f = Some((current.origin.x, current.origin.y, w, h));
                                 }
                                 *saved = None;
-                                pet_context_schedule_restore_alpha(ns_win as *mut std::ffi::c_void);
+                                pet_context_schedule_restore_alpha(ns_win);
                             }
                         }
                     }
