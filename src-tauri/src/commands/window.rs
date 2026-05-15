@@ -2,19 +2,20 @@
 
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 
-use crate::state::MINI_WINDOW_FRAME;
-use crate::{
-    collapsed_mascot_window_size, large_collapsed_mascot_window_size, reassert_mini_floating,
-    sanitized_mascot_scale, COLLAPSED_MASCOT_BASE_H, COLLAPSED_MASCOT_BASE_W,
-    LARGE_MASCOT_SIZE_MULTIPLIER, MASCOT_TOP_INSET,
+use crate::mascot::{
+    collapsed_mascot_window_size, large_collapsed_mascot_window_size, sanitized_mascot_scale,
+    COLLAPSED_MASCOT_BASE_H, COLLAPSED_MASCOT_BASE_W, LARGE_MASCOT_SIZE_MULTIPLIER,
+    MASCOT_TOP_INSET,
 };
+use crate::pet_core::reassert_mini_floating;
+use crate::state::MINI_WINDOW_FRAME;
 
 #[cfg(target_os = "macos")]
-use crate::state::{EFFICIENCY_EXPANDED, NOTCH_SCREEN_INFO, PET_MENU_RESTORE_FRAME};
+use crate::mascot::{collapsed_x, current_sprite_pad};
 #[cfg(target_os = "macos")]
-use crate::{
-    collapsed_x, current_sprite_pad, get_notch_offset, pet_context_schedule_restore_alpha,
-};
+use crate::platform::macos::{get_notch_offset, pet_context_schedule_restore_alpha};
+#[cfg(target_os = "macos")]
+use crate::state::{EFFICIENCY_EXPANDED, NOTCH_SCREEN_INFO, PET_MENU_RESTORE_FRAME};
 #[cfg(target_os = "macos")]
 use std::sync::atomic::Ordering;
 

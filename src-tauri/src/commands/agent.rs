@@ -4,13 +4,14 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use crate::state::{ActiveAgentPid, SessionInfo};
-use crate::{
-    build_agent_health_from_meta, check_agent_active_from_lines, extract_sessions, home_dir_string,
-    invoke_tool, is_remote_session_active, is_session_active, lsof_active_agents,
-    lsof_open_jsonl_paths, remote_sessions_json_path, sessions_json_path, ssh_exec,
-    ssh_is_agent_active, ssh_read_file,
+use crate::agent_gateway::{
+    build_agent_health_from_meta, check_agent_active_from_lines, extract_sessions, invoke_tool,
+    is_remote_session_active, is_session_active, remote_sessions_json_path, sessions_json_path,
 };
+use crate::app_init::home_dir_string;
+use crate::lsof::{lsof_active_agents, lsof_open_jsonl_paths};
+use crate::ssh_core::{ssh_exec, ssh_is_agent_active, ssh_read_file};
+use crate::state::{ActiveAgentPid, SessionInfo};
 
 #[cfg(target_os = "windows")]
 use crate::platform::windows::{hide_window_tokio_cmd, tail_lines_from_file};

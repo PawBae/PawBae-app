@@ -21,79 +21,21 @@ mod session_watcher;
 mod socket;
 use crate::socket::resolve_claude_permission;
 
-mod ssh_core;
-pub(crate) use crate::ssh_core::{
-    close_ssh_master, ssh_backoff_reset, ssh_exec, ssh_is_agent_active, ssh_read_file,
-};
-
-mod lsof;
-pub(crate) use crate::lsof::{lsof_active_agents, lsof_open_jsonl_paths};
-
 mod agent_gateway;
-pub(crate) use crate::agent_gateway::{
-    build_agent_health_from_meta, check_agent_active_from_lines, extract_sessions, invoke_tool,
-    is_remote_session_active, is_session_active, remote_sessions_json_path, sessions_json_path,
-};
-
-mod mascot;
-pub(crate) use crate::mascot::{
-    collapsed_mascot_window_size, large_collapsed_mascot_window_size, sanitized_mascot_scale,
-    COLLAPSED_MASCOT_BASE_H, COLLAPSED_MASCOT_BASE_W, LARGE_MASCOT_SIZE_MULTIPLIER,
-    MASCOT_TOP_INSET,
-};
-#[cfg(target_os = "macos")]
-pub(crate) use crate::mascot::{collapsed_x, current_sprite_pad};
-
-mod pet_core;
-pub(crate) use crate::pet_core::{
-    efficiency_hover_poll, is_codex_internal_utility_session, reassert_mini_floating,
-};
-
-mod jsonl_paths;
-pub(crate) use crate::jsonl_paths::{
-    collect_claude_project_jsonl_files, collect_codex_session_jsonl_files,
-    resolve_session_jsonl_path,
-};
-
-mod terminal;
-pub(crate) use crate::terminal::{
-    frontmost_matches_host_terminal, is_codex_frontmost_app, is_codex_host_terminal,
-    is_cursor_frontmost_app, is_pid_alive,
-};
-#[cfg(not(target_os = "macos"))]
-pub(crate) use crate::terminal::{get_active_ghostty_terminal_id, get_frontmost_app_name};
-
 mod app_init;
-pub(crate) use crate::app_init::home_dir_string;
-
+mod jsonl_paths;
+mod lsof;
+mod mascot;
+mod pet_core;
 mod setup;
+mod ssh_core;
+mod terminal;
 
 #[cfg(target_os = "macos")]
 mod speech;
 
 #[cfg(unix)]
 use libc;
-
-#[cfg(target_os = "macos")]
-pub(crate) use crate::platform::macos::check_accessibility_permission;
-
-#[cfg(not(target_os = "macos"))]
-pub(crate) fn check_accessibility_permission() -> bool {
-    true
-}
-
-// Re-export Windows helpers that command modules reach via `crate::*`.
-#[cfg(target_os = "windows")]
-pub(crate) use crate::platform::windows::hide_window_cmd;
-
-// Re-export macOS-only helpers that command modules reach via `crate::*`.
-#[cfg(target_os = "macos")]
-pub(crate) use crate::platform::macos::{
-    activate_cursor_workspace_window, compute_frontmost_app_window_macos,
-    find_terminal_app_for_pid, frontmost_app_window_cache, get_active_ghostty_terminal_id,
-    get_frontmost_app_name, get_notch_offset, get_tty_for_pid, pet_context_schedule_restore_alpha,
-    pet_passthrough_poll,
-};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {

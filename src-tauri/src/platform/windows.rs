@@ -3,7 +3,7 @@
 use std::sync::atomic::Ordering;
 use tauri::Manager;
 
-use crate::large_collapsed_mascot_window_size;
+use crate::mascot::large_collapsed_mascot_window_size;
 #[allow(unused_imports)]
 use crate::platform::common::*;
 #[allow(unused_imports)]

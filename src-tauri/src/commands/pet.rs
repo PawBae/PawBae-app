@@ -11,13 +11,14 @@ use crate::state::{
     PET_PASSTHROUGH_THREAD_ALIVE, PET_POMODORO_ACTIVE, SPRITE_PAD, STROLL_MODE_ENABLED,
     THROW_TRACKING_ENABLED,
 };
-use crate::{
-    efficiency_hover_poll, large_collapsed_mascot_window_size, sanitized_mascot_scale,
-    LARGE_MASCOT_SIZE_MULTIPLIER, MASCOT_TOP_INSET,
+use crate::mascot::{
+    large_collapsed_mascot_window_size, sanitized_mascot_scale, LARGE_MASCOT_SIZE_MULTIPLIER,
+    MASCOT_TOP_INSET,
 };
+use crate::pet_core::efficiency_hover_poll;
 
 #[cfg(target_os = "macos")]
-use crate::{
+use crate::platform::macos::{
     compute_frontmost_app_window_macos, frontmost_app_window_cache,
     pet_context_schedule_restore_alpha, pet_passthrough_poll,
 };

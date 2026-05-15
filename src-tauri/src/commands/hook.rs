@@ -12,14 +12,19 @@ use crate::cursor::{cwd_matches_workspace_root, resolve_cursor_window_binding};
 use crate::session_watcher::{
     start_session_file_watcher, stop_event_was_interrupted, stop_session_file_watcher,
 };
+use crate::jsonl_paths::resolve_session_jsonl_path;
 use crate::state::ClaudeSession;
-use crate::{
-    frontmost_matches_host_terminal, get_active_ghostty_terminal_id, get_frontmost_app_name,
-    is_codex_frontmost_app, is_cursor_frontmost_app, resolve_session_jsonl_path,
+use crate::terminal::{
+    frontmost_matches_host_terminal, is_codex_frontmost_app, is_cursor_frontmost_app,
 };
-
 #[cfg(target_os = "macos")]
-use crate::{find_terminal_app_for_pid, is_codex_host_terminal};
+use crate::platform::macos::{
+    find_terminal_app_for_pid, get_active_ghostty_terminal_id, get_frontmost_app_name,
+};
+#[cfg(target_os = "macos")]
+use crate::terminal::is_codex_host_terminal;
+#[cfg(not(target_os = "macos"))]
+use crate::terminal::{get_active_ghostty_terminal_id, get_frontmost_app_name};
 
 #[tauri::command]
 pub async fn install_claude_hooks() -> Result<(), String> {

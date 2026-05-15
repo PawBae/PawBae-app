@@ -4,16 +4,27 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use crate::state::{ClaudeSession, ClaudeState};
-use crate::{
-    check_agent_active_from_lines, collect_claude_project_jsonl_files,
-    collect_codex_session_jsonl_files, extract_sessions, frontmost_matches_host_terminal,
-    get_active_ghostty_terminal_id, get_frontmost_app_name, home_dir_string, invoke_tool,
-    is_codex_frontmost_app, is_codex_host_terminal, is_codex_internal_utility_session,
-    is_cursor_frontmost_app, is_pid_alive, is_remote_session_active, is_session_active,
-    lsof_open_jsonl_paths, remote_sessions_json_path, resolve_session_jsonl_path,
-    sessions_json_path, ssh_exec, ssh_read_file,
+use crate::agent_gateway::{
+    check_agent_active_from_lines, extract_sessions, invoke_tool, is_remote_session_active,
+    is_session_active, remote_sessions_json_path, sessions_json_path,
 };
+use crate::app_init::home_dir_string;
+use crate::jsonl_paths::{
+    collect_claude_project_jsonl_files, collect_codex_session_jsonl_files,
+    resolve_session_jsonl_path,
+};
+use crate::lsof::lsof_open_jsonl_paths;
+use crate::pet_core::is_codex_internal_utility_session;
+use crate::ssh_core::{ssh_exec, ssh_read_file};
+use crate::state::{ClaudeSession, ClaudeState};
+use crate::terminal::{
+    frontmost_matches_host_terminal, is_codex_frontmost_app, is_codex_host_terminal,
+    is_cursor_frontmost_app, is_pid_alive,
+};
+#[cfg(target_os = "macos")]
+use crate::platform::macos::{get_active_ghostty_terminal_id, get_frontmost_app_name};
+#[cfg(not(target_os = "macos"))]
+use crate::terminal::{get_active_ghostty_terminal_id, get_frontmost_app_name};
 
 #[cfg(target_os = "windows")]
 use crate::platform::windows::tail_lines_from_file;

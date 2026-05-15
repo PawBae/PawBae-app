@@ -5,7 +5,8 @@ use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
 use crate::state::{ssh_backoff_map, ssh_key_map, SshBackoffState};
-use crate::{check_agent_active_from_lines, home_dir_string};
+use crate::agent_gateway::check_agent_active_from_lines;
+use crate::app_init::home_dir_string;
 
 #[cfg(target_os = "windows")]
 use crate::platform::windows::{hide_window_tokio_cmd, win_ssh_mux};

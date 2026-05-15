@@ -26,3 +26,8 @@ pub(crate) struct AppWindowInfo {
     /// Logical points.
     pub(crate) height: f64,
 }
+
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn check_accessibility_permission() -> bool {
+    true
+}

@@ -2,11 +2,16 @@
 
 use std::path::PathBuf;
 
-use crate::check_accessibility_permission;
+#[cfg(target_os = "macos")]
+use crate::platform::macos::check_accessibility_permission;
+#[cfg(not(target_os = "macos"))]
+use crate::platform::common::check_accessibility_permission;
 use crate::state::ClaudeState;
 
 #[cfg(target_os = "macos")]
-use crate::{activate_cursor_workspace_window, find_terminal_app_for_pid, get_tty_for_pid};
+use crate::platform::macos::{
+    activate_cursor_workspace_window, find_terminal_app_for_pid, get_tty_for_pid,
+};
 
 #[derive(Debug, Clone, serde::Deserialize)]
 struct CursorWindowMeta {

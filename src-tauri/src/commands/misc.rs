@@ -87,7 +87,7 @@ pub async fn open_url(url: String) -> Result<(), String> {
         // tab. Hide it.
         let mut cmd = std::process::Command::new("cmd");
         cmd.args(["/C", "start", "", &url]);
-        crate::hide_window_cmd(&mut cmd);
+        crate::platform::windows::hide_window_cmd(&mut cmd);
         cmd.spawn().map_err(|e| e.to_string())?;
     }
     #[cfg(target_os = "linux")]
@@ -128,7 +128,14 @@ pub async fn activate_app(app_name: String) -> Result<String, String> {
 
 #[tauri::command]
 pub async fn check_ax_permission() -> Result<bool, String> {
-    Ok(crate::check_accessibility_permission())
+    #[cfg(target_os = "macos")]
+    {
+        Ok(crate::platform::macos::check_accessibility_permission())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Ok(crate::platform::common::check_accessibility_permission())
+    }
 }
 
 #[tauri::command]

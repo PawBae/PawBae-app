@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 use crate::commands::agent::{AgentHealth, SessionHealth};
-use crate::home_dir_string;
+use crate::app_init::home_dir_string;
 
 /// Generic helper: call OpenClaw remote API via /tools/invoke
 pub(crate) async fn invoke_tool(

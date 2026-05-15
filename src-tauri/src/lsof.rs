@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 use std::time::SystemTime;
 
-use crate::home_dir_string;
+use crate::app_init::home_dir_string;
 
 /// Returns the full set of open .jsonl file paths across all agents.
 /// On macOS/Linux: uses `lsof +D` to detect open files.

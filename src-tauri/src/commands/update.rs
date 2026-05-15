@@ -4,7 +4,7 @@ use std::time::SystemTime;
 use tauri::Emitter;
 
 #[cfg(target_os = "windows")]
-use crate::hide_window_cmd;
+use crate::platform::windows::hide_window_cmd;
 
 /// Check for updates by fetching the version manifest from the official website.
 /// The manifest is a static JSON file hosted on Vercel at /update/latest.json,

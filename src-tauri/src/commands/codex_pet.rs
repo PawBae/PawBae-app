@@ -126,7 +126,7 @@ pub async fn pick_codex_pet_folder(app: tauri::AppHandle) -> Result<Option<Strin
     // The dialog briefly steals focus and the OS can demote our floating
     // mini window back to the normal level. Re-apply always-on-top so the
     // settings panel doesn't visually sink under other apps.
-    crate::reassert_mini_floating(&app);
+    crate::pet_core::reassert_mini_floating(&app);
     Ok(result)
 }
 /// Open `~/.codex/pets` in the platform's file manager. Creates the
