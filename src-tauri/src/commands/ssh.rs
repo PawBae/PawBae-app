@@ -3,8 +3,8 @@
 #[cfg(unix)]
 use std::path::PathBuf;
 
-use crate::state::{ssh_backoff_map, ssh_key_map};
 use crate::ssh_core::{close_ssh_master, ssh_backoff_reset};
+use crate::state::{ssh_backoff_map, ssh_key_map};
 
 #[cfg(target_os = "windows")]
 use crate::platform::windows::win_ssh_mux;

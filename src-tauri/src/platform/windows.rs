@@ -40,10 +40,10 @@ pub(crate) mod win_ssh_mux {
 
     // One multiplexed SSH session per user@host.
     // The TokioMutex serialises commands so marker boundaries never interleave.
-    static MUX_SESSIONS: OnceLock<Mutex<HashMap<String, Arc<TokioMutex<Option<MuxChild>>>>>> =
-        OnceLock::new();
+    type MuxMap = Mutex<HashMap<String, Arc<TokioMutex<Option<MuxChild>>>>>;
+    static MUX_SESSIONS: OnceLock<MuxMap> = OnceLock::new();
 
-    fn mux_map() -> &'static Mutex<HashMap<String, Arc<TokioMutex<Option<MuxChild>>>>> {
+    fn mux_map() -> &'static MuxMap {
         MUX_SESSIONS.get_or_init(|| Mutex::new(HashMap::new()))
     }
 
@@ -208,7 +208,7 @@ pub(crate) mod win_ssh_mux {
         } else if exit_code == 255 {
             // Transport-level failure — mark session dead so it respawns.
             *guard = None;
-            Err(format!("ssh mux transport error (exit 255)"))
+            Err("ssh mux transport error (exit 255)".to_string())
         } else {
             Err(format!(
                 "ssh cmd failed [exit {}]\nstdout: {}",
@@ -292,7 +292,7 @@ pub(crate) fn fullscreen_foreground_monitor() -> Option<windows::Win32::Graphics
     };
     unsafe {
         let fg = GetForegroundWindow();
-        if fg.0 == std::ptr::null_mut() {
+        if fg.0.is_null() {
             return None;
         }
 

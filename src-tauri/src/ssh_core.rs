@@ -4,9 +4,9 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
-use crate::state::{ssh_backoff_map, ssh_key_map, SshBackoffState};
 use crate::agent_gateway::check_agent_active_from_lines;
 use crate::app_init::home_dir_string;
+use crate::state::{ssh_backoff_map, ssh_key_map, SshBackoffState};
 
 #[cfg(target_os = "windows")]
 use crate::platform::windows::{hide_window_tokio_cmd, win_ssh_mux};
@@ -259,7 +259,7 @@ pub(crate) async fn ssh_exec(ssh_host: &str, ssh_user: &str, cmd: &str) -> Resul
     #[cfg(windows)]
     {
         match win_ssh_mux::exec(ssh_user, ssh_host, &safe_cmd).await {
-            Ok(out) => return Ok(out),
+            Ok(out) => Ok(out),
             Err(e)
                 if e.contains("transport error")
                     || e.contains("connection lost")
@@ -272,7 +272,7 @@ pub(crate) async fn ssh_exec(ssh_host: &str, ssh_user: &str, cmd: &str) -> Resul
                 ensure_ssh_master(ssh_host, ssh_user).await?;
                 return win_ssh_mux::exec(ssh_user, ssh_host, &safe_cmd).await;
             }
-            Err(e) => return Err(e),
+            Err(e) => Err(e),
         }
     }
 

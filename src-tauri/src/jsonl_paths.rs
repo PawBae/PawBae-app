@@ -63,12 +63,9 @@ pub(crate) fn collect_codex_session_jsonl_files() -> Vec<PathBuf> {
 
 fn find_claude_session_file(session_id: &str) -> Option<PathBuf> {
     let target = format!("{}.jsonl", session_id);
-    for path in collect_claude_project_jsonl_files() {
-        if path.file_name().and_then(|n| n.to_str()) == Some(target.as_str()) {
-            return Some(path);
-        }
-    }
-    None
+    collect_claude_project_jsonl_files()
+        .into_iter()
+        .find(|path| path.file_name().and_then(|n| n.to_str()) == Some(target.as_str()))
 }
 
 fn find_codex_session_file(session_id: &str) -> Option<PathBuf> {

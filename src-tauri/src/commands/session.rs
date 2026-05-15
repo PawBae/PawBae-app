@@ -15,14 +15,14 @@ use crate::jsonl_paths::{
 };
 use crate::lsof::lsof_open_jsonl_paths;
 use crate::pet_core::is_codex_internal_utility_session;
+#[cfg(target_os = "macos")]
+use crate::platform::macos::{get_active_ghostty_terminal_id, get_frontmost_app_name};
 use crate::ssh_core::{ssh_exec, ssh_read_file};
 use crate::state::{ClaudeSession, ClaudeState};
 use crate::terminal::{
     frontmost_matches_host_terminal, is_codex_frontmost_app, is_codex_host_terminal,
     is_cursor_frontmost_app, is_pid_alive,
 };
-#[cfg(target_os = "macos")]
-use crate::platform::macos::{get_active_ghostty_terminal_id, get_frontmost_app_name};
 #[cfg(not(target_os = "macos"))]
 use crate::terminal::{get_active_ghostty_terminal_id, get_frontmost_app_name};
 
@@ -322,7 +322,7 @@ pub async fn get_agent_sessions(
                     session_file: val["sessionFile"].as_str().map(|s| s.to_string()),
                 })
                 .collect();
-            sessions.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+            sessions.sort_by_key(|s| std::cmp::Reverse(s.updated_at));
             sessions.truncate(5);
             log::info!(
                 "[get_agent_sessions] SSH metadata result: {} sessions (of {} total)",
@@ -367,7 +367,7 @@ pub async fn get_agent_sessions(
                 })
             })
             .collect();
-        sessions.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+        sessions.sort_by_key(|s| std::cmp::Reverse(s.updated_at));
         sessions.truncate(20);
         return Ok(sessions);
     }
@@ -521,7 +521,7 @@ pub async fn get_agent_sessions(
 
     log::info!("[get_agent_sessions] results: {} sessions, skipped: no_file={} read_err={} no_msg={} cron={}, read_ok={}", 
         sessions.len(), skipped_no_file, read_err, skipped_no_msg, skipped_cron, read_ok);
-    sessions.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+    sessions.sort_by_key(|s| std::cmp::Reverse(s.updated_at));
     sessions.truncate(20);
     Ok(sessions)
 }
@@ -1136,7 +1136,7 @@ pub async fn get_claude_sessions(
             }
         }
     }
-    list.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+    list.sort_by_key(|s| std::cmp::Reverse(s.updated_at));
     Ok(list)
 }
 
@@ -1507,8 +1507,8 @@ pub async fn get_claude_stats(source: Option<String>) -> Result<ClaudeStats, Str
         total_output_tokens: total_output,
         total_cache_read_tokens: total_cache_read,
         total_cache_write_tokens: total_cache_write,
-        total_messages: total_messages,
-        total_sessions: total_sessions,
+        total_messages,
+        total_sessions,
         daily_stats,
         model,
     })

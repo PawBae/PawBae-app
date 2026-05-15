@@ -20,6 +20,7 @@ pub(crate) static EFFICIENCY_EXPANDED: AtomicBool = AtomicBool::new(false);
 /// Cached screen geometry for the notch hover poll thread so it doesn't need
 /// to access NSWindow from a background thread.
 /// (screen_x, screen_y, screen_width, screen_height, notch_offset)
+#[allow(clippy::type_complexity)]
 pub(crate) static NOTCH_SCREEN_INFO: Mutex<Option<(f64, f64, f64, f64, f64)>> = Mutex::new(None);
 /// Cached mini window frame (x, y, w, h) in macOS screen coordinates
 /// (bottom-left origin).  Updated by `set_mini_expanded` and

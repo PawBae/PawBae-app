@@ -1,3 +1,8 @@
+// `LazyLock` (stable in 1.80) is used in `state.rs` for the session-watcher
+// registry. `rust-version` in Cargo.toml stays at 1.77.2 for downstream
+// compatibility; this allow skips the lint clippy raises for that gap.
+#![allow(clippy::incompatible_msrv)]
+
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 

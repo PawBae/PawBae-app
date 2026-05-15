@@ -123,7 +123,7 @@ pub async fn activate_app(app_name: String) -> Result<String, String> {
     }
     #[cfg(not(target_os = "macos"))]
     {
-        Err(format!("activate_app not supported on this platform"))
+        Err("activate_app not supported on this platform".to_string())
     }
 }
 

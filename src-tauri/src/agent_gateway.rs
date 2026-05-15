@@ -2,8 +2,8 @@
 
 use std::path::PathBuf;
 
-use crate::commands::agent::{AgentHealth, SessionHealth};
 use crate::app_init::home_dir_string;
+use crate::commands::agent::{AgentHealth, SessionHealth};
 
 /// Generic helper: call OpenClaw remote API via /tools/invoke
 pub(crate) async fn invoke_tool(
@@ -171,10 +171,7 @@ pub(crate) fn build_agent_health_from_meta(
             }
             // Match session file path to tail output by basename
             #[cfg(windows)]
-            let basename = sf
-                .rsplit(|c: char| c == '/' || c == '\\')
-                .next()
-                .unwrap_or("");
+            let basename = sf.rsplit(['/', '\\']).next().unwrap_or("");
             #[cfg(not(windows))]
             let basename = sf.rsplit('/').next().unwrap_or("");
             let active = if let Some(lines) = tails.get(basename) {

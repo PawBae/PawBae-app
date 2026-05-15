@@ -143,16 +143,15 @@ pub(crate) fn start_session_file_watcher(
                     if matches!(
                         session.status.as_str(),
                         "processing" | "tool_running" | "waiting"
-                    ) {
-                        if check_interrupted(&path2) {
-                            log::info!("File watcher: interrupted session {}", sid2);
-                            session.status = "stopped".to_string();
-                            session.is_processing = false;
-                            session.tool = None;
-                            session.tool_input = None;
-                            session.permission_suggestions = None;
-                            changed = true;
-                        }
+                    ) && check_interrupted(&path2)
+                    {
+                        log::info!("File watcher: interrupted session {}", sid2);
+                        session.status = "stopped".to_string();
+                        session.is_processing = false;
+                        session.tool = None;
+                        session.tool_input = None;
+                        session.permission_suggestions = None;
+                        changed = true;
                     }
 
                     if changed {

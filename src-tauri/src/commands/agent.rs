@@ -641,7 +641,7 @@ pub async fn get_health(
         // Fallback: no sessions.json, check most recent file only
         let latest = std::fs::read_dir(&sessions_dir).ok().and_then(|rd| {
             rd.filter_map(|e| e.ok())
-                .filter(|e| e.path().extension().map_or(false, |ext| ext == "jsonl"))
+                .filter(|e| e.path().extension().is_some_and(|ext| ext == "jsonl"))
                 .max_by_key(|e| e.metadata().ok().and_then(|m| m.modified().ok()))
         });
         let active = if let Some(f) = latest {
@@ -1033,13 +1033,12 @@ pub async fn get_agent_metrics(
                             metrics.message_count += 1;
                         }
                     }
-                    "custom" => {
+                    "custom"
                         if val["customType"]
                             .as_str()
-                            .map_or(false, |t| t.contains("error"))
-                        {
-                            metrics.error_count += 1;
-                        }
+                            .is_some_and(|t| t.contains("error")) =>
+                    {
+                        metrics.error_count += 1;
                     }
                     _ => {}
                 }
@@ -1061,7 +1060,7 @@ pub async fn get_agent_metrics(
                 .into_iter()
                 .map(|(name, count)| ToolCallStat { name, count })
                 .collect();
-            tool_vec.sort_by(|a, b| b.count.cmp(&a.count));
+            tool_vec.sort_by_key(|t| std::cmp::Reverse(t.count));
             metrics.tool_calls = tool_vec;
 
             log::info!("[get_agent_metrics] SSH result: active={} recent_actions={} tool_calls={} message_count={} current_task={:?}",
@@ -1422,13 +1421,12 @@ pub async fn get_agent_metrics(
                     metrics.message_count += 1;
                 }
             }
-            "custom" => {
+            "custom"
                 if val["customType"]
                     .as_str()
-                    .map_or(false, |t| t.contains("error"))
-                {
-                    metrics.error_count += 1;
-                }
+                    .is_some_and(|t| t.contains("error")) =>
+            {
+                metrics.error_count += 1;
             }
             _ => {}
         }
@@ -1452,7 +1450,7 @@ pub async fn get_agent_metrics(
         .into_iter()
         .map(|(name, count)| ToolCallStat { name, count })
         .collect();
-    tool_vec.sort_by(|a, b| b.count.cmp(&a.count));
+    tool_vec.sort_by_key(|t| std::cmp::Reverse(t.count));
     metrics.tool_calls = tool_vec;
 
     Ok(metrics)

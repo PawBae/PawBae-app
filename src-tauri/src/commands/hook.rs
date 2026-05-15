@@ -9,20 +9,20 @@ use tauri::Emitter;
 use tauri::Manager;
 
 use crate::cursor::{cwd_matches_workspace_root, resolve_cursor_window_binding};
-use crate::session_watcher::{
-    start_session_file_watcher, stop_event_was_interrupted, stop_session_file_watcher,
-};
 use crate::jsonl_paths::resolve_session_jsonl_path;
-use crate::state::ClaudeSession;
-use crate::terminal::{
-    frontmost_matches_host_terminal, is_codex_frontmost_app, is_cursor_frontmost_app,
-};
 #[cfg(target_os = "macos")]
 use crate::platform::macos::{
     find_terminal_app_for_pid, get_active_ghostty_terminal_id, get_frontmost_app_name,
 };
+use crate::session_watcher::{
+    start_session_file_watcher, stop_event_was_interrupted, stop_session_file_watcher,
+};
+use crate::state::ClaudeSession;
 #[cfg(target_os = "macos")]
 use crate::terminal::is_codex_host_terminal;
+use crate::terminal::{
+    frontmost_matches_host_terminal, is_codex_frontmost_app, is_cursor_frontmost_app,
+};
 #[cfg(not(target_os = "macos"))]
 use crate::terminal::{get_active_ghostty_terminal_id, get_frontmost_app_name};
 
@@ -275,16 +275,16 @@ try {
         entry
             .get("command")
             .and_then(|c| c.as_str())
-            .map_or(false, |c| is_ours(c))
+            .is_some_and(&is_ours)
             || entry
                 .get("hooks")
                 .and_then(|hs| hs.as_array())
-                .map_or(false, |hs| {
+                .is_some_and(|hs| {
                     hs.iter().any(|inner| {
                         inner
                             .get("command")
                             .and_then(|c| c.as_str())
-                            .map_or(false, |c| is_ours(c))
+                            .is_some_and(&is_ours)
                     })
                 })
     };
@@ -577,16 +577,16 @@ try {
         entry
             .get("command")
             .and_then(|c| c.as_str())
-            .map_or(false, |c| is_ours(c))
+            .is_some_and(&is_ours)
             || entry
                 .get("hooks")
                 .and_then(|hs| hs.as_array())
-                .map_or(false, |hs| {
+                .is_some_and(|hs| {
                     hs.iter().any(|inner| {
                         inner
                             .get("command")
                             .and_then(|c| c.as_str())
-                            .map_or(false, |c| is_ours(c))
+                            .is_some_and(&is_ours)
                     })
                 })
     };

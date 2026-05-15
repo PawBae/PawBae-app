@@ -642,7 +642,7 @@ pub async fn set_ime_mode(_app: tauri::AppHandle, _active: bool) -> Result<(), S
 /// Resize/reposition the mini window between collapsed (small, right of notch)
 /// and expanded (larger, centered on notch) states.
 #[tauri::command]
-#[allow(unused_variables)]
+#[allow(unused_variables, clippy::too_many_arguments)]
 pub async fn set_mini_expanded(
     app: tauri::AppHandle,
     expanded: bool,
@@ -852,7 +852,7 @@ pub async fn resize_mini_height(
     let win = app
         .get_webview_window("main")
         .ok_or("mini window not found")?;
-    let limit = max_height.unwrap_or(350.0).max(200.0).min(2000.0);
+    let limit = max_height.unwrap_or(350.0).clamp(200.0, 2000.0);
     // Scale height limits on Windows to match DPI-aware window sizes
     #[cfg(target_os = "windows")]
     let h = {
@@ -940,7 +940,7 @@ pub async fn resize_mini_height(
 ///
 /// Pass `active: false` to stop the poll and shrink back to collapsed size.
 #[tauri::command]
-#[allow(unused_variables)]
+#[allow(unused_variables, clippy::too_many_arguments)]
 pub async fn set_mini_size(
     app: tauri::AppHandle,
     restore: bool,

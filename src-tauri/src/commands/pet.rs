@@ -4,6 +4,11 @@ use std::sync::atomic::Ordering;
 
 use tauri::Manager;
 
+use crate::mascot::{
+    large_collapsed_mascot_window_size, sanitized_mascot_scale, LARGE_MASCOT_SIZE_MULTIPLIER,
+    MASCOT_TOP_INSET,
+};
+use crate::pet_core::efficiency_hover_poll;
 use crate::platform::common::AppWindowInfo;
 use crate::state::{
     EFFICIENCY_HOVER_ACTIVE, EFFICIENCY_HOVER_THREAD_ALIVE, MINI_WINDOW_FRAME,
@@ -11,11 +16,6 @@ use crate::state::{
     PET_PASSTHROUGH_THREAD_ALIVE, PET_POMODORO_ACTIVE, SPRITE_PAD, STROLL_MODE_ENABLED,
     THROW_TRACKING_ENABLED,
 };
-use crate::mascot::{
-    large_collapsed_mascot_window_size, sanitized_mascot_scale, LARGE_MASCOT_SIZE_MULTIPLIER,
-    MASCOT_TOP_INSET,
-};
-use crate::pet_core::efficiency_hover_poll;
 
 #[cfg(target_os = "macos")]
 use crate::platform::macos::{
@@ -74,6 +74,7 @@ pub async fn get_frontmost_app_window(
 /// the previous pet's measurements don't leak into the new pet's
 /// first physics tick.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn set_sprite_pad_fractions(
     top: Option<f64>,
     right: Option<f64>,
@@ -97,29 +98,29 @@ pub async fn set_sprite_pad_fractions(
     // failure (essentially empty sprite). Silently ignore bad values
     // so a noisy frontend can't move the cat off-screen.
     if let Some(v) = top {
-        if v.is_finite() && v >= 0.0 && v <= 0.95 {
+        if v.is_finite() && (0.0..=0.95).contains(&v) {
             g.top = v;
         }
     }
     if let Some(v) = right {
-        if v.is_finite() && v >= 0.0 && v <= 0.95 {
+        if v.is_finite() && (0.0..=0.95).contains(&v) {
             g.right = v;
         }
     }
     if let Some(v) = bottom {
-        if v.is_finite() && v >= 0.0 && v <= 0.95 {
+        if v.is_finite() && (0.0..=0.95).contains(&v) {
             g.bottom = v;
         }
     }
     if let Some(v) = left {
-        if v.is_finite() && v >= 0.0 && v <= 0.95 {
+        if v.is_finite() && (0.0..=0.95).contains(&v) {
             g.left = v;
         }
     }
     // Absolute CSS pixels. Reject NaN / negative / insanely large
     // values so a buggy frontend can't push the cat off-screen.
     let validate_px = |v: f64| -> Option<f64> {
-        if v.is_finite() && v >= 0.0 && v <= 1000.0 {
+        if v.is_finite() && (0.0..=1000.0).contains(&v) {
             Some(v)
         } else {
             None

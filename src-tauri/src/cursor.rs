@@ -2,10 +2,10 @@
 
 use std::path::PathBuf;
 
-#[cfg(target_os = "macos")]
-use crate::platform::macos::check_accessibility_permission;
 #[cfg(not(target_os = "macos"))]
 use crate::platform::common::check_accessibility_permission;
+#[cfg(target_os = "macos")]
+use crate::platform::macos::check_accessibility_permission;
 use crate::state::ClaudeState;
 
 #[cfg(target_os = "macos")]
@@ -40,11 +40,7 @@ pub(crate) fn claude_session_file_path(session_id: &str, cwd: &str) -> PathBuf {
     // the project directory name (e.g. G:\Desktop\code → G--Desktop-code).
     // The colon after the drive letter (G:) must also be replaced.
     #[cfg(windows)]
-    let project_dir = cwd
-        .replace('/', "-")
-        .replace('\\', "-")
-        .replace(':', "-")
-        .replace('.', "-");
+    let project_dir = cwd.replace(['/', '\\', ':', '.'], "-");
     #[cfg(not(windows))]
     let project_dir = cwd.replace('/', "-").replace('.', "-");
     home.join(".claude")

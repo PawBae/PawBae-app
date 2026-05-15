@@ -145,10 +145,9 @@ pub async fn get_now_playing(app: tauri::AppHandle) -> Result<String, String> {
                     continue;
                 }
 
+                let _ = is_music_app_win;
                 let kind = if is_video_app_win(&source) || is_browser_win(&source) {
                     "video"
-                } else if is_music_app_win(&source) {
-                    "music"
                 } else {
                     "music"
                 };

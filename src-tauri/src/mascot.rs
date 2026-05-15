@@ -33,7 +33,7 @@ pub(crate) fn sanitized_mascot_scale(scale: Option<f64>) -> f64 {
     if !scale.is_finite() {
         return 1.0;
     }
-    scale.max(MASCOT_SCALE_MIN).min(MASCOT_SCALE_MAX)
+    scale.clamp(MASCOT_SCALE_MIN, MASCOT_SCALE_MAX)
 }
 
 pub(crate) fn collapsed_mascot_window_size(scale: f64) -> (f64, f64) {
@@ -44,7 +44,7 @@ pub(crate) fn collapsed_mascot_window_size(scale: f64) -> (f64, f64) {
 }
 
 pub(crate) fn large_collapsed_mascot_window_size(scale: f64, large_scale: f64) -> (f64, f64) {
-    let lms = if large_scale.is_finite() && large_scale >= 1.0 && large_scale <= 6.0 {
+    let lms = if large_scale.is_finite() && (1.0..=6.0).contains(&large_scale) {
         large_scale
     } else {
         LARGE_MASCOT_SIZE_MULTIPLIER

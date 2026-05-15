@@ -83,11 +83,7 @@ pub(crate) fn efficiency_hover_poll(app: tauri::AppHandle) {
                 cursor.0 >= rx && cursor.0 <= rx + rw && cursor.1 >= ry && cursor.1 <= ry + rh
             };
 
-            if inside && !was_inside {
-                let _ = app.emit("efficiency-hover", true);
-                last_enter_emit = Instant::now();
-            } else if inside && was_inside && last_enter_emit.elapsed() > Duration::from_millis(300)
-            {
+            if inside && (!was_inside || last_enter_emit.elapsed() > Duration::from_millis(300)) {
                 let _ = app.emit("efficiency-hover", true);
                 last_enter_emit = Instant::now();
             } else if !inside && was_inside {
