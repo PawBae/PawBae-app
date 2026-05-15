@@ -4,7 +4,9 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use tauri::{Emitter, Manager};
+use tauri::Emitter;
+#[cfg(target_os = "macos")]
+use tauri::Manager;
 
 use crate::state::ClaudeSession;
 use crate::{
@@ -13,6 +15,9 @@ use crate::{
     is_cursor_frontmost_app, resolve_cursor_window_binding, resolve_session_jsonl_path,
     start_session_file_watcher, stop_event_was_interrupted, stop_session_file_watcher,
 };
+
+#[cfg(target_os = "macos")]
+use crate::{find_terminal_app_for_pid, is_codex_host_terminal};
 
 #[tauri::command]
 pub async fn install_claude_hooks() -> Result<(), String> {

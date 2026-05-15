@@ -2,15 +2,24 @@
 
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 
-use crate::state::{FULLSCREEN_HIDING, MINI_WINDOW_FRAME};
+use crate::state::MINI_WINDOW_FRAME;
 use crate::{
     collapsed_mascot_window_size, large_collapsed_mascot_window_size,
     reassert_mini_floating, sanitized_mascot_scale, COLLAPSED_MASCOT_BASE_H,
     COLLAPSED_MASCOT_BASE_W, LARGE_MASCOT_SIZE_MULTIPLIER, MASCOT_TOP_INSET,
 };
 
+#[cfg(target_os = "macos")]
+use std::sync::atomic::Ordering;
+#[cfg(target_os = "macos")]
+use crate::state::{EFFICIENCY_EXPANDED, NOTCH_SCREEN_INFO, PET_MENU_RESTORE_FRAME};
+#[cfg(target_os = "macos")]
+use crate::{collapsed_x, current_sprite_pad, get_notch_offset, pet_context_schedule_restore_alpha};
+
 #[cfg(target_os = "windows")]
 use crate::platform::windows::win_ui_scale;
+#[cfg(target_os = "windows")]
+use crate::state::FULLSCREEN_HIDING;
 
 #[tauri::command]
 pub async fn open_mini(app: tauri::AppHandle) -> Result<(), String> {

@@ -58,6 +58,8 @@ use tauri::{
     tray::TrayIconBuilder,
     Emitter, Manager,
 };
+#[cfg(target_os = "macos")]
+use tauri::menu::CheckMenuItem;
 #[cfg(unix)]
 use libc;
 
@@ -788,7 +790,7 @@ pub(crate) fn large_collapsed_mascot_window_size(scale: f64, large_scale: f64) -
 
 
 
-fn current_sprite_pad() -> SpritePadFracs {
+pub(crate) fn current_sprite_pad() -> SpritePadFracs {
     SPRITE_PAD.lock().map(|g| *g).unwrap_or(SpritePadFracs {
         top: 0.40,
         right: 0.45,
@@ -1826,7 +1828,11 @@ pub(crate) use crate::platform::windows::hide_window_cmd;
 
 // Re-export macOS-only helpers that command modules reach via `crate::*`.
 #[cfg(target_os = "macos")]
-pub(crate) use crate::platform::macos::{get_active_ghostty_terminal_id, get_frontmost_app_name};
+pub(crate) use crate::platform::macos::{
+    compute_frontmost_app_window_macos, find_terminal_app_for_pid,
+    frontmost_app_window_cache, get_active_ghostty_terminal_id, get_frontmost_app_name,
+    get_notch_offset, pet_context_schedule_restore_alpha, pet_passthrough_poll,
+};
 
 
 /// Focus the Cursor terminal tab for a given session.

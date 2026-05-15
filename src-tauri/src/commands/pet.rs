@@ -6,18 +6,26 @@ use tauri::Manager;
 
 use crate::platform::common::AppWindowInfo;
 use crate::state::{
-    EFFICIENCY_HOVER_ACTIVE, EFFICIENCY_HOVER_THREAD_ALIVE, FULLSCREEN_HIDING,
-    MINI_WINDOW_FRAME, PET_CONTEXT_MENU_OPEN, PET_MENU_RESTORE_FRAME,
-    PET_PASSTHROUGH_ACTIVE, PET_PASSTHROUGH_THREAD_ALIVE, PET_POMODORO_ACTIVE,
-    SPRITE_PAD, STROLL_MODE_ENABLED, THROW_TRACKING_ENABLED,
+    EFFICIENCY_HOVER_ACTIVE, EFFICIENCY_HOVER_THREAD_ALIVE, MINI_WINDOW_FRAME,
+    PET_CONTEXT_MENU_OPEN, PET_MENU_RESTORE_FRAME, PET_PASSTHROUGH_ACTIVE,
+    PET_PASSTHROUGH_THREAD_ALIVE, PET_POMODORO_ACTIVE, SPRITE_PAD, STROLL_MODE_ENABLED,
+    THROW_TRACKING_ENABLED,
 };
 use crate::{
     efficiency_hover_poll, large_collapsed_mascot_window_size, sanitized_mascot_scale,
     LARGE_MASCOT_SIZE_MULTIPLIER, MASCOT_TOP_INSET,
 };
 
+#[cfg(target_os = "macos")]
+use crate::{
+    compute_frontmost_app_window_macos, frontmost_app_window_cache, pet_context_schedule_restore_alpha,
+    pet_passthrough_poll,
+};
+
 #[cfg(target_os = "windows")]
 use crate::platform::windows::pet_passthrough_poll_windows;
+#[cfg(target_os = "windows")]
+use crate::state::FULLSCREEN_HIDING;
 
 #[tauri::command]
 pub async fn get_frontmost_app_window(
