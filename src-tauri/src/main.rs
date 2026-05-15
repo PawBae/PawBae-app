@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-  pawbae_app_lib::run();
+    pawbae_app_lib::run();
 }
