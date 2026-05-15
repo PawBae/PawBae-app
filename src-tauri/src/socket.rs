@@ -124,6 +124,7 @@ pub async fn resolve_claude_permission(
 /// Process a Claude hook event (shared logic between Unix socket and TCP server).
 /// Returns Some((session_id, hook_event)) if the event needs further handling
 /// (e.g. PermissionRequest requires blocking the connection for a response).
+#[cfg(not(target_os = "windows"))]
 pub(crate) fn start_cursor_socket_server(
     claude_state: Arc<Mutex<HashMap<String, ClaudeSession>>>,
     app: tauri::AppHandle,

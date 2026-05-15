@@ -56,6 +56,7 @@ pub(crate) static PET_POMODORO_ACTIVE: AtomicBool = AtomicBool::new(false);
 /// snaps the window origin to (cursor - anchor). This is the same pattern
 /// macOS uses for native window dragging and avoids the lag introduced by
 /// accumulating deltas across pre-empted frames.
+#[cfg(target_os = "macos")]
 pub(crate) static DRAG_TASK_PENDING: AtomicBool = AtomicBool::new(false);
 pub(crate) static DRAG_ANCHOR: std::sync::OnceLock<Mutex<Option<(f64, f64)>>> =
     std::sync::OnceLock::new();

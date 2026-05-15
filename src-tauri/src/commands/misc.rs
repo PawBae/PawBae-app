@@ -110,6 +110,7 @@ pub async fn debug_log(scope: String, msg: String) -> Result<(), String> {
 
 /// Activate a macOS app by its name (e.g. "Feishu", "Telegram", "Lark").
 #[tauri::command]
+#[allow(unused_variables)]
 pub async fn activate_app(app_name: String) -> Result<String, String> {
     #[cfg(target_os = "macos")]
     {

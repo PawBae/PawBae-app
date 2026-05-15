@@ -395,8 +395,11 @@ pub async fn jump_to_claude_terminal(
     let sessions = state.sessions.lock().map_err(|e| e.to_string())?;
     let session = sessions.get(&session_id).ok_or("Session not found")?;
     let cwd = session.cwd.clone();
+    #[cfg(target_os = "macos")]
     let terminal_id = session.terminal_id.clone();
+    #[cfg(target_os = "macos")]
     let pid = session.pid;
+    #[cfg(target_os = "macos")]
     let source = session.source.clone();
     drop(sessions);
 

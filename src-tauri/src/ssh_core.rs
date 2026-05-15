@@ -408,22 +408,3 @@ pub(crate) async fn ssh_is_agent_active(ssh_host: &str, ssh_user: &str, agent_id
     let lines: Vec<String> = output.lines().map(|l| l.to_string()).collect();
     check_agent_active_from_lines(&lines)
 }
-/// Check if a specific session file is active by reading its tail.
-async fn ssh_is_session_file_active(ssh_host: &str, ssh_user: &str, session_file: &str) -> bool {
-    let escaped = session_file.replace('"', r#"\""#);
-    let cmd = format!("tail -5 \"{}\" 2>/dev/null", escaped);
-    let output = match ssh_exec(ssh_host, ssh_user, &cmd).await {
-        Ok(s) => s,
-        Err(_) => return false,
-    };
-    for line in output.lines().rev() {
-        if let Ok(val) = serde_json::from_str::<serde_json::Value>(line) {
-            if val["type"].as_str() == Some("message") {
-                let role = val["message"]["role"].as_str().unwrap_or("");
-                let has_usage = val["message"]["usage"].is_object();
-                return role == "user" || (role == "assistant" && !has_usage);
-            }
-        }
-    }
-    false
-}

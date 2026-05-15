@@ -21,6 +21,7 @@ use crate::platform::windows::{is_browser_win, is_music_app_win, is_video_app_wi
 /// 2) Frontmost app fallback (video/music bundle IDs)
 /// 3) Explicit player-state scripts for background music fallback
 #[tauri::command]
+#[allow(unused_variables)]
 pub async fn get_system_idle_time(app: tauri::AppHandle) -> Result<f64, String> {
     #[cfg(target_os = "macos")]
     {
@@ -42,6 +43,7 @@ pub async fn get_system_idle_time(app: tauri::AppHandle) -> Result<f64, String> 
     }
 }
 #[tauri::command]
+#[allow(unused_variables)]
 pub async fn get_now_playing(app: tauri::AppHandle) -> Result<String, String> {
     #[cfg(target_os = "macos")]
     {

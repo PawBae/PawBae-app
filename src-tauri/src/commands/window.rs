@@ -642,6 +642,7 @@ pub async fn set_ime_mode(_app: tauri::AppHandle, _active: bool) -> Result<(), S
 /// Resize/reposition the mini window between collapsed (small, right of notch)
 /// and expanded (larger, centered on notch) states.
 #[tauri::command]
+#[allow(unused_variables)]
 pub async fn set_mini_expanded(
     app: tauri::AppHandle,
     expanded: bool,
@@ -841,6 +842,7 @@ pub async fn set_mini_expanded(
     Ok(())
 }
 #[tauri::command]
+#[allow(unused_variables)]
 pub async fn resize_mini_height(
     app: tauri::AppHandle,
     height: f64,
@@ -938,6 +940,7 @@ pub async fn resize_mini_height(
 ///
 /// Pass `active: false` to stop the poll and shrink back to collapsed size.
 #[tauri::command]
+#[allow(unused_variables)]
 pub async fn set_mini_size(
     app: tauri::AppHandle,
     restore: bool,

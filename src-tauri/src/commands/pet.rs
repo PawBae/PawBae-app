@@ -162,6 +162,7 @@ pub(crate) struct PetFloorInfo {
     dock_x_range: Option<(f64, f64)>,
 }
 #[tauri::command]
+#[allow(unused_variables)]
 pub async fn get_pet_floor_info(app: tauri::AppHandle) -> Result<PetFloorInfo, String> {
     let win = app
         .get_webview_window("main")

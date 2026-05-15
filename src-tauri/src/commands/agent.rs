@@ -912,6 +912,7 @@ pub async fn get_agent_metrics(
             let mut last_tool_name: Option<String> = None;
             let mut last_timestamp: Option<String> = None;
             let mut recent_actions: Vec<RecentAction> = vec![];
+            #[allow(unused_assignments)]
             let mut current_msg_timestamp: Option<String> = None;
 
             for line in content.lines() {
@@ -1258,6 +1259,7 @@ pub async fn get_agent_metrics(
     let mut last_tool_name: Option<String> = None;
     let mut last_timestamp: Option<String> = None;
     let mut recent_actions: Vec<RecentAction> = vec![];
+    #[allow(unused_assignments)]
     let mut current_msg_timestamp: Option<String> = None;
 
     for line in content.lines() {

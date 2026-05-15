@@ -312,6 +312,7 @@ try {
     Ok(())
 }
 
+#[allow(unreachable_code)]
 async fn install_codex_hooks() -> Result<(), String> {
     let home = dirs::home_dir().ok_or("no home dir")?;
     let codex_dir = home.join(".Codex");
@@ -1372,6 +1373,7 @@ pub(crate) fn process_claude_event(
 /// Creates ~/.cursor/hooks/occlaw-cursor-hook.sh and registers it in
 /// ~/.cursor/hooks.json for all Cursor hook events.
 #[tauri::command]
+#[allow(unreachable_code)]
 pub async fn install_cursor_hooks() -> Result<(), String> {
     let home = dirs::home_dir().ok_or("no home dir")?;
     let cursor_dir = home.join(".cursor");

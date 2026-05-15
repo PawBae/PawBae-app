@@ -1,8 +1,10 @@
 //! Mascot/sprite size constants and helpers (collapsed_x, scaling, sprite-pad).
 
+#[cfg(target_os = "macos")]
 use crate::state::{SpritePadFracs, SPRITE_PAD};
 
 /// Compute collapsed mascot x position based on side preference.
+#[cfg(target_os = "macos")]
 pub(crate) fn collapsed_x(sx: f64, sw: f64, win_w: f64, position: &str, notch_offset: f64) -> f64 {
     if position == "left" {
         sx + sw / 2.0 - notch_offset - win_w
@@ -51,6 +53,7 @@ pub(crate) fn large_collapsed_mascot_window_size(scale: f64, large_scale: f64) -
     (size, size)
 }
 
+#[cfg(target_os = "macos")]
 pub(crate) fn current_sprite_pad() -> SpritePadFracs {
     SPRITE_PAD.lock().map(|g| *g).unwrap_or(SpritePadFracs {
         top: 0.40,

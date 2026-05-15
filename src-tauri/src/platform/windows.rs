@@ -17,7 +17,6 @@ pub(crate) fn hide_window_cmd(cmd: &mut std::process::Command) {
 }
 /// Apply CREATE_NO_WINDOW on Windows to prevent console popups (tokio version).
 pub(crate) fn hide_window_tokio_cmd(cmd: &mut tokio::process::Command) {
-    use std::os::windows::process::CommandExt;
     const CREATE_NO_WINDOW: u32 = 0x08000000;
     cmd.creation_flags(CREATE_NO_WINDOW);
 }
