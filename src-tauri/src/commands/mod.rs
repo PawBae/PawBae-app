@@ -12,6 +12,7 @@ pub mod misc;
 pub mod session;
 pub mod ssh;
 pub mod update;
+pub mod window;
 
 #[allow(unused_imports)]
 pub use agent::*;
@@ -27,3 +28,5 @@ pub use session::*;
 pub use ssh::*;
 #[allow(unused_imports)]
 pub use update::*;
+#[allow(unused_imports)]
+pub use window::*;
