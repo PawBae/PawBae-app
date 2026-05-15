@@ -9,6 +9,7 @@ pub mod agent;
 pub mod codex_pet;
 pub mod media;
 pub mod misc;
+pub mod session;
 pub mod ssh;
 pub mod update;
 
@@ -20,6 +21,8 @@ pub use codex_pet::*;
 pub use media::*;
 #[allow(unused_imports)]
 pub use misc::*;
+#[allow(unused_imports)]
+pub use session::*;
 #[allow(unused_imports)]
 pub use ssh::*;
 #[allow(unused_imports)]
