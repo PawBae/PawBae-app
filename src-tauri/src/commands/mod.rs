@@ -6,6 +6,9 @@
 //! unqualified name.
 
 pub mod misc;
+pub mod update;
 
 #[allow(unused_imports)]
 pub use misc::*;
+#[allow(unused_imports)]
+pub use update::*;
