@@ -9,13 +9,14 @@ use tauri::Emitter;
 use tauri::Manager;
 
 use crate::state::ClaudeSession;
+use crate::cursor::{cwd_matches_workspace_root, resolve_cursor_window_binding};
 use crate::session_watcher::{
     start_session_file_watcher, stop_event_was_interrupted, stop_session_file_watcher,
 };
 use crate::{
-    cwd_matches_workspace_root, frontmost_matches_host_terminal,
-    get_active_ghostty_terminal_id, get_frontmost_app_name, is_codex_frontmost_app,
-    is_cursor_frontmost_app, resolve_cursor_window_binding, resolve_session_jsonl_path,
+    frontmost_matches_host_terminal, get_active_ghostty_terminal_id,
+    get_frontmost_app_name, is_codex_frontmost_app, is_cursor_frontmost_app,
+    resolve_session_jsonl_path,
 };
 
 #[cfg(target_os = "macos")]
