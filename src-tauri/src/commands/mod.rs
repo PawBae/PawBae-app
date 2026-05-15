@@ -7,6 +7,7 @@
 
 pub mod agent;
 pub mod codex_pet;
+pub mod hook;
 pub mod media;
 pub mod misc;
 pub mod pet;
@@ -19,6 +20,8 @@ pub mod window;
 pub use agent::*;
 #[allow(unused_imports)]
 pub use codex_pet::*;
+#[allow(unused_imports)]
+pub use hook::*;
 #[allow(unused_imports)]
 pub use media::*;
 #[allow(unused_imports)]
