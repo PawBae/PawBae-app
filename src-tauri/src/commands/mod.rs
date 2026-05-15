@@ -5,9 +5,12 @@
 //! `generate_handler!` macro in lib.rs continues to reference them by
 //! unqualified name.
 
+pub mod media;
 pub mod misc;
 pub mod update;
 
+#[allow(unused_imports)]
+pub use media::*;
 #[allow(unused_imports)]
 pub use misc::*;
 #[allow(unused_imports)]
