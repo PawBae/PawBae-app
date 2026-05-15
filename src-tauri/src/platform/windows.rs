@@ -71,28 +71,35 @@ pub(crate) mod win_ssh_mux {
 
         let mut cmd = Command::new("ssh");
         cmd.args([
-                "-T",
-                "-o", "StrictHostKeyChecking=no",
-                "-o", "BatchMode=yes",
-                "-o", "ConnectTimeout=10",
-                "-o", "ServerAliveInterval=15",
-                "-o", "ServerAliveCountMax=3",
-                &host_key,
-            ])
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::null())
-            .kill_on_drop(true);
+            "-T",
+            "-o",
+            "StrictHostKeyChecking=no",
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "ConnectTimeout=10",
+            "-o",
+            "ServerAliveInterval=15",
+            "-o",
+            "ServerAliveCountMax=3",
+            &host_key,
+        ])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .kill_on_drop(true);
         super::hide_window_tokio_cmd(&mut cmd);
-        let mut child = cmd
-            .spawn()
-            .map_err(|e| format!("ssh mux spawn: {}", e))?;
+        let mut child = cmd.spawn().map_err(|e| format!("ssh mux spawn: {}", e))?;
 
         let stdin = child.stdin.take().ok_or("ssh mux: no stdin")?;
         let stdout = child.stdout.take().ok_or("ssh mux: no stdout")?;
         let reader = BufReader::new(stdout);
 
-        *guard = Some(MuxChild { stdin, stdout: reader, child });
+        *guard = Some(MuxChild {
+            stdin,
+            stdout: reader,
+            child,
+        });
 
         // Validate the connection with a quick echo test.
         drop(guard);
@@ -118,7 +125,9 @@ pub(crate) mod win_ssh_mux {
         let host_key = format!("{}@{}", ssh_user, ssh_host);
         let lock = session_lock(&host_key);
         let mut guard = lock.lock().await;
-        let mux = guard.as_mut().ok_or_else(|| "ssh mux: not connected".to_string())?;
+        let mux = guard
+            .as_mut()
+            .ok_or_else(|| "ssh mux: not connected".to_string())?;
 
         // Check the process is still alive.
         if mux.child.try_wait().ok().flatten().is_some() {
@@ -127,8 +136,13 @@ pub(crate) mod win_ssh_mux {
         }
 
         // Unique marker that cannot appear in normal command output.
-        let marker = format!("__OCCLAW_{}__", std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos());
+        let marker = format!(
+            "__OCCLAW_{}__",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        );
 
         // Wrap the command so we can capture its exit code after a unique delimiter.
         // The shell on the remote side will:
@@ -144,7 +158,10 @@ pub(crate) mod win_ssh_mux {
             .write_all(wrapped.as_bytes())
             .await
             .map_err(|e| format!("ssh mux write: {}", e))?;
-        mux.stdin.flush().await.map_err(|e| format!("ssh mux flush: {}", e))?;
+        mux.stdin
+            .flush()
+            .await
+            .map_err(|e| format!("ssh mux flush: {}", e))?;
 
         // Read lines until we see the marker.
         let mut output = String::new();
@@ -160,7 +177,8 @@ pub(crate) mod win_ssh_mux {
             }
 
             let mut line = String::new();
-            let read_result = tokio::time::timeout(remaining, mux.stdout.read_line(&mut line)).await;
+            let read_result =
+                tokio::time::timeout(remaining, mux.stdout.read_line(&mut line)).await;
 
             match read_result {
                 Ok(Ok(0)) => {
@@ -193,7 +211,11 @@ pub(crate) mod win_ssh_mux {
             *guard = None;
             Err(format!("ssh mux transport error (exit 255)"))
         } else {
-            Err(format!("ssh cmd failed [exit {}]\nstdout: {}", exit_code, output.trim()))
+            Err(format!(
+                "ssh cmd failed [exit {}]\nstdout: {}",
+                exit_code,
+                output.trim()
+            ))
         }
     }
 
@@ -210,9 +232,7 @@ pub(crate) mod win_ssh_mux {
 
     /// Kill all persistent subprocesses.
     pub async fn kill_all() {
-        let keys: Vec<String> = {
-            mux_map().lock().unwrap().keys().cloned().collect()
-        };
+        let keys: Vec<String> = { mux_map().lock().unwrap().keys().cloned().collect() };
         for key in keys {
             let lock = session_lock(&key);
             let mut guard = lock.lock().await;
@@ -227,14 +247,20 @@ pub(crate) mod win_ssh_mux {
 /// which is not available on Windows).
 pub(crate) fn tail_lines_from_file(path: &std::path::Path, n: usize) -> Vec<String> {
     use std::io::{Read, Seek, SeekFrom};
-    let Ok(mut file) = std::fs::File::open(path) else { return vec![] };
-    let Ok(meta) = file.metadata() else { return vec![] };
+    let Ok(mut file) = std::fs::File::open(path) else {
+        return vec![];
+    };
+    let Ok(meta) = file.metadata() else {
+        return vec![];
+    };
     let len = meta.len();
     // Read up to 8KB from the end — more than enough for a handful of JSONL lines
     let read_size = std::cmp::min(len, 8192) as usize;
     let _ = file.seek(SeekFrom::End(-(read_size as i64)));
     let mut buf = vec![0u8; read_size];
-    let Ok(bytes_read) = file.read(&mut buf) else { return vec![] };
+    let Ok(bytes_read) = file.read(&mut buf) else {
+        return vec![];
+    };
     let text = String::from_utf8_lossy(&buf[..bytes_read]);
     let all_lines: Vec<String> = text.lines().map(|l| l.to_string()).collect();
     if all_lines.len() <= n {
@@ -258,13 +284,13 @@ pub(crate) fn win_ui_scale(monitor: &tauri::Monitor) -> f64 {
 /// (Progman, WorkerW, Shell_TrayWnd) which cover the full screen but are
 /// not real fullscreen apps.
 pub(crate) fn fullscreen_foreground_monitor() -> Option<windows::Win32::Graphics::Gdi::HMONITOR> {
-    use windows::Win32::UI::WindowsAndMessaging::{
-        GetForegroundWindow, GetWindowRect, GetClassNameW,
-    };
-    use windows::Win32::Graphics::Gdi::{
-        MonitorFromWindow, GetMonitorInfoW, MONITORINFO, MONITOR_DEFAULTTONEAREST,
-    };
     use windows::Win32::Foundation::RECT;
+    use windows::Win32::Graphics::Gdi::{
+        GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetClassNameW, GetForegroundWindow, GetWindowRect,
+    };
     unsafe {
         let fg = GetForegroundWindow();
         if fg.0 == std::ptr::null_mut() {
@@ -275,10 +301,7 @@ pub(crate) fn fullscreen_foreground_monitor() -> Option<windows::Win32::Graphics
         let len = GetClassNameW(fg, &mut class_buf) as usize;
         if len > 0 {
             let class_name = String::from_utf16_lossy(&class_buf[..len]);
-            if class_name == "Progman"
-                || class_name == "WorkerW"
-                || class_name == "Shell_TrayWnd"
-            {
+            if class_name == "Progman" || class_name == "WorkerW" || class_name == "Shell_TrayWnd" {
                 return None;
             }
         }
@@ -309,36 +332,62 @@ pub(crate) fn fullscreen_foreground_monitor() -> Option<windows::Win32::Graphics
 }
 pub(crate) fn is_music_app_win(id: &str) -> bool {
     const MUSIC_APPS: &[&str] = &[
-        "spotify", "zune", "zunemusic",
-        "cloudmusic", "163music", "netease", "\u{7f51}\u{6613}\u{4e91}",
-        "qqmusic", "qq\u{97f3}\u{4e50}",
-        "kugou", "\u{9177}\u{72d7}", "kuwo", "\u{9177}\u{6211}",
-        "foobar2000", "aimp", "musicbee",
-        "itunes", "applemusic", "cider",
-        "\u{6c7d}\u{6c34}\u{97f3}\u{4e50}", "soda",
+        "spotify",
+        "zune",
+        "zunemusic",
+        "cloudmusic",
+        "163music",
+        "netease",
+        "\u{7f51}\u{6613}\u{4e91}",
+        "qqmusic",
+        "qq\u{97f3}\u{4e50}",
+        "kugou",
+        "\u{9177}\u{72d7}",
+        "kuwo",
+        "\u{9177}\u{6211}",
+        "foobar2000",
+        "aimp",
+        "musicbee",
+        "itunes",
+        "applemusic",
+        "cider",
+        "\u{6c7d}\u{6c34}\u{97f3}\u{4e50}",
+        "soda",
     ];
     MUSIC_APPS.iter().any(|m| id.contains(m))
 }
 pub(crate) fn is_video_app_win(id: &str) -> bool {
     const VIDEO_APPS: &[&str] = &[
-        "potplayer", "vlc", "mpv",
-        "plex", "mpc-hc", "mpc-be",
-        "kmplayer", "iina", "films",
-        "bilibili", "\u{54d4}\u{54e9}\u{54d4}\u{54e9}",
-        "disney", "netflix", "hbo",
-        "douyin", "\u{6296}\u{97f3}", "tiktok",
-        "iqiyi", "\u{7231}\u{5947}\u{827a}",
-        "youku", "\u{4f18}\u{9177}",
-        "mgtv", "\u{8292}\u{679c}",
+        "potplayer",
+        "vlc",
+        "mpv",
+        "plex",
+        "mpc-hc",
+        "mpc-be",
+        "kmplayer",
+        "iina",
+        "films",
+        "bilibili",
+        "\u{54d4}\u{54e9}\u{54d4}\u{54e9}",
+        "disney",
+        "netflix",
+        "hbo",
+        "douyin",
+        "\u{6296}\u{97f3}",
+        "tiktok",
+        "iqiyi",
+        "\u{7231}\u{5947}\u{827a}",
+        "youku",
+        "\u{4f18}\u{9177}",
+        "mgtv",
+        "\u{8292}\u{679c}",
         "dandanplay",
     ];
     VIDEO_APPS.iter().any(|v| id.contains(v))
 }
 pub(crate) fn is_browser_win(id: &str) -> bool {
     const BROWSERS: &[&str] = &[
-        "chrome", "firefox", "msedge",
-        "brave", "vivaldi", "opera",
-        "arc",
+        "chrome", "firefox", "msedge", "brave", "vivaldi", "opera", "arc",
     ];
     BROWSERS.iter().any(|b| id.contains(b))
 }
@@ -348,14 +397,19 @@ pub(crate) fn is_browser_win(id: &str) -> bool {
 /// hit-box pass through to whatever is behind, while clicks on the mascot
 /// itself reach the webview. When the pet context menu is open the entire
 /// window is interactive so menu buttons receive clicks.
-pub(crate) fn pet_passthrough_poll_windows(app: tauri::AppHandle, mascot_scale: f64, large_mascot_scale: f64) {
+pub(crate) fn pet_passthrough_poll_windows(
+    app: tauri::AppHandle,
+    mascot_scale: f64,
+    large_mascot_scale: f64,
+) {
     use std::time::Duration;
     use windows::Win32::Foundation::POINT;
     use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
 
     PET_PASSTHROUGH_THREAD_ALIVE.store(true, Ordering::SeqCst);
     // mascot dimensions in logical pixels (matches CSS px on Windows WebView2).
-    let (mascot_w_logical, mascot_h_logical) = large_collapsed_mascot_window_size(mascot_scale, large_mascot_scale);
+    let (mascot_w_logical, mascot_h_logical) =
+        large_collapsed_mascot_window_size(mascot_scale, large_mascot_scale);
     let hit_w = mascot_w_logical * (1.8 / 3.0);
     let hit_h = mascot_h_logical * (2.5 / 3.0);
     let inset_x_logical = (mascot_w_logical - hit_w) / 2.0;
@@ -428,8 +482,7 @@ pub(crate) fn pet_passthrough_poll_windows(app: tauri::AppHandle, mascot_scale: 
                         let hit_top = mascot_top + iy;
                         let hit_bottom = mascot_bottom - iy;
 
-                        cx >= hit_left && cx <= hit_right
-                            && cy >= hit_top && cy <= hit_bottom
+                        cx >= hit_left && cx <= hit_right && cy >= hit_top && cy <= hit_bottom
                     } else {
                         false
                     }

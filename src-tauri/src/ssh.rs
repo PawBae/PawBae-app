@@ -11,21 +11,33 @@ use crate::{check_agent_active_from_lines, home_dir_string};
 use crate::platform::windows::{hide_window_tokio_cmd, win_ssh_mux};
 
 fn unix_now() -> u64 {
-    SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default().as_secs()
+    SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
 }
 
 fn ssh_backoff_remaining(host_key: &str) -> Option<u64> {
     let map = ssh_backoff_map().lock().unwrap();
     let state = map.get(host_key)?;
-    if state.fail_count == 0 { return None; }
+    if state.fail_count == 0 {
+        return None;
+    }
     let cooldown = std::cmp::min(15u64 * 2u64.pow(state.fail_count.saturating_sub(1)), 300);
     let elapsed = unix_now().saturating_sub(state.fail_epoch);
-    if elapsed < cooldown { Some(cooldown - elapsed) } else { None }
+    if elapsed < cooldown {
+        Some(cooldown - elapsed)
+    } else {
+        None
+    }
 }
 
 fn ssh_backoff_record_failure(host_key: &str) {
     let mut map = ssh_backoff_map().lock().unwrap();
-    let state = map.entry(host_key.to_string()).or_insert(SshBackoffState { fail_count: 0, fail_epoch: 0 });
+    let state = map.entry(host_key.to_string()).or_insert(SshBackoffState {
+        fail_count: 0,
+        fail_epoch: 0,
+    });
     state.fail_count += 1;
     state.fail_epoch = unix_now();
 }
@@ -40,12 +52,15 @@ pub(crate) fn ssh_backoff_reset(host_key: &str) {
 /// is not supported; the marker file tracks whether a connection was recently validated).
 fn ssh_control_path(ssh_user: &str, ssh_host: &str) -> String {
     #[cfg(unix)]
-    { format!("/tmp/pawbae-ssh-{}@{}:22", ssh_user, ssh_host) }
+    {
+        format!("/tmp/pawbae-ssh-{}@{}:22", ssh_user, ssh_host)
+    }
     #[cfg(windows)]
     {
         let temp = std::env::temp_dir();
         temp.join(format!("pawbae-ssh-{}@{}.marker", ssh_user, ssh_host))
-            .to_string_lossy().to_string()
+            .to_string_lossy()
+            .to_string()
     }
 }
 /// Ensure an SSH ControlMaster socket is established (called once, reused by all ssh_exec).
@@ -56,38 +71,60 @@ fn ssh_control_path(ssh_user: &str, ssh_host: &str) -> String {
 async fn ensure_ssh_master(ssh_host: &str, ssh_user: &str) -> Result<(), String> {
     let host_key = format!("{}@{}", ssh_user, ssh_host);
     if let Some(remaining) = ssh_backoff_remaining(&host_key) {
-        return Err(format!("SSH connection to {} backing off, retry in {}s", host_key, remaining));
+        return Err(format!(
+            "SSH connection to {} backing off, retry in {}s",
+            host_key, remaining
+        ));
     }
 
     let control_path = ssh_control_path(ssh_user, ssh_host);
     // Fast path: socket/marker already exists, reuse the master connection.
-    if std::path::Path::new(&control_path).exists() { return Ok(()); }
+    if std::path::Path::new(&control_path).exists() {
+        return Ok(());
+    }
 
     // Per-host lock so only one task establishes the master at a time.
     use std::sync::OnceLock;
     use tokio::sync::Mutex as TokioMutex;
-    static LOCKS: OnceLock<Mutex<HashMap<String, std::sync::Arc<TokioMutex<()>>>>> = OnceLock::new();
+    static LOCKS: OnceLock<Mutex<HashMap<String, std::sync::Arc<TokioMutex<()>>>>> =
+        OnceLock::new();
     let lock = {
-        let mut locks = LOCKS.get_or_init(|| Mutex::new(HashMap::new())).lock().unwrap();
-        locks.entry(host_key.clone()).or_insert_with(|| Arc::new(TokioMutex::new(()))).clone()
+        let mut locks = LOCKS
+            .get_or_init(|| Mutex::new(HashMap::new()))
+            .lock()
+            .unwrap();
+        locks
+            .entry(host_key.clone())
+            .or_insert_with(|| Arc::new(TokioMutex::new(())))
+            .clone()
     };
     let _guard = lock.lock().await;
     // Re-check after acquiring the lock
-    if std::path::Path::new(&control_path).exists() { return Ok(()); }
+    if std::path::Path::new(&control_path).exists() {
+        return Ok(());
+    }
 
     #[cfg(unix)]
     {
         let cp = format!("ControlPath={}", control_path);
         let child = tokio::process::Command::new("ssh")
             .args([
-                "-o", "StrictHostKeyChecking=no",
-                "-o", "BatchMode=yes",
-                "-o", "ConnectTimeout=10",
-                "-o", "ControlMaster=yes",
-                "-o", &cp,
-                "-o", "ControlPersist=600",
-                "-o", "ServerAliveInterval=15",
-                "-o", "ServerAliveCountMax=3",
+                "-o",
+                "StrictHostKeyChecking=no",
+                "-o",
+                "BatchMode=yes",
+                "-o",
+                "ConnectTimeout=10",
+                "-o",
+                "ControlMaster=yes",
+                "-o",
+                &cp,
+                "-o",
+                "ControlPersist=600",
+                "-o",
+                "ServerAliveInterval=15",
+                "-o",
+                "ServerAliveCountMax=3",
                 "-fN",
                 &host_key,
             ])
@@ -98,10 +135,9 @@ async fn ensure_ssh_master(ssh_host: &str, ssh_user: &str) -> Result<(), String>
 
         let child_id = child.id();
 
-        let result = tokio::time::timeout(
-            std::time::Duration::from_secs(15),
-            child.wait_with_output(),
-        ).await;
+        let result =
+            tokio::time::timeout(std::time::Duration::from_secs(15), child.wait_with_output())
+                .await;
 
         let output = match result {
             Ok(Ok(o)) => o,
@@ -111,7 +147,9 @@ async fn ensure_ssh_master(ssh_host: &str, ssh_user: &str) -> Result<(), String>
             }
             Err(_) => {
                 if let Some(pid) = child_id {
-                    unsafe { libc::kill(pid as i32, libc::SIGKILL); }
+                    unsafe {
+                        libc::kill(pid as i32, libc::SIGKILL);
+                    }
                 }
                 ssh_backoff_record_failure(&host_key);
                 return Err(format!("ssh master to {} timed out after 15s", host_key));
@@ -121,15 +159,30 @@ async fn ensure_ssh_master(ssh_host: &str, ssh_user: &str) -> Result<(), String>
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             ssh_backoff_record_failure(&host_key);
-            let count = ssh_backoff_map().lock().unwrap().get(&host_key).map(|s| s.fail_count).unwrap_or(0);
-            let code = output.status.code().map(|c| c.to_string()).unwrap_or_else(|| "signal".into());
-            log::warn!("[ssh] connection to {} failed (attempt {}), entering backoff", host_key, count);
+            let count = ssh_backoff_map()
+                .lock()
+                .unwrap()
+                .get(&host_key)
+                .map(|s| s.fail_count)
+                .unwrap_or(0);
+            let code = output
+                .status
+                .code()
+                .map(|c| c.to_string())
+                .unwrap_or_else(|| "signal".into());
+            log::warn!(
+                "[ssh] connection to {} failed (attempt {}), entering backoff",
+                host_key,
+                count
+            );
             return Err(format!("SSH master failed [exit {}]: {}", code, stderr));
         }
 
         // Wait for the socket file to appear
         for _ in 0..30 {
-            if std::path::Path::new(&control_path).exists() { break; }
+            if std::path::Path::new(&control_path).exists() {
+                break;
+            }
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
         if !std::path::Path::new(&control_path).exists() {
@@ -145,8 +198,17 @@ async fn ensure_ssh_master(ssh_host: &str, ssh_user: &str) -> Result<(), String>
         // prevents hitting server-side MaxStartups limits.
         if let Err(e) = win_ssh_mux::ensure(ssh_user, ssh_host).await {
             ssh_backoff_record_failure(&host_key);
-            let count = ssh_backoff_map().lock().unwrap().get(&host_key).map(|s| s.fail_count).unwrap_or(0);
-            log::warn!("[ssh] connection to {} failed (attempt {}), entering backoff", host_key, count);
+            let count = ssh_backoff_map()
+                .lock()
+                .unwrap()
+                .get(&host_key)
+                .map(|s| s.fail_count)
+                .unwrap_or(0);
+            log::warn!(
+                "[ssh] connection to {} failed (attempt {}), entering backoff",
+                host_key,
+                count
+            );
             return Err(format!("SSH connection failed: {}", e));
         }
         // Create marker file so the fast-path check at the top works.
@@ -155,20 +217,23 @@ async fn ensure_ssh_master(ssh_host: &str, ssh_user: &str) -> Result<(), String>
 
     // Detect which key was used by querying ssh config for this host.
     let mut ssh_g_cmd = tokio::process::Command::new("ssh");
-    ssh_g_cmd.args(["-G", &host_key])
+    ssh_g_cmd
+        .args(["-G", &host_key])
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null());
     #[cfg(windows)]
     hide_window_tokio_cmd(&mut ssh_g_cmd);
-    if let Ok(cfg_output) = ssh_g_cmd.output().await
-    {
+    if let Ok(cfg_output) = ssh_g_cmd.output().await {
         let cfg = String::from_utf8_lossy(&cfg_output.stdout);
         for line in cfg.lines() {
             if let Some(path) = line.strip_prefix("identityfile ") {
                 let expanded = path.replace("~", &home_dir_string());
                 if std::path::Path::new(&expanded).exists() {
                     log::info!("[ssh] {} will use key: {}", host_key, expanded);
-                    ssh_key_map().lock().unwrap().insert(host_key.clone(), expanded);
+                    ssh_key_map()
+                        .lock()
+                        .unwrap()
+                        .insert(host_key.clone(), expanded);
                     break;
                 }
             }
@@ -194,7 +259,13 @@ pub(crate) async fn ssh_exec(ssh_host: &str, ssh_user: &str, cmd: &str) -> Resul
     {
         match win_ssh_mux::exec(ssh_user, ssh_host, &safe_cmd).await {
             Ok(out) => return Ok(out),
-            Err(e) if e.contains("transport error") || e.contains("connection lost") || e.contains("process exited") || e.contains("not connected") || e.contains("timed out") => {
+            Err(e)
+                if e.contains("transport error")
+                    || e.contains("connection lost")
+                    || e.contains("process exited")
+                    || e.contains("not connected")
+                    || e.contains("timed out") =>
+            {
                 log::warn!("[ssh] transport error, removing marker and retrying: {}", e);
                 let _ = tokio::fs::remove_file(&ssh_control_path(ssh_user, ssh_host)).await;
                 ensure_ssh_master(ssh_host, ssh_user).await?;
@@ -210,11 +281,8 @@ pub(crate) async fn ssh_exec(ssh_host: &str, ssh_user: &str, cmd: &str) -> Resul
         let control_path = ssh_control_path(ssh_user, ssh_host);
         let cp = format!("ControlPath={}", control_path);
 
-        let mut ssh_args: Vec<&str> = vec![
-            "-o", "BatchMode=yes",
-            "-o", "ConnectTimeout=5",
-            "-o", &cp,
-        ];
+        let mut ssh_args: Vec<&str> =
+            vec!["-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "-o", &cp];
         ssh_args.push(&target);
         ssh_args.push(&safe_cmd);
 
@@ -234,8 +302,12 @@ pub(crate) async fn ssh_exec(ssh_host: &str, ssh_user: &str, cmd: &str) -> Resul
             let stderr = String::from_utf8_lossy(&output.stderr);
             let stdout = String::from_utf8_lossy(&output.stdout);
             let mut msg = format!("ssh cmd failed [exit {}]", exit_code);
-            if !stderr.trim().is_empty() { msg.push_str(&format!("\nstderr: {}", stderr.trim())); }
-            if !stdout.trim().is_empty() { msg.push_str(&format!("\nstdout: {}", stdout.trim())); }
+            if !stderr.trim().is_empty() {
+                msg.push_str(&format!("\nstderr: {}", stderr.trim()));
+            }
+            if !stdout.trim().is_empty() {
+                msg.push_str(&format!("\nstdout: {}", stdout.trim()));
+            }
             return Err(msg);
         }
 
@@ -243,11 +315,8 @@ pub(crate) async fn ssh_exec(ssh_host: &str, ssh_user: &str, cmd: &str) -> Resul
         let _ = tokio::fs::remove_file(&control_path).await;
         ensure_ssh_master(ssh_host, ssh_user).await?;
 
-        let mut ssh_args2: Vec<&str> = vec![
-            "-o", "BatchMode=yes",
-            "-o", "ConnectTimeout=5",
-            "-o", &cp,
-        ];
+        let mut ssh_args2: Vec<&str> =
+            vec!["-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "-o", &cp];
         ssh_args2.push(&target);
         ssh_args2.push(&safe_cmd);
 
@@ -261,10 +330,18 @@ pub(crate) async fn ssh_exec(ssh_host: &str, ssh_user: &str, cmd: &str) -> Resul
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             let stdout = String::from_utf8_lossy(&output.stdout);
-            let code = output.status.code().map(|c| c.to_string()).unwrap_or_else(|| "signal".into());
+            let code = output
+                .status
+                .code()
+                .map(|c| c.to_string())
+                .unwrap_or_else(|| "signal".into());
             let mut msg = format!("ssh cmd failed [exit {}]", code);
-            if !stderr.trim().is_empty() { msg.push_str(&format!("\nstderr: {}", stderr.trim())); }
-            if !stdout.trim().is_empty() { msg.push_str(&format!("\nstdout: {}", stdout.trim())); }
+            if !stderr.trim().is_empty() {
+                msg.push_str(&format!("\nstderr: {}", stderr.trim()));
+            }
+            if !stdout.trim().is_empty() {
+                msg.push_str(&format!("\nstdout: {}", stdout.trim()));
+            }
             return Err(msg);
         }
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
@@ -292,10 +369,18 @@ pub(crate) async fn close_ssh_master(ssh_host: &str, ssh_user: &str) -> Result<(
     }
     let _ = tokio::fs::remove_file(&control_path).await;
     ssh_backoff_reset(&format!("{}@{}", ssh_user, ssh_host));
-    log::info!("[close_ssh_master] closed socket for {}@{}", ssh_user, ssh_host);
+    log::info!(
+        "[close_ssh_master] closed socket for {}@{}",
+        ssh_user,
+        ssh_host
+    );
     Ok(())
 }
-pub(crate) async fn ssh_read_file(ssh_host: &str, ssh_user: &str, path: &str) -> Result<String, String> {
+pub(crate) async fn ssh_read_file(
+    ssh_host: &str,
+    ssh_user: &str,
+    path: &str,
+) -> Result<String, String> {
     // Use double quotes so ~ expands, but escape any embedded double quotes
     let escaped = path.replace('"', r#"\""#);
     ssh_exec(ssh_host, ssh_user, &format!("cat \"{}\"", escaped)).await
@@ -304,7 +389,11 @@ pub(crate) async fn ssh_read_file(ssh_host: &str, ssh_user: &str, path: &str) ->
 /// Check if an agent is active by reading the tail of the latest .jsonl file via SSH.
 /// If the last message-type entry is a user message (no assistant response yet), agent is working.
 pub(crate) async fn ssh_is_agent_active(ssh_host: &str, ssh_user: &str, agent_id: &str) -> bool {
-    let agent_dir = if agent_id.is_empty() { "main" } else { agent_id };
+    let agent_dir = if agent_id.is_empty() {
+        "main"
+    } else {
+        agent_id
+    };
     // Read the last 5 lines of the newest .jsonl file
     let cmd = format!(
         "f=$(ls -t $HOME/.openclaw/agents/{}/sessions/*.jsonl 2>/dev/null | head -1); [ -f \"$f\" ] && tail -5 \"$f\"",

@@ -4,17 +4,19 @@ use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 
 use crate::state::MINI_WINDOW_FRAME;
 use crate::{
-    collapsed_mascot_window_size, large_collapsed_mascot_window_size,
-    reassert_mini_floating, sanitized_mascot_scale, COLLAPSED_MASCOT_BASE_H,
-    COLLAPSED_MASCOT_BASE_W, LARGE_MASCOT_SIZE_MULTIPLIER, MASCOT_TOP_INSET,
+    collapsed_mascot_window_size, large_collapsed_mascot_window_size, reassert_mini_floating,
+    sanitized_mascot_scale, COLLAPSED_MASCOT_BASE_H, COLLAPSED_MASCOT_BASE_W,
+    LARGE_MASCOT_SIZE_MULTIPLIER, MASCOT_TOP_INSET,
 };
 
 #[cfg(target_os = "macos")]
-use std::sync::atomic::Ordering;
-#[cfg(target_os = "macos")]
 use crate::state::{EFFICIENCY_EXPANDED, NOTCH_SCREEN_INFO, PET_MENU_RESTORE_FRAME};
 #[cfg(target_os = "macos")]
-use crate::{collapsed_x, current_sprite_pad, get_notch_offset, pet_context_schedule_restore_alpha};
+use crate::{
+    collapsed_x, current_sprite_pad, get_notch_offset, pet_context_schedule_restore_alpha,
+};
+#[cfg(target_os = "macos")]
+use std::sync::atomic::Ordering;
 
 #[cfg(target_os = "windows")]
 use crate::platform::windows::win_ui_scale;
@@ -233,17 +235,18 @@ pub async fn get_ui_scale(app: tauri::AppHandle) -> Result<f64, String> {
     Ok(1.0)
 }
 
-
 #[tauri::command]
 pub async fn move_mini_by(app: tauri::AppHandle, dx: f64, dy: f64) -> Result<(), String> {
-    let win = app.get_webview_window("main").ok_or("mini window not found")?;
+    let win = app
+        .get_webview_window("main")
+        .ok_or("mini window not found")?;
     #[cfg(target_os = "macos")]
     {
         let win_clone = win.clone();
         app.run_on_main_thread(move || {
-            use objc2::runtime::{AnyClass, AnyObject};
             use objc2::msg_send;
-            use objc2_foundation::{NSRect, NSPoint, NSSize};
+            use objc2::runtime::{AnyClass, AnyObject};
+            use objc2_foundation::{NSPoint, NSRect, NSSize};
             if let Ok(ns_win) = win_clone.ns_window() {
                 let obj = unsafe { &*(ns_win as *mut AnyObject) };
                 let frame: NSRect = unsafe { msg_send![obj, frame] };
@@ -287,54 +290,63 @@ pub async fn move_mini_by(app: tauri::AppHandle, dx: f64, dy: f64) -> Result<(),
                 // is a *decrease* in origin.y.
                 let target_x = frame.origin.x + dx;
                 let target_y = frame.origin.y - dy;
-                let (clamped_x, clamped_y) = if let (Some(vf), Some(sf)) = (visible_frame, screen_frame) {
-                    // Sprite-content padding. Each edge prefers the
-                    // absolute CSS-pixel override pushed by the frontend
-                    // after alpha-scanning the pet's atlas and
-                    // DOM-measuring the rendered sprite layout; falls
-                    // back to (fraction × window dimension) when the
-                    // frontend hasn't pushed a value for that edge
-                    // (e.g. a floor-only pet has no climb-ceiling row,
-                    // so top_px stays None and the top fraction wins).
-                    // The fraction-of-window-size formula is incorrect
-                    // when the sprite div doesn't fill the window
-                    // (centered, with empty pixels around) — only an
-                    // absolute pixel value captures that offset.
-                    let pad = current_sprite_pad();
-                    let pad_bottom = pad.bottom_px.unwrap_or(frame.size.height * pad.bottom);
-                    let pad_top    = pad.top_px.unwrap_or(frame.size.height * pad.top);
-                    let pad_left   = pad.left_px.unwrap_or(frame.size.width * pad.left);
-                    let pad_right  = pad.right_px.unwrap_or(frame.size.width * pad.right);
+                let (clamped_x, clamped_y) =
+                    if let (Some(vf), Some(sf)) = (visible_frame, screen_frame) {
+                        // Sprite-content padding. Each edge prefers the
+                        // absolute CSS-pixel override pushed by the frontend
+                        // after alpha-scanning the pet's atlas and
+                        // DOM-measuring the rendered sprite layout; falls
+                        // back to (fraction × window dimension) when the
+                        // frontend hasn't pushed a value for that edge
+                        // (e.g. a floor-only pet has no climb-ceiling row,
+                        // so top_px stays None and the top fraction wins).
+                        // The fraction-of-window-size formula is incorrect
+                        // when the sprite div doesn't fill the window
+                        // (centered, with empty pixels around) — only an
+                        // absolute pixel value captures that offset.
+                        let pad = current_sprite_pad();
+                        let pad_bottom = pad.bottom_px.unwrap_or(frame.size.height * pad.bottom);
+                        let pad_top = pad.top_px.unwrap_or(frame.size.height * pad.top);
+                        let pad_left = pad.left_px.unwrap_or(frame.size.width * pad.left);
+                        let pad_right = pad.right_px.unwrap_or(frame.size.width * pad.right);
 
-                    // X: bounded by visibleFrame (so side Docks act as
-                    // walls too). Walls and ceiling use visibleFrame; the
-                    // *floor* is what becomes piecewise.
-                    let min_x = vf.origin.x - pad_left;
-                    let max_x = vf.origin.x + vf.size.width - frame.size.width + pad_right;
-                    let cx = if max_x < min_x { target_x } else { target_x.clamp(min_x, max_x) };
+                        // X: bounded by visibleFrame (so side Docks act as
+                        // walls too). Walls and ceiling use visibleFrame; the
+                        // *floor* is what becomes piecewise.
+                        let min_x = vf.origin.x - pad_left;
+                        let max_x = vf.origin.x + vf.size.width - frame.size.width + pad_right;
+                        let cx = if max_x < min_x {
+                            target_x
+                        } else {
+                            target_x.clamp(min_x, max_x)
+                        };
 
-                    // Piecewise floor: when the window's center-x is
-                    // inside the Dock's horizontal extent, the floor is
-                    // the top of the Dock (visibleFrame.y). When the
-                    // pet walks off the side of the Dock the floor
-                    // drops to the actual screen bottom (frame.y).
-                    // Safety fallback: if Dock detection fails (returns
-                    // None), treat the entire visibleFrame width as a
-                    // platform so the pet still sits on the Dock area
-                    // instead of plummeting past it.
-                    let center_x = cx + frame.size.width / 2.0;
-                    let over_dock = match dock_rect {
-                        Some((dx0, _, dw, _)) => center_x >= dx0 && center_x <= dx0 + dw,
-                        None => true,
+                        // Piecewise floor: when the window's center-x is
+                        // inside the Dock's horizontal extent, the floor is
+                        // the top of the Dock (visibleFrame.y). When the
+                        // pet walks off the side of the Dock the floor
+                        // drops to the actual screen bottom (frame.y).
+                        // Safety fallback: if Dock detection fails (returns
+                        // None), treat the entire visibleFrame width as a
+                        // platform so the pet still sits on the Dock area
+                        // instead of plummeting past it.
+                        let center_x = cx + frame.size.width / 2.0;
+                        let over_dock = match dock_rect {
+                            Some((dx0, _, dw, _)) => center_x >= dx0 && center_x <= dx0 + dw,
+                            None => true,
+                        };
+                        let floor_y = if over_dock { vf.origin.y } else { sf.origin.y };
+                        let min_y = floor_y - pad_bottom;
+                        let max_y = vf.origin.y + vf.size.height - frame.size.height + pad_top;
+                        let cy = if max_y < min_y {
+                            target_y
+                        } else {
+                            target_y.clamp(min_y, max_y)
+                        };
+                        (cx, cy)
+                    } else {
+                        (target_x, target_y)
                     };
-                    let floor_y = if over_dock { vf.origin.y } else { sf.origin.y };
-                    let min_y = floor_y - pad_bottom;
-                    let max_y = vf.origin.y + vf.size.height - frame.size.height + pad_top;
-                    let cy = if max_y < min_y { target_y } else { target_y.clamp(min_y, max_y) };
-                    (cx, cy)
-                } else {
-                    (target_x, target_y)
-                };
 
                 let new_frame = NSRect::new(
                     NSPoint::new(clamped_x, clamped_y),
@@ -344,7 +356,12 @@ pub async fn move_mini_by(app: tauri::AppHandle, dx: f64, dy: f64) -> Result<(),
                     let _: () = msg_send![obj, setFrame: new_frame, display: true, animate: false];
                 }
                 if let Ok(mut f) = MINI_WINDOW_FRAME.lock() {
-                    *f = Some((new_frame.origin.x, new_frame.origin.y, new_frame.size.width, new_frame.size.height));
+                    *f = Some((
+                        new_frame.origin.x,
+                        new_frame.origin.y,
+                        new_frame.size.width,
+                        new_frame.size.height,
+                    ));
                 }
                 // Keep the pet-context restore frame in sync when dragging
                 // while the context menu is open, so closing restores to the
@@ -360,7 +377,8 @@ pub async fn move_mini_by(app: tauri::AppHandle, dx: f64, dy: f64) -> Result<(),
                     }
                 }
             }
-        }).map_err(|e| e.to_string())?;
+        })
+        .map_err(|e| e.to_string())?;
     }
     #[cfg(target_os = "windows")]
     {
@@ -387,15 +405,16 @@ pub async fn get_mini_origin(app: tauri::AppHandle) -> Result<(f64, f64), String
         let (tx, rx) = std::sync::mpsc::channel();
         let win_clone = win.clone();
         app.run_on_main_thread(move || {
-            use objc2::runtime::AnyObject;
             use objc2::msg_send;
+            use objc2::runtime::AnyObject;
             use objc2_foundation::NSRect;
             if let Ok(ns_win) = win_clone.ns_window() {
                 let obj = unsafe { &*(ns_win as *mut AnyObject) };
                 let frame: NSRect = unsafe { msg_send![obj, frame] };
                 let _ = tx.send((frame.origin.x, frame.origin.y));
             }
-        }).map_err(|e| e.to_string())?;
+        })
+        .map_err(|e| e.to_string())?;
         if let Ok(pos) = rx.recv_timeout(std::time::Duration::from_secs(1)) {
             return Ok(pos);
         }
@@ -429,8 +448,8 @@ pub async fn get_mini_monitor_rect(app: tauri::AppHandle) -> Result<(f64, f64, f
         let (tx, rx) = std::sync::mpsc::channel();
         let win_clone = win.clone();
         app.run_on_main_thread(move || {
-            use objc2::runtime::{AnyClass, AnyObject};
             use objc2::msg_send;
+            use objc2::runtime::{AnyClass, AnyObject};
             use objc2_foundation::NSRect;
             if let Ok(ns_win) = win_clone.ns_window() {
                 let obj = unsafe { &*(ns_win as *mut AnyObject) };
@@ -460,7 +479,8 @@ pub async fn get_mini_monitor_rect(app: tauri::AppHandle) -> Result<(f64, f64, f
                     screen_frame.size.height,
                 ));
             }
-        }).map_err(|e| e.to_string())?;
+        })
+        .map_err(|e| e.to_string())?;
         if let Ok(rect) = rx.recv_timeout(std::time::Duration::from_secs(1)) {
             return Ok(rect);
         }
@@ -499,7 +519,9 @@ pub async fn set_mini_origin(
     let confine = confine.unwrap_or(true);
     log::info!(
         "[mini-pos] set_mini_origin request x={:.1} y={:.1} confine={}",
-        x, y, confine
+        x,
+        y,
+        confine
     );
     let win = app.get_webview_window("main").ok_or("mini not found")?;
     #[cfg(target_os = "macos")]
@@ -568,7 +590,8 @@ pub async fn set_mini_origin(
         if !confine {
             log::info!(
                 "[mini-pos] set_mini_origin(win) unconfined x={:.1} y={:.1}",
-                x, y
+                x,
+                y
             );
             let _ = win.set_position(tauri::LogicalPosition::new(x, y));
             return Ok(());
@@ -599,7 +622,8 @@ pub async fn set_mini_origin(
         } else {
             log::info!(
                 "[mini-pos] set_mini_origin(win,fallback) apply x={:.1} y={:.1} (with inset)",
-                x, y + MASCOT_TOP_INSET
+                x,
+                y + MASCOT_TOP_INSET
             );
             let _ = win.set_position(tauri::LogicalPosition::new(x, y + MASCOT_TOP_INSET));
         }
@@ -617,8 +641,20 @@ pub async fn set_ime_mode(_app: tauri::AppHandle, _active: bool) -> Result<(), S
 /// Resize/reposition the mini window between collapsed (small, right of notch)
 /// and expanded (larger, centered on notch) states.
 #[tauri::command]
-pub async fn set_mini_expanded(app: tauri::AppHandle, expanded: bool, position: Option<String>, efficiency: Option<bool>, max_height: Option<f64>, mascot_scale: Option<f64>, large_mascot: Option<bool>, keep_position: Option<bool>, large_mascot_scale: Option<f64>) -> Result<(), String> {
-    let win = app.get_webview_window("main").ok_or("mini window not found")?;
+pub async fn set_mini_expanded(
+    app: tauri::AppHandle,
+    expanded: bool,
+    position: Option<String>,
+    efficiency: Option<bool>,
+    max_height: Option<f64>,
+    mascot_scale: Option<f64>,
+    large_mascot: Option<bool>,
+    keep_position: Option<bool>,
+    large_mascot_scale: Option<f64>,
+) -> Result<(), String> {
+    let win = app
+        .get_webview_window("main")
+        .ok_or("mini window not found")?;
     let pos = position.unwrap_or_else(|| "right".to_string());
     let mascot_scale = sanitized_mascot_scale(mascot_scale);
     let large_mascot_scale = large_mascot_scale.unwrap_or(LARGE_MASCOT_SIZE_MULTIPLIER);
@@ -744,7 +780,11 @@ pub async fn set_mini_expanded(app: tauri::AppHandle, expanded: bool, position: 
             let sw = monitor.size().width as f64 / scale;
             let ui = win_ui_scale(&monitor);
             if expanded {
-                let base_w = if efficiency.unwrap_or(false) { 600.0 } else { 500.0 };
+                let base_w = if efficiency.unwrap_or(false) {
+                    600.0
+                } else {
+                    500.0
+                };
                 let win_w = (base_w * ui).round();
                 let win_h = (400.0 * ui).round();
                 let x = mx + (sw - win_w) / 2.0;
@@ -776,7 +816,12 @@ pub async fn set_mini_expanded(app: tauri::AppHandle, expanded: bool, position: 
                         let _ = win.set_position(tauri::LogicalPosition::new(x, y));
                     } else {
                         let notch_off = (80.0 * ui).round();
-                        let x = mx + if pos == "left" { sw / 2.0 - notch_off - win_w } else { sw / 2.0 + notch_off };
+                        let x = mx
+                            + if pos == "left" {
+                                sw / 2.0 - notch_off - win_w
+                            } else {
+                                sw / 2.0 + notch_off
+                            };
                         let y = my + (MASCOT_TOP_INSET * ui).round();
                         log::info!(
                             "[mini-pos] set_mini_expanded(win,collapsed) frame x={:.1} y={:.1} w={:.1} h={:.1} keep_position={}",
@@ -795,13 +840,24 @@ pub async fn set_mini_expanded(app: tauri::AppHandle, expanded: bool, position: 
     Ok(())
 }
 #[tauri::command]
-pub async fn resize_mini_height(app: tauri::AppHandle, height: f64, max_height: Option<f64>, animate: Option<bool>) -> Result<(), String> {
-    let win = app.get_webview_window("main").ok_or("mini window not found")?;
+pub async fn resize_mini_height(
+    app: tauri::AppHandle,
+    height: f64,
+    max_height: Option<f64>,
+    animate: Option<bool>,
+) -> Result<(), String> {
+    let win = app
+        .get_webview_window("main")
+        .ok_or("mini window not found")?;
     let limit = max_height.unwrap_or(350.0).max(200.0).min(2000.0);
     // Scale height limits on Windows to match DPI-aware window sizes
     #[cfg(target_os = "windows")]
     let h = {
-        let ui = if let Ok(Some(m)) = win.current_monitor() { win_ui_scale(&m) } else { 1.0 };
+        let ui = if let Ok(Some(m)) = win.current_monitor() {
+            win_ui_scale(&m)
+        } else {
+            1.0
+        };
         (height * ui).round().max(45.0 * ui).min(limit * ui)
     };
     #[cfg(not(target_os = "windows"))]
@@ -811,19 +867,26 @@ pub async fn resize_mini_height(app: tauri::AppHandle, height: f64, max_height: 
     {
         let win_clone = win.clone();
         app.run_on_main_thread(move || {
-            use objc2::runtime::{AnyClass, AnyObject};
             use objc2::msg_send;
-            use objc2_foundation::{NSRect, NSPoint, NSSize};
+            use objc2::runtime::{AnyClass, AnyObject};
+            use objc2_foundation::{NSPoint, NSRect, NSSize};
 
             if let Ok(ns_win) = win_clone.ns_window() {
                 let obj = unsafe { &*(ns_win as *mut AnyObject) };
                 let screen: *mut AnyObject = unsafe { msg_send![obj, screen] };
                 let screen_ptr = if screen.is_null() {
-                    let cls = match AnyClass::get(c"NSScreen") { Some(c) => c, None => return };
+                    let cls = match AnyClass::get(c"NSScreen") {
+                        Some(c) => c,
+                        None => return,
+                    };
                     let ms: *mut AnyObject = unsafe { msg_send![cls, mainScreen] };
-                    if ms.is_null() { return; }
+                    if ms.is_null() {
+                        return;
+                    }
                     ms
-                } else { screen };
+                } else {
+                    screen
+                };
                 let sf: NSRect = unsafe { msg_send![&*screen_ptr, frame] };
                 let cur: NSRect = unsafe { msg_send![obj, frame] };
                 let capped_h = h.min((sf.size.height * 0.75).max(200.0));
@@ -837,17 +900,22 @@ pub async fn resize_mini_height(app: tauri::AppHandle, height: f64, max_height: 
                 );
                 log::info!(
                     "[mini-pos] resize_mini_height(mac) frame x={:.1} y={:.1} w={:.1} h={:.1}",
-                    cur.origin.x, new_y, cur.size.width, capped_h
+                    cur.origin.x,
+                    new_y,
+                    cur.size.width,
+                    capped_h
                 );
                 unsafe {
                     let do_animate: bool = animate.unwrap_or(false);
-                    let _: () = msg_send![obj, setFrame: new_frame, display: true, animate: do_animate];
+                    let _: () =
+                        msg_send![obj, setFrame: new_frame, display: true, animate: do_animate];
                 }
                 if let Ok(mut f) = MINI_WINDOW_FRAME.lock() {
                     *f = Some((cur.origin.x, new_y, cur.size.width, capped_h));
                 }
             }
-        }).map_err(|e| e.to_string())?;
+        })
+        .map_err(|e| e.to_string())?;
     }
 
     #[cfg(target_os = "windows")]
@@ -861,22 +929,6 @@ pub async fn resize_mini_height(app: tauri::AppHandle, height: f64, max_height: 
 
     Ok(())
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 /// Expand the mini window to pet-context size and start a cursor-position poll
 /// that toggles `setIgnoresMouseEvents:` — the transparent area around the
@@ -895,7 +947,9 @@ pub async fn set_mini_size(
     large_mascot: Option<bool>,
     large_mascot_scale: Option<f64>,
 ) -> Result<(), String> {
-    let win = app.get_webview_window("main").ok_or("mini window not found")?;
+    let win = app
+        .get_webview_window("main")
+        .ok_or("mini window not found")?;
     let pos = position.unwrap_or_else(|| "right".to_string());
     let want_top = keep_on_top.unwrap_or(restore);
     let is_pet_context = pet_context.unwrap_or(false);
@@ -1105,7 +1159,9 @@ pub async fn set_mini_size(
                 let win_w = (base_w * ui).round();
                 let win_h = (base_h * ui).round();
                 let _ = win.set_size(tauri::LogicalSize::new(win_w, win_h));
-                let _ = win.set_always_on_top(want_top && !FULLSCREEN_HIDING.load(std::sync::atomic::Ordering::SeqCst));
+                let _ = win.set_always_on_top(
+                    want_top && !FULLSCREEN_HIDING.load(std::sync::atomic::Ordering::SeqCst),
+                );
                 if large_mascot.unwrap_or(false) {
                     let margin = (10.0 * ui).round();
                     let x = mx + sw - win_w - margin;
@@ -1113,7 +1169,12 @@ pub async fn set_mini_size(
                     let _ = win.set_position(tauri::LogicalPosition::new(x, y));
                 } else {
                     let notch_off = (80.0 * ui).round();
-                    let x = mx + if pos == "left" { sw / 2.0 - notch_off - win_w } else { sw / 2.0 + notch_off };
+                    let x = mx
+                        + if pos == "left" {
+                            sw / 2.0 - notch_off - win_w
+                        } else {
+                            sw / 2.0 + notch_off
+                        };
                     let _ = win.set_position(tauri::LogicalPosition::new(
                         x,
                         my + (MASCOT_TOP_INSET * ui).round(),
@@ -1123,7 +1184,9 @@ pub async fn set_mini_size(
                 let win_w = (sw * 0.85).round();
                 let win_h = (sh * 0.85).round();
                 let x = mx + (sw - win_w) / 2.0;
-                let _ = win.set_always_on_top(want_top && !FULLSCREEN_HIDING.load(std::sync::atomic::Ordering::SeqCst));
+                let _ = win.set_always_on_top(
+                    want_top && !FULLSCREEN_HIDING.load(std::sync::atomic::Ordering::SeqCst),
+                );
                 let _ = win.set_size(tauri::LogicalSize::new(win_w, win_h));
                 let _ = win.set_position(tauri::LogicalPosition::new(x, my));
             }
@@ -1133,8 +1196,6 @@ pub async fn set_mini_size(
     Ok(())
 }
 
-
-
 #[tauri::command]
 pub async fn open_detail_panel(app: tauri::AppHandle) -> Result<(), String> {
     if let Some(win) = app.get_webview_window("detail") {
@@ -1143,28 +1204,22 @@ pub async fn open_detail_panel(app: tauri::AppHandle) -> Result<(), String> {
         return Ok(());
     }
 
-    let win = WebviewWindowBuilder::new(&app, "detail", WebviewUrl::App("index.html#/detail".into()))
-        .title("PawBae - Detail")
-        .inner_size(480.0, 600.0)
-        .decorations(true)
-        .resizable(true)
-        .center()
-        .build()
-        .map_err(|e| e.to_string())?;
+    let win =
+        WebviewWindowBuilder::new(&app, "detail", WebviewUrl::App("index.html#/detail".into()))
+            .title("PawBae - Detail")
+            .inner_size(480.0, 600.0)
+            .decorations(true)
+            .resizable(true)
+            .center()
+            .build()
+            .map_err(|e| e.to_string())?;
     let _ = win.maximize();
 
     Ok(())
 }
-
 
 #[tauri::command]
 pub async fn reassert_floating(app: tauri::AppHandle) -> Result<(), String> {
     reassert_mini_floating(&app);
     Ok(())
 }
-
-
-
-
-
-

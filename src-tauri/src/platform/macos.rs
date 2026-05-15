@@ -15,7 +15,9 @@ pub(crate) unsafe fn get_notch_offset(screen: *mut objc2::runtime::AnyObject) ->
     use objc2::msg_send;
     use objc2_foundation::NSRect;
 
-    if screen.is_null() { return 80.0; }
+    if screen.is_null() {
+        return 80.0;
+    }
     let sel = objc2::runtime::Sel::register(c"auxiliaryTopRightArea");
     let responds: bool = msg_send![&*screen, respondsToSelector: sel];
     if responds {
@@ -24,7 +26,9 @@ pub(crate) unsafe fn get_notch_offset(screen: *mut objc2::runtime::AnyObject) ->
             let frame: NSRect = msg_send![&*screen, frame];
             let center_x = frame.origin.x + frame.size.width / 2.0;
             let half_w = right_area.origin.x - center_x;
-            if half_w > 10.0 { return half_w; }
+            if half_w > 10.0 {
+                return half_w;
+            }
         }
     }
     80.0
@@ -51,8 +55,17 @@ mod cg_window {
         pub fn CFArrayGetCount(arr: CFArrayRef) -> CFIndex;
         pub fn CFArrayGetValueAtIndex(arr: CFArrayRef, idx: CFIndex) -> CFTypeRef;
         pub fn CFDictionaryGetValue(d: CFDictionaryRef, key: CFTypeRef) -> CFTypeRef;
-        pub fn CFStringCreateWithCString(alloc: CFTypeRef, cstr: *const c_char, enc: u32) -> CFStringRef;
-        pub fn CFStringGetCString(s: CFStringRef, buf: *mut c_char, bufsz: CFIndex, enc: u32) -> bool;
+        pub fn CFStringCreateWithCString(
+            alloc: CFTypeRef,
+            cstr: *const c_char,
+            enc: u32,
+        ) -> CFStringRef;
+        pub fn CFStringGetCString(
+            s: CFStringRef,
+            buf: *mut c_char,
+            bufsz: CFIndex,
+            enc: u32,
+        ) -> bool;
         pub fn CFStringGetLength(s: CFStringRef) -> CFIndex;
         pub fn CFNumberGetValue(num: CFTypeRef, ty: i32, val: *mut c_void) -> bool;
         pub fn CFRelease(cf: CFTypeRef);
@@ -81,17 +94,25 @@ unsafe fn cf_string_from(s: &str) -> cg_window::CFStringRef {
 
 unsafe fn cf_dict_get_double(dict: cg_window::CFDictionaryRef, key: &str) -> Option<f64> {
     let key_cf = cf_string_from(key);
-    if key_cf.is_null() { return None; }
+    if key_cf.is_null() {
+        return None;
+    }
     let val = cg_window::CFDictionaryGetValue(dict, key_cf);
     cg_window::CFRelease(key_cf);
-    if val.is_null() { return None; }
+    if val.is_null() {
+        return None;
+    }
     let mut out: f64 = 0.0;
     let ok = cg_window::CFNumberGetValue(
         val,
         cg_window::NUMBER_DOUBLE_TYPE,
         &mut out as *mut f64 as *mut std::ffi::c_void,
     );
-    if ok { Some(out) } else { None }
+    if ok {
+        Some(out)
+    } else {
+        None
+    }
 }
 
 /// Read a top-level i32 value (such as kCGWindowLayer or kCGWindowAlpha
@@ -99,27 +120,41 @@ unsafe fn cf_dict_get_double(dict: cg_window::CFDictionaryRef, key: &str) -> Opt
 /// fails.
 unsafe fn cf_dict_get_i32(dict: cg_window::CFDictionaryRef, key: &str) -> Option<i32> {
     let key_cf = cf_string_from(key);
-    if key_cf.is_null() { return None; }
+    if key_cf.is_null() {
+        return None;
+    }
     let val = cg_window::CFDictionaryGetValue(dict, key_cf);
     cg_window::CFRelease(key_cf);
-    if val.is_null() { return None; }
+    if val.is_null() {
+        return None;
+    }
     let mut out: i32 = 0;
     let ok = cg_window::CFNumberGetValue(
         val,
         cg_window::NUMBER_SINT32_TYPE,
         &mut out as *mut i32 as *mut std::ffi::c_void,
     );
-    if ok { Some(out) } else { None }
+    if ok {
+        Some(out)
+    } else {
+        None
+    }
 }
 
 unsafe fn cf_dict_get_string(dict: cg_window::CFDictionaryRef, key: &str) -> Option<String> {
     let key_cf = cf_string_from(key);
-    if key_cf.is_null() { return None; }
+    if key_cf.is_null() {
+        return None;
+    }
     let val = cg_window::CFDictionaryGetValue(dict, key_cf);
     cg_window::CFRelease(key_cf);
-    if val.is_null() { return None; }
+    if val.is_null() {
+        return None;
+    }
     let len = cg_window::CFStringGetLength(val);
-    if len <= 0 { return Some(String::new()); }
+    if len <= 0 {
+        return Some(String::new());
+    }
     let bufsz = (len as usize) * 4 + 1; // UTF-8 worst case
     let mut buf: Vec<i8> = vec![0; bufsz];
     let ok = cg_window::CFStringGetCString(
@@ -128,7 +163,9 @@ unsafe fn cf_dict_get_string(dict: cg_window::CFDictionaryRef, key: &str) -> Opt
         bufsz as cg_window::CFIndex,
         cg_window::STRING_ENCODING_UTF8,
     );
-    if !ok { return None; }
+    if !ok {
+        return None;
+    }
     let cstr = std::ffi::CStr::from_ptr(buf.as_ptr());
     Some(cstr.to_string_lossy().into_owned())
 }
@@ -154,8 +191,8 @@ unsafe fn cf_dict_get_string(dict: cg_window::CFDictionaryRef, key: &str) -> Opt
 // one-line change instead of a re-port of the CGWindowList scan.
 #[allow(dead_code)]
 unsafe fn compute_dock_rect_macos() -> Option<(f64, f64, f64, f64)> {
-    use objc2::runtime::{AnyClass, AnyObject};
     use objc2::msg_send;
+    use objc2::runtime::{AnyClass, AnyObject};
     use objc2_foundation::NSRect;
     use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -164,7 +201,9 @@ unsafe fn compute_dock_rect_macos() -> Option<(f64, f64, f64, f64)> {
 
     let cls = AnyClass::get(c"NSScreen")?;
     let main_screen: *mut AnyObject = msg_send![cls, mainScreen];
-    if main_screen.is_null() { return None; }
+    if main_screen.is_null() {
+        return None;
+    }
     let mframe: NSRect = msg_send![&*main_screen, frame];
     let main_w = mframe.size.width;
     let main_h = mframe.size.height;
@@ -203,15 +242,21 @@ unsafe fn compute_dock_rect_macos() -> Option<(f64, f64, f64, f64)> {
 
     for i in 0..count {
         let dict = cg_window::CFArrayGetValueAtIndex(list, i) as cg_window::CFDictionaryRef;
-        if dict.is_null() { continue; }
+        if dict.is_null() {
+            continue;
+        }
         let owner = cf_dict_get_string(dict, "kCGWindowOwnerName").unwrap_or_default();
         let layer = cf_dict_get_i32(dict, "kCGWindowLayer").unwrap_or(0);
         let alpha = cf_dict_get_double(dict, "kCGWindowAlpha").unwrap_or(0.0);
         let bounds_key = cf_string_from("kCGWindowBounds");
-        if bounds_key.is_null() { continue; }
+        if bounds_key.is_null() {
+            continue;
+        }
         let bounds = cg_window::CFDictionaryGetValue(dict, bounds_key);
         cg_window::CFRelease(bounds_key);
-        if bounds.is_null() { continue; }
+        if bounds.is_null() {
+            continue;
+        }
         let x = cf_dict_get_double(bounds, "X").unwrap_or(0.0);
         let y_cg = cf_dict_get_double(bounds, "Y").unwrap_or(0.0);
         let w = cf_dict_get_double(bounds, "Width").unwrap_or(0.0);
@@ -222,7 +267,13 @@ unsafe fn compute_dock_rect_macos() -> Option<(f64, f64, f64, f64)> {
         if dump_now {
             log::info!(
                 "[dock/dump] owner={:?} layer={} alpha={:.2} x={} y_cg={} w={} h={}",
-                owner, layer, alpha, x, y_cg, w, h,
+                owner,
+                layer,
+                alpha,
+                x,
+                y_cg,
+                w,
+                h,
             );
         }
 
@@ -235,10 +286,16 @@ unsafe fn compute_dock_rect_macos() -> Option<(f64, f64, f64, f64)> {
         let is_dock_owner = owner_lower == "dock"
             || owner_lower == "windowserver"
             || owner_lower == "window server";
-        if !is_dock_owner { continue; }
-        if w < 30.0 || h < 30.0 { continue; }
+        if !is_dock_owner {
+            continue;
+        }
+        if w < 30.0 || h < 30.0 {
+            continue;
+        }
         let wallpaper_like = w >= main_w * 0.6 && h >= main_h * 0.6;
-        if wallpaper_like { continue; }
+        if wallpaper_like {
+            continue;
+        }
         // Position gate — the Dock is always at a screen edge. On
         // macOS bottom-up coords (`y_cg + h ≈ main_h` = bottom edge,
         // `y_cg ≈ 0` = top edge of main screen). Reject the menu
@@ -247,7 +304,9 @@ unsafe fn compute_dock_rect_macos() -> Option<(f64, f64, f64, f64)> {
         let touches_bottom = (y_cg + h - main_h).abs() < 2.0;
         let touches_left = x.abs() < 2.0 && h > w; // tall strip at x≈0
         let touches_right = (x + w - main_w).abs() < 2.0 && h > w;
-        if !(touches_bottom || touches_left || touches_right) { continue; }
+        if !(touches_bottom || touches_left || touches_right) {
+            continue;
+        }
 
         candidate_count += 1;
         let long_side = w.max(h);
@@ -272,13 +331,14 @@ unsafe fn compute_dock_rect_macos() -> Option<(f64, f64, f64, f64)> {
     // INFO record we keep around to verify behavior on a real machine.
     log::debug!(
         "[dock] count={} dock_or_ws_candidates={} chosen={:?}",
-        count, candidate_count, chosen,
+        count,
+        candidate_count,
+        chosen,
     );
     let (x, y_cg, w, h, _layer, _owner) = chosen?;
     let ns_y = mframe.origin.y + mframe.size.height - y_cg - h;
     Some((x, ns_y, w, h))
 }
-
 
 /// 500 ms TTL cache around `compute_dock_rect_macos`. Returns `None`
 /// when the Dock strip isn't visible to CGWindowList (the macOS 14.4+
@@ -295,13 +355,14 @@ fn get_cached_dock_rect_macos() -> Option<(f64, f64, f64, f64)> {
     const TTL: Duration = Duration::from_millis(500);
     let mut cache = CACHE.lock().ok()?;
     if let Some((at, val)) = *cache {
-        if at.elapsed() < TTL { return val; }
+        if at.elapsed() < TTL {
+            return val;
+        }
     }
     let fresh = unsafe { compute_dock_rect_macos() };
     *cache = Some((Instant::now(), fresh));
     fresh
 }
-
 
 /// Pick the topmost normal app window from CGWindowList, excluding the
 /// mascot's own windows. Returns `None` when no qualifying window is
@@ -317,8 +378,8 @@ fn get_cached_dock_rect_macos() -> Option<(f64, f64, f64, f64)> {
 /// CGWindowList returns windows in z-order front-to-back, so the first
 /// passing entry is the topmost — exactly what we want.
 pub(crate) unsafe fn compute_frontmost_app_window_macos() -> Option<AppWindowInfo> {
-    use objc2::runtime::{AnyClass, AnyObject};
     use objc2::msg_send;
+    use objc2::runtime::{AnyClass, AnyObject};
     use objc2_foundation::NSRect;
 
     // Main-screen frame is needed to flip CGWindowList's top-down y to
@@ -326,7 +387,9 @@ pub(crate) unsafe fn compute_frontmost_app_window_macos() -> Option<AppWindowInf
     // mascot itself is currently main-screen-centric per `get_pet_floor_info`.
     let cls = AnyClass::get(c"NSScreen")?;
     let main: *mut AnyObject = msg_send![cls, mainScreen];
-    if main.is_null() { return None; }
+    if main.is_null() {
+        return None;
+    }
     let mframe: NSRect = msg_send![&*main, frame];
     let main_h = mframe.size.height;
     let main_origin_y = mframe.origin.y;
@@ -337,38 +400,55 @@ pub(crate) unsafe fn compute_frontmost_app_window_macos() -> Option<AppWindowInf
         cg_window::OPTION_ON_SCREEN_ONLY,
         cg_window::NULL_WINDOW_ID,
     );
-    if list.is_null() { return None; }
+    if list.is_null() {
+        return None;
+    }
     let count = cg_window::CFArrayGetCount(list);
 
     let mut best: Option<AppWindowInfo> = None;
     for i in 0..count {
         let dict = cg_window::CFArrayGetValueAtIndex(list, i) as cg_window::CFDictionaryRef;
-        if dict.is_null() { continue; }
+        if dict.is_null() {
+            continue;
+        }
 
         let layer = cf_dict_get_i32(dict, "kCGWindowLayer").unwrap_or(99);
-        if layer != 0 { continue; }
+        if layer != 0 {
+            continue;
+        }
         let alpha = cf_dict_get_double(dict, "kCGWindowAlpha").unwrap_or(0.0);
-        if alpha < 0.5 { continue; }
+        if alpha < 0.5 {
+            continue;
+        }
         let owner_pid = cf_dict_get_i32(dict, "kCGWindowOwnerPID").unwrap_or(0);
-        if owner_pid == our_pid { continue; }
+        if owner_pid == our_pid {
+            continue;
+        }
         let owner = cf_dict_get_string(dict, "kCGWindowOwnerName").unwrap_or_default();
         let owner_lower = owner.to_ascii_lowercase();
-        if owner_lower == "dock"
-            || owner_lower == "windowserver"
-            || owner_lower == "window server" { continue; }
+        if owner_lower == "dock" || owner_lower == "windowserver" || owner_lower == "window server"
+        {
+            continue;
+        }
 
         let bounds_key = cf_string_from("kCGWindowBounds");
-        if bounds_key.is_null() { continue; }
+        if bounds_key.is_null() {
+            continue;
+        }
         let bounds = cg_window::CFDictionaryGetValue(dict, bounds_key);
         cg_window::CFRelease(bounds_key);
-        if bounds.is_null() { continue; }
+        if bounds.is_null() {
+            continue;
+        }
         let x = cf_dict_get_double(bounds, "X").unwrap_or(0.0);
         let y_cg = cf_dict_get_double(bounds, "Y").unwrap_or(0.0);
         let w = cf_dict_get_double(bounds, "Width").unwrap_or(0.0);
         let h = cf_dict_get_double(bounds, "Height").unwrap_or(0.0);
         // Tooltips, popovers and completion menus are too small to be
         // useful platforms; also skip degenerate w/h <= 0.
-        if w < 200.0 || h < 120.0 { continue; }
+        if w < 200.0 || h < 120.0 {
+            continue;
+        }
 
         let window_id = cf_dict_get_i32(dict, "kCGWindowNumber").unwrap_or(0) as u32;
         let ns_y = main_origin_y + main_h - y_cg - h;
@@ -404,7 +484,11 @@ pub(crate) mod frontmost_app_window_cache {
     pub fn try_fresh() -> Option<Option<AppWindowInfo>> {
         let cache = CACHE.lock().ok()?;
         let (at, val) = cache.as_ref()?;
-        if at.elapsed() < TTL { Some(val.clone()) } else { None }
+        if at.elapsed() < TTL {
+            Some(val.clone())
+        } else {
+            None
+        }
     }
 
     pub fn store(val: Option<AppWindowInfo>) {
@@ -527,7 +611,10 @@ pub(crate) fn pet_context_schedule_restore_alpha(ns_win_ptr: *mut std::ffi::c_vo
     }
 
     let gen = PET_ALPHA_GEN.fetch_add(1, Ordering::SeqCst) + 1;
-    let ctx = Box::new(RestoreCtx { ns_win: ns_win_ptr, gen });
+    let ctx = Box::new(RestoreCtx {
+        ns_win: ns_win_ptr,
+        gen,
+    });
     unsafe {
         // 34ms ≈ 2 frames at 60Hz — minimal delay for the webview to
         // finish compositing at the new window size.
@@ -550,22 +637,36 @@ pub(crate) fn get_frontmost_bundle_id() -> String {
             None => return String::new(),
         };
         let ws: *mut AnyObject = msg_send![cls, sharedWorkspace];
-        if ws.is_null() { return String::new(); }
+        if ws.is_null() {
+            return String::new();
+        }
         let front_app: *mut AnyObject = msg_send![&*ws, frontmostApplication];
-        if front_app.is_null() { return String::new(); }
+        if front_app.is_null() {
+            return String::new();
+        }
         let bid_ns: *mut AnyObject = msg_send![&*front_app, bundleIdentifier];
-        if bid_ns.is_null() { return String::new(); }
+        if bid_ns.is_null() {
+            return String::new();
+        }
         let utf8: *const u8 = msg_send![&*bid_ns, UTF8String];
-        if utf8.is_null() { return String::new(); }
+        if utf8.is_null() {
+            return String::new();
+        }
         let len: usize = msg_send![&*bid_ns, length];
         String::from_utf8_lossy(std::slice::from_raw_parts(utf8, len)).into_owned()
     }
 }
 const MUSIC_APP_BIDS: &[&str] = &[
-    "com.apple.music", "com.spotify.client", "com.netease.163music",
-    "com.tencent.qqmusic", "com.kugou", "com.kuwo",
-    "com.xiami.client", "com.apple.itunes",
-    "com.soda.music", "com.bytedance.soda.music",
+    "com.apple.music",
+    "com.spotify.client",
+    "com.netease.163music",
+    "com.tencent.qqmusic",
+    "com.kugou",
+    "com.kuwo",
+    "com.xiami.client",
+    "com.apple.itunes",
+    "com.soda.music",
+    "com.bytedance.soda.music",
 ];
 pub(crate) fn is_music_app(bid: &str) -> bool {
     MUSIC_APP_BIDS.iter().any(|m| bid.contains(m))
@@ -592,10 +693,10 @@ fn is_music_app_running() -> bool {
 fn _get_system_now_playing_is_playing_unused() -> Option<bool> {
     use block2::RcBlock;
     use std::ffi::c_void;
-    use std::sync::{Mutex, OnceLock};
     use std::sync::mpsc::channel;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::sync::{Mutex, OnceLock};
     use std::time::Duration;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     type DispatchQueue = *mut std::ffi::c_void;
     type PlaybackState = u32;
@@ -648,7 +749,9 @@ fn _get_system_now_playing_is_playing_unused() -> Option<bool> {
         } else {
             let mr_is_playing_sym = libc::dlsym(
                 mr_handle,
-                c"MRMediaRemoteGetNowPlayingApplicationIsPlaying".as_ptr().cast(),
+                c"MRMediaRemoteGetNowPlayingApplicationIsPlaying"
+                    .as_ptr()
+                    .cast(),
             );
             if mr_is_playing_sym.is_null() {
                 None
@@ -681,7 +784,8 @@ fn _get_system_now_playing_is_playing_unused() -> Option<bool> {
                 if mr_sym.is_null() {
                     None
                 } else {
-                    let f: MrGetPlaybackStateFn = std::mem::transmute::<*mut c_void, MrGetPlaybackStateFn>(mr_sym);
+                    let f: MrGetPlaybackStateFn =
+                        std::mem::transmute::<*mut c_void, MrGetPlaybackStateFn>(mr_sym);
                     let _ = MR_GET_STATE_FN.set(f);
                     Some(f)
                 }
@@ -691,10 +795,8 @@ fn _get_system_now_playing_is_playing_unused() -> Option<bool> {
         let get_now_playing_info = if let Some(f) = MR_GET_INFO_FN.get() {
             Some(*f)
         } else {
-            let mr_info_sym = libc::dlsym(
-                mr_handle,
-                c"MRMediaRemoteGetNowPlayingInfo".as_ptr().cast(),
-            );
+            let mr_info_sym =
+                libc::dlsym(mr_handle, c"MRMediaRemoteGetNowPlayingInfo".as_ptr().cast());
             if mr_info_sym.is_null() {
                 None
             } else {
@@ -767,14 +869,18 @@ fn _get_system_now_playing_is_playing_unused() -> Option<bool> {
         let get_global_queue = if let Some(f) = DISPATCH_GET_GLOBAL_QUEUE_FN.get() {
             *f
         } else {
-            let dispatch_handle =
-                libc::dlopen(c"/usr/lib/system/libdispatch.dylib".as_ptr().cast(), libc::RTLD_NOW);
+            let dispatch_handle = libc::dlopen(
+                c"/usr/lib/system/libdispatch.dylib".as_ptr().cast(),
+                libc::RTLD_NOW,
+            );
             if dispatch_handle.is_null() {
                 log::info!("[now_playing/media_remote] dlopen libdispatch failed");
                 return None;
             }
-            let dispatch_sym =
-                libc::dlsym(dispatch_handle, c"dispatch_get_global_queue".as_ptr().cast());
+            let dispatch_sym = libc::dlsym(
+                dispatch_handle,
+                c"dispatch_get_global_queue".as_ptr().cast(),
+            );
             if dispatch_sym.is_null() {
                 log::info!("[now_playing/media_remote] dlsym dispatch_get_global_queue failed");
                 return None;
@@ -788,8 +894,7 @@ fn _get_system_now_playing_is_playing_unused() -> Option<bool> {
         let queue = get_global_queue(0, 0);
 
         // Best signal: now playing info playbackRate (0 paused, 1 playing).
-        if let Some(get_now_playing_info_fn) = get_now_playing_info
-        {
+        if let Some(get_now_playing_info_fn) = get_now_playing_info {
             let (tx, rx) = channel::<(Option<f64>, Option<f64>)>();
             let callback = RcBlock::new(move |info: *const c_void| {
                 if info.is_null() {
@@ -808,7 +913,11 @@ fn _get_system_now_playing_is_playing_unused() -> Option<bool> {
                         K_CFNUMBER_DOUBLE_TYPE,
                         &mut n as *mut f64 as *mut c_void,
                     );
-                    if ok != 0 { Some(n) } else { None }
+                    if ok != 0 {
+                        Some(n)
+                    } else {
+                        None
+                    }
                 };
                 let rate = read_number(playback_rate_key);
                 let elapsed = read_number(elapsed_time_key);
@@ -872,7 +981,10 @@ fn _get_system_now_playing_is_playing_unused() -> Option<bool> {
             match rx.recv_timeout(Duration::from_millis(220)) {
                 Ok(is_playing_raw) => {
                     let is_playing = is_playing_raw != 0;
-                    log::info!("[now_playing/media_remote] is_playing_api={} source=is_playing", is_playing);
+                    log::info!(
+                        "[now_playing/media_remote] is_playing_api={} source=is_playing",
+                        is_playing
+                    );
                     is_playing_api_result = Some(is_playing);
                 }
                 Err(_) => {
@@ -1020,7 +1132,10 @@ fn is_audio_output_active() -> bool {
 pub(crate) fn nowplaying_cli_status() -> Option<(bool, String)> {
     static CLI_PATH: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
     let path = CLI_PATH.get_or_init(|| {
-        for p in &["/opt/homebrew/bin/nowplaying-cli", "/usr/local/bin/nowplaying-cli"] {
+        for p in &[
+            "/opt/homebrew/bin/nowplaying-cli",
+            "/usr/local/bin/nowplaying-cli",
+        ] {
             if std::path::Path::new(p).exists() {
                 return Some(p.to_string());
             }
@@ -1105,17 +1220,28 @@ pub(crate) fn is_any_music_app_playing() -> bool {
 }
 pub(crate) fn is_video_app(bid: &str) -> bool {
     const VIDEO_APPS: &[&str] = &[
-        "com.colliderli.iina", "org.videolan.vlc", "com.apple.quicktimeplayer",
-        "tv.plex.plexmediaplayer", "io.mpv", "com.apple.tv",
-        "com.bilibili.bili", "com.disneyplus", "com.netflix",
+        "com.colliderli.iina",
+        "org.videolan.vlc",
+        "com.apple.quicktimeplayer",
+        "tv.plex.plexmediaplayer",
+        "io.mpv",
+        "com.apple.tv",
+        "com.bilibili.bili",
+        "com.disneyplus",
+        "com.netflix",
     ];
     VIDEO_APPS.iter().any(|v| bid.contains(v))
 }
 pub(crate) fn is_browser(bid: &str) -> bool {
     const BROWSERS: &[&str] = &[
-        "com.google.chrome", "org.mozilla.firefox", "com.apple.safari",
-        "com.microsoft.edgemac", "com.brave.browser", "com.vivaldi.vivaldi",
-        "company.thebrowser.browser", "com.operasoftware.opera",
+        "com.google.chrome",
+        "org.mozilla.firefox",
+        "com.apple.safari",
+        "com.microsoft.edgemac",
+        "com.brave.browser",
+        "com.vivaldi.vivaldi",
+        "company.thebrowser.browser",
+        "com.operasoftware.opera",
     ];
     BROWSERS.iter().any(|b| bid.contains(b))
 }
@@ -1127,7 +1253,11 @@ pub(crate) fn is_browser(bid: &str) -> bool {
 /// window) or the context menu is open, `setIgnoresMouseEvents: false` so the
 /// webview receives events. Otherwise `setIgnoresMouseEvents: true` so clicks
 /// pass through to whatever is behind.
-pub(crate) fn pet_passthrough_poll(app: tauri::AppHandle, mascot_scale: f64, large_mascot_scale: f64) {
+pub(crate) fn pet_passthrough_poll(
+    app: tauri::AppHandle,
+    mascot_scale: f64,
+    large_mascot_scale: f64,
+) {
     use std::time::Duration;
     PET_PASSTHROUGH_THREAD_ALIVE.store(true, Ordering::SeqCst);
     let mut was_interactive = false;
@@ -1144,13 +1274,15 @@ pub(crate) fn pet_passthrough_poll(app: tauri::AppHandle, mascot_scale: f64, lar
         let (tx, rx) = std::sync::mpsc::channel();
         let app_c = app.clone();
         let _ = app_c.run_on_main_thread(move || {
-            use objc2::runtime::{AnyClass, AnyObject};
             use objc2::msg_send;
+            use objc2::runtime::{AnyClass, AnyObject};
             use objc2_foundation::NSRect;
             let result: Option<(f64, f64, f64, f64)> = unsafe {
                 AnyClass::get(c"NSScreen").and_then(|cls| {
                     let ms: *mut AnyObject = msg_send![cls, mainScreen];
-                    if ms.is_null() { None } else {
+                    if ms.is_null() {
+                        None
+                    } else {
                         let sf: NSRect = msg_send![&*ms, frame];
                         Some((sf.origin.x, sf.origin.y, sf.size.width, sf.size.height))
                     }
@@ -1189,8 +1321,10 @@ pub(crate) fn pet_passthrough_poll(app: tauri::AppHandle, mascot_scale: f64, lar
             let hit_right = mascot_right - ix;
             let hit_bottom = mascot_bottom + iy;
             let hit_top = mascot_bottom + mascot_h - iy;
-            cursor.0 >= hit_left && cursor.0 <= hit_right
-                && cursor.1 >= hit_bottom && cursor.1 <= hit_top
+            cursor.0 >= hit_left
+                && cursor.0 <= hit_right
+                && cursor.1 >= hit_bottom
+                && cursor.1 <= hit_top
         } else {
             false
         };
@@ -1248,10 +1382,16 @@ pub(crate) fn get_active_ghostty_terminal_id() -> Option<String> {
         return ""
     "#;
     let output = std::process::Command::new("osascript")
-        .arg("-e").arg(script)
-        .output().ok()?;
+        .arg("-e")
+        .arg(script)
+        .output()
+        .ok()?;
     let tid = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if tid.is_empty() { None } else { Some(tid) }
+    if tid.is_empty() {
+        None
+    } else {
+        Some(tid)
+    }
 }
 /// Returns the short name of the frontmost application (macOS only).
 /// Used to suppress completion popups when the user is already looking
@@ -1262,7 +1402,8 @@ pub(crate) fn get_frontmost_app_name() -> String {
         return appName
     "#;
     let output = std::process::Command::new("osascript")
-        .arg("-e").arg(script)
+        .arg("-e")
+        .arg(script)
         .output();
     match output {
         Ok(o) => String::from_utf8_lossy(&o.stdout).trim().to_string(),
@@ -1335,16 +1476,23 @@ end tell"#,
 /// Returns the process name of the first recognized terminal emulator.
 pub(crate) fn find_terminal_app_for_pid(pid: u32) -> Option<String> {
     let known_terminals = [
-        "Ghostty", "ghostty",
-        "iTerm2", "iterm2",
-        "Terminal", "Apple_Terminal",
-        "WezTerm", "wezterm-gui",
-        "Warp", "warp",
+        "Ghostty",
+        "ghostty",
+        "iTerm2",
+        "iterm2",
+        "Terminal",
+        "Apple_Terminal",
+        "WezTerm",
+        "wezterm-gui",
+        "Warp",
+        "warp",
         "kitty",
-        "Alacritty", "alacritty",
+        "Alacritty",
+        "alacritty",
         "kaku",
         "Cursor",
-        "Codex", "codex",
+        "Codex",
+        "codex",
     ];
 
     let mut current_pid = pid;
@@ -1354,10 +1502,14 @@ pub(crate) fn find_terminal_app_for_pid(pid: u32) -> Option<String> {
             .output()
             .ok()?;
         let line = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if line.is_empty() { return None; }
+        if line.is_empty() {
+            return None;
+        }
 
         let parts: Vec<&str> = line.splitn(2, char::is_whitespace).collect();
-        if parts.len() < 2 { return None; }
+        if parts.len() < 2 {
+            return None;
+        }
 
         let ppid: u32 = parts[0].trim().parse().ok()?;
         let comm = parts[1].trim();
@@ -1368,7 +1520,9 @@ pub(crate) fn find_terminal_app_for_pid(pid: u32) -> Option<String> {
             return Some(name.to_string());
         }
 
-        if ppid <= 1 { return None; }
+        if ppid <= 1 {
+            return None;
+        }
         current_pid = ppid;
     }
     None
@@ -1380,7 +1534,9 @@ pub(crate) fn get_tty_for_pid(pid: u32) -> Option<String> {
         .output()
         .ok()?;
     let tty = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if tty.is_empty() || tty == "??" { return None; }
+    if tty.is_empty() || tty == "??" {
+        return None;
+    }
     // Normalize: ps outputs like "ttys003", convert to "/dev/ttys003"
     if tty.starts_with("/dev/") {
         Some(tty)
@@ -1420,7 +1576,10 @@ pub(crate) fn install_wry_webview_ime_fix() {
         true
     }
 
-    fn patch_class(class_name: &'static std::ffi::CStr, text_input_protocol: Option<&'static AnyProtocol>) {
+    fn patch_class(
+        class_name: &'static std::ffi::CStr,
+        text_input_protocol: Option<&'static AnyProtocol>,
+    ) {
         let Some(cls) = AnyClass::get(class_name) else {
             log::warn!("[ime] class not found: {}", class_name.to_string_lossy());
             return;
@@ -1436,7 +1595,9 @@ pub(crate) fn install_wry_webview_ime_fix() {
             let _ = ffi::class_addMethod(
                 cls_ptr,
                 sel!(windowLevel),
-                std::mem::transmute::<unsafe extern "C-unwind" fn(&AnyObject, Sel) -> isize, Imp>(window_level),
+                std::mem::transmute::<unsafe extern "C-unwind" fn(&AnyObject, Sel) -> isize, Imp>(
+                    window_level,
+                ),
                 level_encoding.as_ptr(),
             );
             // Use class_replaceMethod so we win even when the class (or one

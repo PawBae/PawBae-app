@@ -16,7 +16,8 @@ fn check_interrupted(path: &std::path::Path) -> bool {
         // This supports both Claude and Codex transcript formats.
         for line in content.lines().rev().take(120) {
             // Codex: explicit turn abort marker.
-            if line.contains("\"type\":\"event_msg\"") && line.contains("\"type\":\"turn_aborted\"") {
+            if line.contains("\"type\":\"event_msg\"") && line.contains("\"type\":\"turn_aborted\"")
+            {
                 return true;
             }
             // Codex: tool call rejected by user (skip/deny).
@@ -31,7 +32,8 @@ fn check_interrupted(path: &std::path::Path) -> bool {
                 return false;
             }
             // Any newer user message supersedes older interruption markers.
-            if line.contains("\"type\":\"event_msg\"") && line.contains("\"type\":\"user_message\"") {
+            if line.contains("\"type\":\"event_msg\"") && line.contains("\"type\":\"user_message\"")
+            {
                 return false;
             }
             if line.contains("\"type\":\"user\"") {
@@ -46,18 +48,26 @@ fn check_interrupted(path: &std::path::Path) -> bool {
 /// Determine whether a Stop event represents a user-aborted turn rather than a
 /// normal completion. Cursor stop hooks expose a completion status, while some
 /// clients only reveal the interruption via transcript markers.
-pub(crate) fn stop_event_was_interrupted(event: &serde_json::Value, session_source: &str, claude_status: &str) -> bool {
+pub(crate) fn stop_event_was_interrupted(
+    event: &serde_json::Value,
+    session_source: &str,
+    claude_status: &str,
+) -> bool {
     let status = claude_status.trim().to_ascii_lowercase();
     if session_source == "cursor" {
         if status == "completed" {
             return false;
         }
-        if matches!(status.as_str(), "interrupted" | "cancelled" | "canceled" | "aborted" | "stopped") {
+        if matches!(
+            status.as_str(),
+            "interrupted" | "cancelled" | "canceled" | "aborted" | "stopped"
+        ) {
             return true;
         }
     }
 
-    let stop_message = event.get("lastResponse")
+    let stop_message = event
+        .get("lastResponse")
         .or_else(|| event.get("last_assistant_message"))
         .or_else(|| event.get("codex_last_assistant_message"))
         .and_then(|v| v.as_str())
@@ -70,7 +80,8 @@ pub(crate) fn stop_event_was_interrupted(event: &serde_json::Value, session_sour
         return true;
     }
 
-    event.get("transcript_path")
+    event
+        .get("transcript_path")
         .and_then(|v| v.as_str())
         .filter(|p| !p.is_empty())
         .map(|p| check_interrupted(std::path::Path::new(p)))
@@ -98,57 +109,64 @@ pub(crate) fn start_session_file_watcher(
     let initial_size = std::fs::metadata(&jsonl_path).map(|m| m.len()).unwrap_or(0);
     let last_size = Arc::new(Mutex::new(initial_size));
 
-    let watcher_result = notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| {
-        if let Ok(event) = res {
-            // Only care about modifications
-            if !event.kind.is_modify() { return; }
+    let watcher_result =
+        notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| {
+            if let Ok(event) = res {
+                // Only care about modifications
+                if !event.kind.is_modify() {
+                    return;
+                }
 
-            let sessions2 = sessions.clone();
-            let app2 = app.clone();
-            let sid2 = sid.clone();
-            let path2 = path_for_handler.clone();
-            let last_size2 = last_size.clone();
+                let sessions2 = sessions.clone();
+                let app2 = app.clone();
+                let sid2 = sid.clone();
+                let path2 = path_for_handler.clone();
+                let last_size2 = last_size.clone();
 
-            // Debounce: spawn a thread that waits before processing
-            std::thread::spawn(move || {
-                std::thread::sleep(std::time::Duration::from_millis(WATCHER_DEBOUNCE_MS));
+                // Debounce: spawn a thread that waits before processing
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_millis(WATCHER_DEBOUNCE_MS));
 
-                let new_size = std::fs::metadata(&path2).map(|m| m.len()).unwrap_or(0);
-                let mut prev = last_size2.lock().unwrap();
-                *prev = new_size;
+                    let new_size = std::fs::metadata(&path2).map(|m| m.len()).unwrap_or(0);
+                    let mut prev = last_size2.lock().unwrap();
+                    *prev = new_size;
 
-                let mut sessions_guard = sessions2.lock().unwrap();
-                let session = match sessions_guard.get_mut(&sid2) {
-                    Some(s) => s,
-                    None => return,
-                };
+                    let mut sessions_guard = sessions2.lock().unwrap();
+                    let session = match sessions_guard.get_mut(&sid2) {
+                        Some(s) => s,
+                        None => return,
+                    };
 
-                let mut changed = false;
+                    let mut changed = false;
 
-                // Interruption detection: active/waiting but file shows interrupted
-                if matches!(session.status.as_str(), "processing" | "tool_running" | "waiting") {
-                    if check_interrupted(&path2) {
-                        log::info!("File watcher: interrupted session {}", sid2);
-                        session.status = "stopped".to_string();
-                        session.is_processing = false;
-                        session.tool = None;
-                        session.tool_input = None;
-                        session.permission_suggestions = None;
-                        changed = true;
+                    // Interruption detection: active/waiting but file shows interrupted
+                    if matches!(
+                        session.status.as_str(),
+                        "processing" | "tool_running" | "waiting"
+                    ) {
+                        if check_interrupted(&path2) {
+                            log::info!("File watcher: interrupted session {}", sid2);
+                            session.status = "stopped".to_string();
+                            session.is_processing = false;
+                            session.tool = None;
+                            session.tool_input = None;
+                            session.permission_suggestions = None;
+                            changed = true;
+                        }
                     }
-                }
 
-
-                if changed {
-                    session.updated_at = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
-                    let _ = app2.emit("claude-session-update", &sid2);
-                    // Don't emit claude-task-complete here — the Stop hook event
-                    // already emits it. This avoids double sound playback.
-                }
-            });
-        }
-    });
+                    if changed {
+                        session.updated_at = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_millis() as u64;
+                        let _ = app2.emit("claude-session-update", &sid2);
+                        // Don't emit claude-task-complete here — the Stop hook event
+                        // already emits it. This avoids double sound playback.
+                    }
+                });
+            }
+        });
 
     match watcher_result {
         Ok(mut watcher) => {
@@ -156,7 +174,11 @@ pub(crate) fn start_session_file_watcher(
                 log::error!("Failed to watch session file {:?}: {}", jsonl_path, e);
                 return;
             }
-            log::info!("Started file watcher for session {} at {:?}", session_id, jsonl_path);
+            log::info!(
+                "Started file watcher for session {} at {:?}",
+                session_id,
+                jsonl_path
+            );
             SESSION_WATCHERS.lock().unwrap().insert(session_id, watcher);
         }
         Err(e) => {

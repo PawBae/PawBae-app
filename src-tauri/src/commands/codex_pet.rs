@@ -89,7 +89,11 @@ pub async fn list_custom_codex_pets() -> Result<Vec<CodexPetMeta>, String> {
             spritesheet_url: url,
         });
     }
-    out.sort_by(|a, b| a.display_name.to_lowercase().cmp(&b.display_name.to_lowercase()));
+    out.sort_by(|a, b| {
+        a.display_name
+            .to_lowercase()
+            .cmp(&b.display_name.to_lowercase())
+    });
     Ok(out)
 }
 #[tauri::command]
@@ -115,7 +119,8 @@ pub async fn pick_codex_pet_folder(app: tauri::AppHandle) -> Result<Option<Strin
         let _ = tx.send(path);
     });
     let picked = rx.await.map_err(|e| e.to_string())?;
-    let result = picked.and_then(|p| p.into_path().ok())
+    let result = picked
+        .and_then(|p| p.into_path().ok())
         .map(|p| p.to_string_lossy().into_owned());
 
     // The dialog briefly steals focus and the OS can demote our floating
@@ -138,15 +143,24 @@ pub async fn open_codex_pets_dir() -> Result<String, String> {
     let path = dir.to_string_lossy().to_string();
     #[cfg(target_os = "macos")]
     {
-        std::process::Command::new("open").arg(&path).spawn().map_err(|e| e.to_string())?;
+        std::process::Command::new("open")
+            .arg(&path)
+            .spawn()
+            .map_err(|e| e.to_string())?;
     }
     #[cfg(target_os = "windows")]
     {
-        std::process::Command::new("explorer").arg(&path).spawn().map_err(|e| e.to_string())?;
+        std::process::Command::new("explorer")
+            .arg(&path)
+            .spawn()
+            .map_err(|e| e.to_string())?;
     }
     #[cfg(target_os = "linux")]
     {
-        std::process::Command::new("xdg-open").arg(&path).spawn().map_err(|e| e.to_string())?;
+        std::process::Command::new("xdg-open")
+            .arg(&path)
+            .spawn()
+            .map_err(|e| e.to_string())?;
     }
     Ok(path)
 }
@@ -222,7 +236,9 @@ fn codex_asset_url(abs: &std::path::Path) -> String {
     };
     let parts: Vec<String> = rel
         .components()
-        .map(|c| utf8_percent_encode(&c.as_os_str().to_string_lossy(), NON_ALPHANUMERIC).to_string())
+        .map(|c| {
+            utf8_percent_encode(&c.as_os_str().to_string_lossy(), NON_ALPHANUMERIC).to_string()
+        })
         .collect();
     // Windows WebView2 cannot fetch `<scheme>://...` URLs registered via
     // `register_uri_scheme_protocol`; Tauri exposes them as

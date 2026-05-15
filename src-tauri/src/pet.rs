@@ -10,7 +10,9 @@ use crate::state::{
 };
 
 #[cfg(target_os = "macos")]
-use crate::platform::macos::{macos_cursor_position, macos_pressed_mouse_buttons, request_drag_apply};
+use crate::platform::macos::{
+    macos_cursor_position, macos_pressed_mouse_buttons, request_drag_apply,
+};
 
 /// Background polling loop for efficiency-mode hover.
 /// Checks the cursor position against two regions:
@@ -67,8 +69,7 @@ pub(crate) fn efficiency_hover_poll(app: tauri::AppHandle) {
 
             let inside = if is_expanded {
                 if let Some((fx, fy, fw, fh)) = frame {
-                    cursor.0 >= fx && cursor.0 <= fx + fw
-                        && cursor.1 >= fy && cursor.1 <= fy + fh
+                    cursor.0 >= fx && cursor.0 <= fx + fw && cursor.1 >= fy && cursor.1 <= fy + fh
                 } else {
                     false
                 }
@@ -79,14 +80,14 @@ pub(crate) fn efficiency_hover_poll(app: tauri::AppHandle) {
                     .unwrap_or(35.0);
                 let rx = sx + (sw - rw) / 2.0;
                 let ry = sy + sh - rh;
-                cursor.0 >= rx && cursor.0 <= rx + rw
-                    && cursor.1 >= ry && cursor.1 <= ry + rh
+                cursor.0 >= rx && cursor.0 <= rx + rw && cursor.1 >= ry && cursor.1 <= ry + rh
             };
 
             if inside && !was_inside {
                 let _ = app.emit("efficiency-hover", true);
                 last_enter_emit = Instant::now();
-            } else if inside && was_inside && last_enter_emit.elapsed() > Duration::from_millis(300) {
+            } else if inside && was_inside && last_enter_emit.elapsed() > Duration::from_millis(300)
+            {
                 let _ = app.emit("efficiency-hover", true);
                 last_enter_emit = Instant::now();
             } else if !inside && was_inside {
@@ -131,7 +132,13 @@ pub(crate) fn efficiency_hover_poll(app: tauri::AppHandle) {
                         // frontend physics convention.
                         let dy_topdown = -(cursor.1 - last_cursor.1);
                         last_cursor = cursor;
-                        let walk_dir = if dx > 0.5 { 1 } else if dx < -0.5 { -1 } else { last_walk_dir };
+                        let walk_dir = if dx > 0.5 {
+                            1
+                        } else if dx < -0.5 {
+                            -1
+                        } else {
+                            last_walk_dir
+                        };
                         if walk_dir != last_walk_dir {
                             let _ = app.emit("mini-mascot-walk", walk_dir);
                             last_walk_dir = walk_dir;
@@ -158,7 +165,9 @@ pub(crate) fn efficiency_hover_poll(app: tauri::AppHandle) {
                         // recent ~80 ms of samples. Older samples are
                         // dropped so a long pause before release doesn't
                         // dilute the final velocity.
-                        if THROW_TRACKING_ENABLED.load(Ordering::SeqCst) && !throw_samples.is_empty() {
+                        if THROW_TRACKING_ENABLED.load(Ordering::SeqCst)
+                            && !throw_samples.is_empty()
+                        {
                             let cutoff = Instant::now();
                             // Average only over samples where the cursor
                             // actually moved. Users typically pause for
@@ -198,7 +207,8 @@ pub(crate) fn efficiency_hover_poll(app: tauri::AppHandle) {
                             } else {
                                 log::info!(
                                     "[drag-throw] all {} samples in {}ms window were near-zero",
-                                    total_seen, THROW_AVG_WINDOW_MS,
+                                    total_seen,
+                                    THROW_AVG_WINDOW_MS,
                                 );
                             }
                         }
@@ -235,7 +245,9 @@ pub(crate) fn efficiency_hover_poll(app: tauri::AppHandle) {
                     // would otherwise leave physics running underneath.
                     log::info!(
                         "[drag-start] cursor=({:.1},{:.1}) tracking={}",
-                        cursor.0, cursor.1, THROW_TRACKING_ENABLED.load(Ordering::SeqCst),
+                        cursor.0,
+                        cursor.1,
+                        THROW_TRACKING_ENABLED.load(Ordering::SeqCst),
                     );
                     let _ = app.emit("mini-mascot-drag-start", ());
                 }
@@ -315,8 +327,8 @@ pub(crate) fn reassert_mini_floating(app: &tauri::AppHandle) {
     let _ = app.run_on_main_thread(move || {
         #[cfg(target_os = "macos")]
         {
-            use objc2::runtime::AnyObject;
             use objc2::msg_send;
+            use objc2::runtime::AnyObject;
             if let Ok(ns_win) = win_clone.ns_window() {
                 let obj = unsafe { &*(ns_win as *mut AnyObject) };
                 unsafe {

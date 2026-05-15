@@ -6,7 +6,8 @@ use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
 #[cfg(target_os = "windows")]
-pub(crate) static FULLSCREEN_HIDING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+pub(crate) static FULLSCREEN_HIDING: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
 
 /// Whether the efficiency-mode notch hover tracking thread should be running.
 pub(crate) static EFFICIENCY_HOVER_ACTIVE: AtomicBool = AtomicBool::new(false);
@@ -31,7 +32,8 @@ pub(crate) static MINI_WINDOW_FRAME: Mutex<Option<(f64, f64, f64, f64)>> = Mutex
 pub(crate) static PET_MENU_RESTORE_FRAME: Mutex<Option<(f64, f64, f64, f64)>> = Mutex::new(None);
 /// Generation counter for pet-context alpha restore (legacy resize path).
 #[cfg(target_os = "macos")]
-pub(crate) static PET_ALPHA_GEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+pub(crate) static PET_ALPHA_GEN: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
 /// Whether the pet-mode click-through poll thread should be running.
 pub(crate) static PET_PASSTHROUGH_ACTIVE: AtomicBool = AtomicBool::new(false);
 /// Whether the pet-mode click-through poll thread is alive.
@@ -55,7 +57,8 @@ pub(crate) static PET_POMODORO_ACTIVE: AtomicBool = AtomicBool::new(false);
 /// macOS uses for native window dragging and avoids the lag introduced by
 /// accumulating deltas across pre-empted frames.
 pub(crate) static DRAG_TASK_PENDING: AtomicBool = AtomicBool::new(false);
-pub(crate) static DRAG_ANCHOR: std::sync::OnceLock<Mutex<Option<(f64, f64)>>> = std::sync::OnceLock::new();
+pub(crate) static DRAG_ANCHOR: std::sync::OnceLock<Mutex<Option<(f64, f64)>>> =
+    std::sync::OnceLock::new();
 pub(crate) fn drag_anchor() -> &'static Mutex<Option<(f64, f64)>> {
     DRAG_ANCHOR.get_or_init(|| Mutex::new(None))
 }
@@ -81,7 +84,8 @@ pub(crate) struct SshBackoffState {
     pub(crate) fail_epoch: u64,
 }
 
-pub(crate) static SSH_BACKOFF: std::sync::OnceLock<Mutex<HashMap<String, SshBackoffState>>> = std::sync::OnceLock::new();
+pub(crate) static SSH_BACKOFF: std::sync::OnceLock<Mutex<HashMap<String, SshBackoffState>>> =
+    std::sync::OnceLock::new();
 
 pub(crate) fn ssh_backoff_map() -> &'static Mutex<HashMap<String, SshBackoffState>> {
     SSH_BACKOFF.get_or_init(|| Mutex::new(HashMap::new()))
@@ -89,7 +93,8 @@ pub(crate) fn ssh_backoff_map() -> &'static Mutex<HashMap<String, SshBackoffStat
 
 /// Stores which SSH key was accepted for each host (user@host → key path).
 /// Populated by ensure_ssh_master via `ssh -v` output parsing.
-pub(crate) static SSH_KEY_USED: std::sync::OnceLock<Mutex<HashMap<String, String>>> = std::sync::OnceLock::new();
+pub(crate) static SSH_KEY_USED: std::sync::OnceLock<Mutex<HashMap<String, String>>> =
+    std::sync::OnceLock::new();
 
 pub(crate) fn ssh_key_map() -> &'static Mutex<HashMap<String, String>> {
     SSH_KEY_USED.get_or_init(|| Mutex::new(HashMap::new()))
@@ -147,16 +152,17 @@ pub(crate) struct SpritePadFracs {
     pub(crate) left_px: Option<f64>,
 }
 
-pub(crate) static SPRITE_PAD: std::sync::Mutex<SpritePadFracs> = std::sync::Mutex::new(SpritePadFracs {
-    top: 0.40,
-    right: 0.45,
-    bottom: 0.30,
-    left: 0.45,
-    top_px: None,
-    right_px: None,
-    bottom_px: None,
-    left_px: None,
-});
+pub(crate) static SPRITE_PAD: std::sync::Mutex<SpritePadFracs> =
+    std::sync::Mutex::new(SpritePadFracs {
+        top: 0.40,
+        right: 0.45,
+        bottom: 0.30,
+        left: 0.45,
+        top_px: None,
+        right_px: None,
+        bottom_px: None,
+        left_px: None,
+    });
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ClaudeSession {
@@ -186,7 +192,10 @@ pub struct ClaudeSession {
     #[serde(rename = "pendingAgents")]
     pub pending_agents: u32,
     /// Raw permission_suggestions JSON from the PermissionRequest hook event.
-    #[serde(rename = "permissionSuggestions", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "permissionSuggestions",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub permission_suggestions: Option<serde_json::Value>,
     /// AI's last response text (truncated), forwarded from the Stop hook event.
     /// Shown in the efficiency-mode completion reminder popup.
@@ -238,5 +247,6 @@ pub(crate) struct ClaudeState {
 }
 
 /// Global registry of active file watchers, keyed by session ID
-pub(crate) static SESSION_WATCHERS: std::sync::LazyLock<Mutex<HashMap<String, notify::RecommendedWatcher>>> =
-    std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
+pub(crate) static SESSION_WATCHERS: std::sync::LazyLock<
+    Mutex<HashMap<String, notify::RecommendedWatcher>>,
+> = std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));

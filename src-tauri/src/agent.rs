@@ -6,7 +6,12 @@ use crate::commands::agent::{AgentHealth, SessionHealth};
 use crate::home_dir_string;
 
 /// Generic helper: call OpenClaw remote API via /tools/invoke
-pub(crate) async fn invoke_tool(url: &str, token: &str, tool: &str, args: serde_json::Value) -> Result<serde_json::Value, String> {
+pub(crate) async fn invoke_tool(
+    url: &str,
+    token: &str,
+    tool: &str,
+    args: serde_json::Value,
+) -> Result<serde_json::Value, String> {
     let client = reqwest::Client::new();
     let resp = client
         .post(format!("{}/tools/invoke", url))
@@ -20,7 +25,13 @@ pub(crate) async fn invoke_tool(url: &str, token: &str, tool: &str, args: serde_
     if !status.is_success() {
         return Err(format!("remote API error ({}): {}", status, text));
     }
-    serde_json::from_str(&text).map_err(|e| format!("parse remote response: {} body: {}", e, &text[..text.len().min(200)]))
+    serde_json::from_str(&text).map_err(|e| {
+        format!(
+            "parse remote response: {} body: {}",
+            e,
+            &text[..text.len().min(200)]
+        )
+    })
 }
 
 /// Extract sessions array from remote API response, handling both formats:
@@ -65,8 +76,20 @@ fn is_queue_active(status_text: &str) -> bool {
 }
 
 /// Remote activity detection: Queue active (instant) OR updatedAt within 3s (smooth stop).
-pub(crate) async fn is_remote_session_active(url: &str, token: &str, session_key: &str, s: &serde_json::Value) -> bool {
-    if let Ok(status) = invoke_tool(url, token, "session_status", serde_json::json!({"sessionKey": session_key})).await {
+pub(crate) async fn is_remote_session_active(
+    url: &str,
+    token: &str,
+    session_key: &str,
+    s: &serde_json::Value,
+) -> bool {
+    if let Ok(status) = invoke_tool(
+        url,
+        token,
+        "session_status",
+        serde_json::json!({"sessionKey": session_key}),
+    )
+    .await
+    {
         let sr = status.get("result").unwrap_or(&status);
         let det = sr.get("details").unwrap_or(sr);
         if let Some(text) = det["statusText"].as_str() {
@@ -111,7 +134,9 @@ pub(crate) fn check_agent_active_from_lines(lines: &[String]) -> bool {
                 has_usage = val["message"]["usage"].is_object();
                 // Check if assistant message contains a toolCall content block
                 if let Some(content) = val["message"]["content"].as_array() {
-                    has_tool_call = content.iter().any(|c| c["type"].as_str() == Some("toolCall"));
+                    has_tool_call = content
+                        .iter()
+                        .any(|c| c["type"].as_str() == Some("toolCall"));
                 }
                 break;
             }
@@ -141,10 +166,15 @@ pub(crate) fn build_agent_health_from_meta(
     if let Ok(map) = serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(meta_json) {
         for (key, val) in map.iter() {
             let sf = val["sessionFile"].as_str().unwrap_or("");
-            if sf.is_empty() { continue; }
+            if sf.is_empty() {
+                continue;
+            }
             // Match session file path to tail output by basename
             #[cfg(windows)]
-            let basename = sf.rsplit(|c: char| c == '/' || c == '\\').next().unwrap_or("");
+            let basename = sf
+                .rsplit(|c: char| c == '/' || c == '\\')
+                .next()
+                .unwrap_or("");
             #[cfg(not(windows))]
             let basename = sf.rsplit('/').next().unwrap_or("");
             let active = if let Some(lines) = tails.get(basename) {
@@ -152,8 +182,13 @@ pub(crate) fn build_agent_health_from_meta(
             } else {
                 false
             };
-            if active { any_active = true; }
-            sessions.push(SessionHealth { key: key.clone(), active });
+            if active {
+                any_active = true;
+            }
+            sessions.push(SessionHealth {
+                key: key.clone(),
+                active,
+            });
         }
     }
 
@@ -161,35 +196,45 @@ pub(crate) fn build_agent_health_from_meta(
     if sessions.is_empty() && !tails.is_empty() {
         for (fname, lines) in tails {
             let active = check_agent_active_from_lines(lines);
-            if active { any_active = true; }
+            if active {
+                any_active = true;
+            }
             // Use filename (without .jsonl) as session key
             let key = fname.strip_suffix(".jsonl").unwrap_or(fname).to_string();
             sessions.push(SessionHealth { key, active });
         }
     }
 
-    AgentHealth { agent_id: agent_id.to_string(), active: any_active, sessions }
+    AgentHealth {
+        agent_id: agent_id.to_string(),
+        active: any_active,
+        sessions,
+    }
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
 pub(crate) fn remote_sessions_json_path(agent_id: &str) -> String {
-    let agent_dir = if agent_id.is_empty() { "main" } else { agent_id };
-    format!("$HOME/.openclaw/agents/{}/sessions/sessions.json", agent_dir)
+    let agent_dir = if agent_id.is_empty() {
+        "main"
+    } else {
+        agent_id
+    };
+    format!(
+        "$HOME/.openclaw/agents/{}/sessions/sessions.json",
+        agent_dir
+    )
 }
 
 pub(crate) fn sessions_json_path(agent_id: &str) -> PathBuf {
     let home = home_dir_string();
-    let agent_dir = if agent_id.is_empty() { "main" } else { agent_id };
-    PathBuf::from(home).join(".openclaw").join("agents").join(agent_dir).join("sessions").join("sessions.json")
+    let agent_dir = if agent_id.is_empty() {
+        "main"
+    } else {
+        agent_id
+    };
+    PathBuf::from(home)
+        .join(".openclaw")
+        .join("agents")
+        .join(agent_dir)
+        .join("sessions")
+        .join("sessions.json")
 }

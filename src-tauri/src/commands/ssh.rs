@@ -30,7 +30,10 @@ pub async fn reset_ssh(ssh_host: String, ssh_user: String) {
     let _ = close_ssh_master(&ssh_host, &ssh_user).await;
     // Clear cached key info since we're starting fresh
     ssh_key_map().lock().unwrap().remove(&host_key);
-    log::info!("[reset_ssh] cleared backoff, killed master, and reset for {}", host_key);
+    log::info!(
+        "[reset_ssh] cleared backoff, killed master, and reset for {}",
+        host_key
+    );
 }
 #[tauri::command]
 pub async fn close_ssh(ssh_host: Option<String>, ssh_user: Option<String>) -> Result<(), String> {
@@ -53,7 +56,9 @@ pub async fn close_ssh(ssh_host: Option<String>, ssh_user: Option<String>) -> Re
             }
         }
         #[cfg(windows)]
-        { win_ssh_mux::kill_all().await; }
+        {
+            win_ssh_mux::kill_all().await;
+        }
         // Clear all backoff entries
         ssh_backoff_map().lock().unwrap().clear();
         return Ok(());
@@ -63,6 +68,8 @@ pub async fn close_ssh(ssh_host: Option<String>, ssh_user: Option<String>) -> Re
 #[tauri::command]
 pub async fn read_local_file(path: String) -> Result<String, String> {
     use base64::Engine;
-    let data = tokio::fs::read(&path).await.map_err(|e| format!("read failed: {e}"))?;
+    let data = tokio::fs::read(&path)
+        .await
+        .map_err(|e| format!("read failed: {e}"))?;
     Ok(base64::engine::general_purpose::STANDARD.encode(&data))
 }

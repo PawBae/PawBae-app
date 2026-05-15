@@ -13,16 +13,23 @@ pub(crate) async fn lsof_open_jsonl_paths() -> std::collections::HashSet<String>
     {
         let home = home_dir_string();
         let agents_dir = format!("{}/.openclaw/agents", home);
-        let lsof_bin = if std::path::Path::new("/usr/sbin/lsof").exists() { "/usr/sbin/lsof" } else { "lsof" };
+        let lsof_bin = if std::path::Path::new("/usr/sbin/lsof").exists() {
+            "/usr/sbin/lsof"
+        } else {
+            "lsof"
+        };
         let Ok(output) = tokio::process::Command::new(lsof_bin)
             .args(["+D", &agents_dir])
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::null())
             .output()
             .await
-        else { return std::collections::HashSet::new() };
+        else {
+            return std::collections::HashSet::new();
+        };
         let stdout = String::from_utf8_lossy(&output.stdout);
-        stdout.lines()
+        stdout
+            .lines()
             .filter(|l| l.contains(".jsonl"))
             .filter_map(|l| l.split_whitespace().last().map(|s| s.to_string()))
             .collect()
@@ -44,7 +51,9 @@ pub(crate) async fn lsof_open_jsonl_paths() -> std::collections::HashSet<String>
                         if path.extension().and_then(|e| e.to_str()) == Some("jsonl") {
                             if let Ok(meta) = path.metadata() {
                                 if let Ok(modified) = meta.modified() {
-                                    if now.duration_since(modified).unwrap_or_default().as_secs() < 5 {
+                                    if now.duration_since(modified).unwrap_or_default().as_secs()
+                                        < 5
+                                    {
                                         result.insert(path.to_string_lossy().to_string());
                                     }
                                 }
@@ -115,7 +124,9 @@ pub(crate) async fn lsof_active_agents() -> std::collections::HashSet<String> {
                         if path.extension().and_then(|e| e.to_str()) == Some("jsonl") {
                             if let Ok(meta) = path.metadata() {
                                 if let Ok(modified) = meta.modified() {
-                                    if now.duration_since(modified).unwrap_or_default().as_secs() < 5 {
+                                    if now.duration_since(modified).unwrap_or_default().as_secs()
+                                        < 5
+                                    {
                                         active.insert(agent_name.clone());
                                         break;
                                     }

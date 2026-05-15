@@ -18,8 +18,8 @@ use crate::{
 
 #[cfg(target_os = "macos")]
 use crate::{
-    compute_frontmost_app_window_macos, frontmost_app_window_cache, pet_context_schedule_restore_alpha,
-    pet_passthrough_poll,
+    compute_frontmost_app_window_macos, frontmost_app_window_cache,
+    pet_context_schedule_restore_alpha, pet_passthrough_poll,
 };
 
 #[cfg(target_os = "windows")]
@@ -44,7 +44,8 @@ pub async fn get_frontmost_app_window(
             let result = unsafe { compute_frontmost_app_window_macos() };
             frontmost_app_window_cache::store(result.clone());
             let _ = tx.send(result);
-        }).map_err(|e| e.to_string())?;
+        })
+        .map_err(|e| e.to_string())?;
         match rx.recv_timeout(std::time::Duration::from_millis(200)) {
             Ok(v) => Ok(v),
             // Timeout — treat as "no window right now". Better to skip
@@ -94,19 +95,55 @@ pub async fn set_sprite_pad_fractions(
     // window past the floor; a frac > 0.95 indicates a measurement
     // failure (essentially empty sprite). Silently ignore bad values
     // so a noisy frontend can't move the cat off-screen.
-    if let Some(v) = top    { if v.is_finite() && v >= 0.0 && v <= 0.95 { g.top    = v; } }
-    if let Some(v) = right  { if v.is_finite() && v >= 0.0 && v <= 0.95 { g.right  = v; } }
-    if let Some(v) = bottom { if v.is_finite() && v >= 0.0 && v <= 0.95 { g.bottom = v; } }
-    if let Some(v) = left   { if v.is_finite() && v >= 0.0 && v <= 0.95 { g.left   = v; } }
+    if let Some(v) = top {
+        if v.is_finite() && v >= 0.0 && v <= 0.95 {
+            g.top = v;
+        }
+    }
+    if let Some(v) = right {
+        if v.is_finite() && v >= 0.0 && v <= 0.95 {
+            g.right = v;
+        }
+    }
+    if let Some(v) = bottom {
+        if v.is_finite() && v >= 0.0 && v <= 0.95 {
+            g.bottom = v;
+        }
+    }
+    if let Some(v) = left {
+        if v.is_finite() && v >= 0.0 && v <= 0.95 {
+            g.left = v;
+        }
+    }
     // Absolute CSS pixels. Reject NaN / negative / insanely large
     // values so a buggy frontend can't push the cat off-screen.
     let validate_px = |v: f64| -> Option<f64> {
-        if v.is_finite() && v >= 0.0 && v <= 1000.0 { Some(v) } else { None }
+        if v.is_finite() && v >= 0.0 && v <= 1000.0 {
+            Some(v)
+        } else {
+            None
+        }
     };
-    if let Some(v) = top_px    { if let Some(px) = validate_px(v) { g.top_px    = Some(px); } }
-    if let Some(v) = right_px  { if let Some(px) = validate_px(v) { g.right_px  = Some(px); } }
-    if let Some(v) = bottom_px { if let Some(px) = validate_px(v) { g.bottom_px = Some(px); } }
-    if let Some(v) = left_px   { if let Some(px) = validate_px(v) { g.left_px   = Some(px); } }
+    if let Some(v) = top_px {
+        if let Some(px) = validate_px(v) {
+            g.top_px = Some(px);
+        }
+    }
+    if let Some(v) = right_px {
+        if let Some(px) = validate_px(v) {
+            g.right_px = Some(px);
+        }
+    }
+    if let Some(v) = bottom_px {
+        if let Some(px) = validate_px(v) {
+            g.bottom_px = Some(px);
+        }
+    }
+    if let Some(v) = left_px {
+        if let Some(px) = validate_px(v) {
+            g.left_px = Some(px);
+        }
+    }
     Ok(())
 }
 /// Pet-physics floor info, packed for one IPC roundtrip per cache TTL.
@@ -125,14 +162,16 @@ pub(crate) struct PetFloorInfo {
 }
 #[tauri::command]
 pub async fn get_pet_floor_info(app: tauri::AppHandle) -> Result<PetFloorInfo, String> {
-    let win = app.get_webview_window("main").ok_or("mini window not found")?;
+    let win = app
+        .get_webview_window("main")
+        .ok_or("mini window not found")?;
     #[cfg(target_os = "macos")]
     {
         let (tx, rx) = std::sync::mpsc::channel();
         let win_clone = win.clone();
         app.run_on_main_thread(move || {
-            use objc2::runtime::{AnyClass, AnyObject};
             use objc2::msg_send;
+            use objc2::runtime::{AnyClass, AnyObject};
             use objc2_foundation::NSRect;
             if let Ok(ns_win) = win_clone.ns_window() {
                 let obj = unsafe { &*(ns_win as *mut AnyObject) };
@@ -142,7 +181,9 @@ pub async fn get_pet_floor_info(app: tauri::AppHandle) -> Result<PetFloorInfo, S
                         match AnyClass::get(c"NSScreen") {
                             Some(cls) => {
                                 let main: *mut AnyObject = msg_send![cls, mainScreen];
-                                if main.is_null() { (None, None) } else {
+                                if main.is_null() {
+                                    (None, None)
+                                } else {
                                     (
                                         Some(msg_send![&*main, frame]),
                                         Some(msg_send![&*main, visibleFrame]),
@@ -168,16 +209,25 @@ pub async fn get_pet_floor_info(app: tauri::AppHandle) -> Result<PetFloorInfo, S
                 let dock: Option<(f64, f64, f64, f64)> = None;
                 let _ = tx.send((frame, visible, dock));
             }
-        }).map_err(|e| e.to_string())?;
+        })
+        .map_err(|e| e.to_string())?;
         if let Ok((frame, visible, dock)) = rx.recv_timeout(std::time::Duration::from_secs(1)) {
             let off_dock_y = frame.map(|f| f.origin.y).unwrap_or(0.0);
             let on_dock_y = visible.map(|v| v.origin.y).unwrap_or(off_dock_y);
             let dock_x_range = dock.map(|(x, _, w, _)| (x, x + w));
-            return Ok(PetFloorInfo { on_dock_y, off_dock_y, dock_x_range });
+            return Ok(PetFloorInfo {
+                on_dock_y,
+                off_dock_y,
+                dock_x_range,
+            });
         }
     }
     #[allow(unreachable_code)]
-    Ok(PetFloorInfo { on_dock_y: 0.0, off_dock_y: 0.0, dock_x_range: None })
+    Ok(PetFloorInfo {
+        on_dock_y: 0.0,
+        off_dock_y: 0.0,
+        dock_x_range: None,
+    })
 }
 /// Start or stop cursor-position polling for efficiency-mode hover detection.
 ///
@@ -189,7 +239,10 @@ pub async fn get_pet_floor_info(app: tauri::AppHandle) -> Result<PetFloorInfo, S
 /// (expanded).  It emits `"efficiency-hover"` events (`true` = entered,
 /// `false` = left) so the frontend can open / close the panel.
 #[tauri::command]
-pub async fn set_efficiency_hover_tracking(app: tauri::AppHandle, active: bool) -> Result<(), String> {
+pub async fn set_efficiency_hover_tracking(
+    app: tauri::AppHandle,
+    active: bool,
+) -> Result<(), String> {
     EFFICIENCY_HOVER_ACTIVE.store(active, Ordering::SeqCst);
     if active && !EFFICIENCY_HOVER_THREAD_ALIVE.load(Ordering::SeqCst) {
         let app2 = app.clone();
@@ -227,7 +280,9 @@ pub async fn set_pet_mode_window(
     mascot_scale: Option<f64>,
     large_mascot_scale: Option<f64>,
 ) -> Result<(), String> {
-    let win = app.get_webview_window("main").ok_or("mini window not found")?;
+    let win = app
+        .get_webview_window("main")
+        .ok_or("mini window not found")?;
     let mascot_scale = sanitized_mascot_scale(mascot_scale);
     let large_mascot_scale = large_mascot_scale.unwrap_or(LARGE_MASCOT_SIZE_MULTIPLIER);
 
@@ -237,9 +292,9 @@ pub async fn set_pet_mode_window(
         {
             let win_clone = win.clone();
             app.run_on_main_thread(move || {
-                use objc2::runtime::{AnyClass, AnyObject};
                 use objc2::msg_send;
-                use objc2_foundation::{NSRect, NSPoint, NSSize};
+                use objc2::runtime::{AnyClass, AnyObject};
+                use objc2_foundation::{NSPoint, NSRect, NSSize};
                 if let Ok(ns_win) = win_clone.ns_window() {
                     let obj = unsafe { &*(ns_win as *mut AnyObject) };
                     let current: NSRect = unsafe { msg_send![obj, frame] };
@@ -249,7 +304,9 @@ pub async fn set_pet_mode_window(
                             let cls = AnyClass::get(c"NSScreen");
                             cls.and_then(|c| {
                                 let ms: *mut AnyObject = msg_send![c, mainScreen];
-                                if ms.is_null() { None } else {
+                                if ms.is_null() {
+                                    None
+                                } else {
                                     let sf: NSRect = msg_send![&*ms, frame];
                                     Some((sf.origin.x, sf.origin.y, sf.size.width, sf.size.height))
                                 }
@@ -272,7 +329,8 @@ pub async fn set_pet_mode_window(
                         unsafe {
                             // Start with clicks passing through until the poll takes over.
                             let _: () = msg_send![obj, setIgnoresMouseEvents: true];
-                            let _: () = msg_send![obj, setFrame: frame, display: true, animate: false];
+                            let _: () =
+                                msg_send![obj, setFrame: frame, display: true, animate: false];
                             let _: () = msg_send![obj, setLevel: 27isize];
                             let _: () = msg_send![obj, orderFrontRegardless];
                         }
@@ -281,7 +339,8 @@ pub async fn set_pet_mode_window(
                         }
                     }
                 }
-            }).map_err(|e| e.to_string())?;
+            })
+            .map_err(|e| e.to_string())?;
         }
         #[cfg(target_os = "windows")]
         {
@@ -316,12 +375,16 @@ pub async fn set_pet_mode_window(
         #[cfg(target_os = "macos")]
         if !PET_PASSTHROUGH_THREAD_ALIVE.load(Ordering::SeqCst) {
             let app2 = app.clone();
-            std::thread::spawn(move || pet_passthrough_poll(app2, mascot_scale, large_mascot_scale));
+            std::thread::spawn(move || {
+                pet_passthrough_poll(app2, mascot_scale, large_mascot_scale)
+            });
         }
         #[cfg(target_os = "windows")]
         if !PET_PASSTHROUGH_THREAD_ALIVE.load(Ordering::SeqCst) {
             let app2 = app.clone();
-            std::thread::spawn(move || pet_passthrough_poll_windows(app2, mascot_scale, large_mascot_scale));
+            std::thread::spawn(move || {
+                pet_passthrough_poll_windows(app2, mascot_scale, large_mascot_scale)
+            });
         }
     } else {
         // Stop the poll thread.
@@ -334,13 +397,14 @@ pub async fn set_pet_mode_window(
         {
             let win_clone = win.clone();
             app.run_on_main_thread(move || {
-                use objc2::runtime::AnyObject;
                 use objc2::msg_send;
-                use objc2_foundation::{NSRect, NSPoint, NSSize};
+                use objc2::runtime::AnyObject;
+                use objc2_foundation::{NSPoint, NSRect, NSSize};
                 if let Ok(ns_win) = win_clone.ns_window() {
                     let obj = unsafe { &*(ns_win as *mut AnyObject) };
                     let current: NSRect = unsafe { msg_send![obj, frame] };
-                    let (win_w, win_h) = large_collapsed_mascot_window_size(mascot_scale, large_mascot_scale);
+                    let (win_w, win_h) =
+                        large_collapsed_mascot_window_size(mascot_scale, large_mascot_scale);
                     // Collapse towards bottom-right corner.
                     let x = current.origin.x + current.size.width - win_w;
                     let y = current.origin.y;
@@ -353,7 +417,8 @@ pub async fn set_pet_mode_window(
                         *f = Some((x, y, win_w, win_h));
                     }
                 }
-            }).map_err(|e| e.to_string())?;
+            })
+            .map_err(|e| e.to_string())?;
         }
         #[cfg(target_os = "windows")]
         {
@@ -363,7 +428,8 @@ pub async fn set_pet_mode_window(
                     let current_x = pos.x as f64 / scale;
                     let current_y = pos.y as f64 / scale;
                     let current_w = size.width as f64 / scale;
-                    let (win_w, win_h) = large_collapsed_mascot_window_size(mascot_scale, large_mascot_scale);
+                    let (win_w, win_h) =
+                        large_collapsed_mascot_window_size(mascot_scale, large_mascot_scale);
                     // Collapse towards bottom-right corner.
                     let x = current_x + current_w - win_w;
                     let y = current_y;
@@ -393,7 +459,11 @@ pub async fn set_pet_pomodoro_active(active: bool) -> Result<(), String> {
 /// the same pixel position.  Menu buttons render in the new 180 px area
 /// via `overflow: visible` + `left: mascotSize + 14`.
 #[tauri::command]
-pub async fn set_pet_context_menu(app: tauri::AppHandle, open: bool, side: Option<String>) -> Result<(), String> {
+pub async fn set_pet_context_menu(
+    app: tauri::AppHandle,
+    open: bool,
+    side: Option<String>,
+) -> Result<(), String> {
     PET_CONTEXT_MENU_OPEN.store(open, Ordering::SeqCst);
 
     #[cfg(target_os = "macos")]
@@ -404,9 +474,9 @@ pub async fn set_pet_context_menu(app: tauri::AppHandle, open: bool, side: Optio
                 let win_clone = win.clone();
                 let (tx, rx) = std::sync::mpsc::channel::<()>();
                 let _ = app.run_on_main_thread(move || {
-                    use objc2::runtime::AnyObject;
                     use objc2::msg_send;
-                    use objc2_foundation::{NSRect, NSPoint, NSSize};
+                    use objc2::runtime::AnyObject;
+                    use objc2_foundation::{NSPoint, NSRect, NSSize};
                     if let Ok(ns_win) = win_clone.ns_window() {
                         let obj = unsafe { &*(ns_win as *mut AnyObject) };
                         let current: NSRect = unsafe { msg_send![obj, frame] };
@@ -427,10 +497,16 @@ pub async fn set_pet_context_menu(app: tauri::AppHandle, open: bool, side: Optio
                         );
                         unsafe {
                             let _: () = msg_send![obj, setAlphaValue: 0.0f64];
-                            let _: () = msg_send![obj, setFrame: frame, display: true, animate: false];
+                            let _: () =
+                                msg_send![obj, setFrame: frame, display: true, animate: false];
                         }
                         if let Ok(mut f) = MINI_WINDOW_FRAME.lock() {
-                            *f = Some((current.origin.x, current.origin.y, new_w, current.size.height));
+                            *f = Some((
+                                current.origin.x,
+                                current.origin.y,
+                                new_w,
+                                current.size.height,
+                            ));
                         }
                         pet_context_schedule_restore_alpha(ns_win as *mut std::ffi::c_void);
                     }
@@ -506,13 +582,14 @@ pub async fn set_pet_context_menu(app: tauri::AppHandle, open: bool, side: Optio
             if let Some(win) = app.get_webview_window("main") {
                 if let Ok(mut saved) = PET_MENU_RESTORE_FRAME.lock() {
                     if let Some((_x, _y, w, h)) = *saved {
-                        let (current_x, current_y) = match (win.outer_position(), win.current_monitor()) {
-                            (Ok(pos), Ok(Some(monitor))) => {
-                                let scale = monitor.scale_factor();
-                                (pos.x as f64 / scale, pos.y as f64 / scale)
-                            }
-                            _ => (0.0, 0.0),
-                        };
+                        let (current_x, current_y) =
+                            match (win.outer_position(), win.current_monitor()) {
+                                (Ok(pos), Ok(Some(monitor))) => {
+                                    let scale = monitor.scale_factor();
+                                    (pos.x as f64 / scale, pos.y as f64 / scale)
+                                }
+                                _ => (0.0, 0.0),
+                            };
                         let _ = win.set_size(tauri::LogicalSize::new(w, h));
                         if let Ok(mut f) = MINI_WINDOW_FRAME.lock() {
                             *f = Some((current_x, current_y, w, h));
@@ -538,22 +615,19 @@ pub async fn spawn_demo_mascot(app: tauri::AppHandle, pet_id: String) -> Result<
     let label = format!("demo-mascot-{}", n);
 
     let url = format!("index.html#/mini?demo=1&pet={}", pet_id);
-    let win = tauri::WebviewWindowBuilder::new(
-        &app,
-        label.clone(),
-        tauri::WebviewUrl::App(url.into()),
-    )
-    .title("PawBae demo mascot")
-    .inner_size(96.0, 96.0)
-    .min_inner_size(96.0, 96.0)
-    .resizable(false)
-    .decorations(false)
-    .transparent(true)
-    .shadow(false)
-    .always_on_top(true)
-    .skip_taskbar(true)
-    .build()
-    .map_err(|e| e.to_string())?;
+    let win =
+        tauri::WebviewWindowBuilder::new(&app, label.clone(), tauri::WebviewUrl::App(url.into()))
+            .title("PawBae demo mascot")
+            .inner_size(96.0, 96.0)
+            .min_inner_size(96.0, 96.0)
+            .resizable(false)
+            .decorations(false)
+            .transparent(true)
+            .shadow(false)
+            .always_on_top(true)
+            .skip_taskbar(true)
+            .build()
+            .map_err(|e| e.to_string())?;
 
     // Position the demo window in a known-good area near the top-right
     // of the screen, stepping each subsequent spawn by one collapsed
@@ -605,7 +679,8 @@ pub async fn spawn_demo_mascot(app: tauri::AppHandle, pet_id: String) -> Result<
 
                 unsafe {
                     let _: () = msg_send![demo_obj, setLevel: 27isize];
-                    let _: () = msg_send![demo_obj, setFrame: new_frame, display: true, animate: false];
+                    let _: () =
+                        msg_send![demo_obj, setFrame: new_frame, display: true, animate: false];
                     let behavior: usize = (1 << 0) | (1 << 4) | (1 << 8) | (1 << 6);
                     let _: () = msg_send![demo_obj, setCollectionBehavior: behavior];
                     let _: () = msg_send![demo_obj, setAcceptsMouseMovedEvents: true];

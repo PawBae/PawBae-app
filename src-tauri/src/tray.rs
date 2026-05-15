@@ -13,14 +13,22 @@ use tauri::{Emitter, Manager};
 use crate::state::{STROLL_MODE_ENABLED, THROW_TRACKING_ENABLED};
 
 #[cfg(target_os = "windows")]
-use crate::state::FULLSCREEN_HIDING;
-#[cfg(target_os = "windows")]
 use crate::platform::windows::win_ui_scale;
+#[cfg(target_os = "windows")]
+use crate::state::FULLSCREEN_HIDING;
 
 // Tray label tuple: (show, hide, stroll, settings, quit). The `stroll` slot is
 // populated for every language but only inserted into the tray menu on
 // macOS — Phase 2 pet physics is currently macOS-only.
-pub(crate) fn tray_labels(lang: &str) -> (&'static str, &'static str, &'static str, &'static str, &'static str) {
+pub(crate) fn tray_labels(
+    lang: &str,
+) -> (
+    &'static str,
+    &'static str,
+    &'static str,
+    &'static str,
+    &'static str,
+) {
     match lang {
         "zh" => ("显示", "隐藏", "散步模式", "设置", "退出"),
         _ => ("Show", "Hide", "Stroll Mode", "Settings", "Quit"),
@@ -30,22 +38,33 @@ pub(crate) fn tray_labels(lang: &str) -> (&'static str, &'static str, &'static s
 pub(crate) fn init<R: tauri::Runtime>(app: &mut tauri::App<R>) -> tauri::Result<()> {
     // System tray — use saved language, fallback to system language
     let initial_lang = {
-        let store_path = app.path().app_data_dir().ok().map(|p| p.join("settings.json"));
+        let store_path = app
+            .path()
+            .app_data_dir()
+            .ok()
+            .map(|p| p.join("settings.json"));
         let mut lang = None;
         if let Some(ref sp) = store_path {
             if let Ok(data) = std::fs::read_to_string(sp) {
                 if let Ok(val) = serde_json::from_str::<serde_json::Value>(&data) {
-                    lang = val.get("pawbae-lang").and_then(|v| v.as_str()).map(|s| s.to_string());
+                    lang = val
+                        .get("pawbae-lang")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
                 }
             }
         }
         lang.unwrap_or_else(|| {
             let sys = std::env::var("LANG").unwrap_or_default().to_lowercase();
-            if sys.starts_with("zh") { "zh".into() }
-            else { "en".into() }
+            if sys.starts_with("zh") {
+                "zh".into()
+            } else {
+                "en".into()
+            }
         })
     };
-    let (show_label, hide_label, stroll_label, settings_label, quit_label) = tray_labels(&initial_lang);
+    let (show_label, hide_label, stroll_label, settings_label, quit_label) =
+        tray_labels(&initial_lang);
     let _ = stroll_label;
     let show = MenuItem::with_id(app, "show", show_label, true, None::<&str>)?;
     let hide = MenuItem::with_id(app, "hide", hide_label, true, None::<&str>)?;
@@ -69,8 +88,8 @@ pub(crate) fn init<R: tauri::Runtime>(app: &mut tauri::App<R>) -> tauri::Result<
     // Use dedicated tray icon (logo-mini: white cat silhouette on transparent bg)
     // instead of the app icon, so it renders correctly in macOS menu bar / Windows tray
     let tray_icon_bytes = include_bytes!("../icons/tray-icon.png");
-    let tray_icon = tauri::image::Image::from_bytes(tray_icon_bytes)
-        .expect("failed to load tray icon");
+    let tray_icon =
+        tauri::image::Image::from_bytes(tray_icon_bytes).expect("failed to load tray icon");
     TrayIconBuilder::with_id("main")
         .icon(tray_icon)
         .menu(&menu)

@@ -12,12 +12,17 @@ use crate::state::STROLL_MODE_ENABLED;
 
 #[tauri::command]
 pub fn update_tray_language(app: tauri::AppHandle, lang: String) -> Result<(), String> {
-    let (show_label, hide_label, stroll_label, settings_label, quit_label) = crate::tray::tray_labels(&lang);
+    let (show_label, hide_label, stroll_label, settings_label, quit_label) =
+        crate::tray::tray_labels(&lang);
     let _ = stroll_label;
-    let show = MenuItem::with_id(&app, "show", show_label, true, None::<&str>).map_err(|e| e.to_string())?;
-    let hide = MenuItem::with_id(&app, "hide", hide_label, true, None::<&str>).map_err(|e| e.to_string())?;
-    let settings = MenuItem::with_id(&app, "settings", settings_label, true, None::<&str>).map_err(|e| e.to_string())?;
-    let quit = MenuItem::with_id(&app, "quit", quit_label, true, None::<&str>).map_err(|e| e.to_string())?;
+    let show = MenuItem::with_id(&app, "show", show_label, true, None::<&str>)
+        .map_err(|e| e.to_string())?;
+    let hide = MenuItem::with_id(&app, "hide", hide_label, true, None::<&str>)
+        .map_err(|e| e.to_string())?;
+    let settings = MenuItem::with_id(&app, "settings", settings_label, true, None::<&str>)
+        .map_err(|e| e.to_string())?;
+    let quit = MenuItem::with_id(&app, "quit", quit_label, true, None::<&str>)
+        .map_err(|e| e.to_string())?;
     #[cfg(target_os = "macos")]
     let menu = {
         let stroll = CheckMenuItem::with_id(
@@ -29,10 +34,12 @@ pub fn update_tray_language(app: tauri::AppHandle, lang: String) -> Result<(), S
             None::<&str>,
         )
         .map_err(|e| e.to_string())?;
-        Menu::with_items(&app, &[&show, &hide, &stroll, &settings, &quit]).map_err(|e| e.to_string())?
+        Menu::with_items(&app, &[&show, &hide, &stroll, &settings, &quit])
+            .map_err(|e| e.to_string())?
     };
     #[cfg(not(target_os = "macos"))]
-    let menu = Menu::with_items(&app, &[&show, &hide, &settings, &quit]).map_err(|e| e.to_string())?;
+    let menu =
+        Menu::with_items(&app, &[&show, &hide, &settings, &quit]).map_err(|e| e.to_string())?;
     if let Some(tray) = app.tray_by_id("main") {
         tray.set_menu(Some(menu)).map_err(|e| e.to_string())?;
     }
@@ -66,7 +73,12 @@ pub async fn proxy_post(url: String, body: String) -> Result<String, String> {
 #[tauri::command]
 pub async fn open_url(url: String) -> Result<(), String> {
     #[cfg(target_os = "macos")]
-    { std::process::Command::new("open").arg(&url).spawn().map_err(|e| e.to_string())?; }
+    {
+        std::process::Command::new("open")
+            .arg(&url)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
     #[cfg(target_os = "windows")]
     {
         // `cmd /C start ""` opens the URL in the default browser, but cmd
@@ -79,7 +91,12 @@ pub async fn open_url(url: String) -> Result<(), String> {
         cmd.spawn().map_err(|e| e.to_string())?;
     }
     #[cfg(target_os = "linux")]
-    { std::process::Command::new("xdg-open").arg(&url).spawn().map_err(|e| e.to_string())?; }
+    {
+        std::process::Command::new("xdg-open")
+            .arg(&url)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
     Ok(())
 }
 
@@ -122,10 +139,18 @@ pub async fn request_ax_permission() -> Result<(), String> {
 
         #[link(name = "CoreFoundation", kind = "framework")]
         extern "C" {
-            fn CFStringCreateWithCString(alloc: *const c_void, c_str: *const u8, encoding: u32) -> *const c_void;
+            fn CFStringCreateWithCString(
+                alloc: *const c_void,
+                c_str: *const u8,
+                encoding: u32,
+            ) -> *const c_void;
             fn CFDictionaryCreate(
-                alloc: *const c_void, keys: *const *const c_void, values: *const *const c_void,
-                count: isize, key_cbs: *const c_void, val_cbs: *const c_void,
+                alloc: *const c_void,
+                keys: *const *const c_void,
+                values: *const *const c_void,
+                count: isize,
+                key_cbs: *const c_void,
+                val_cbs: *const c_void,
             ) -> *const c_void;
             fn CFRelease(cf: *const c_void);
             static kCFTypeDictionaryKeyCallBacks: c_void;
@@ -147,8 +172,12 @@ pub async fn request_ax_permission() -> Result<(), String> {
             let keys = [key];
             let values = [kCFBooleanTrue];
             let dict = CFDictionaryCreate(
-                std::ptr::null(), keys.as_ptr(), values.as_ptr(), 1,
-                &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks,
+                std::ptr::null(),
+                keys.as_ptr(),
+                values.as_ptr(),
+                1,
+                &kCFTypeDictionaryKeyCallBacks,
+                &kCFTypeDictionaryValueCallBacks,
             );
             AXIsProcessTrustedWithOptions(dict);
             CFRelease(dict);

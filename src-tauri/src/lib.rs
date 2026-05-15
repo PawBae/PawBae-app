@@ -74,67 +74,6 @@ mod speech;
 #[cfg(unix)]
 use libc;
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-/// Move the mini window by a delta (dx, dy in CSS/logical points).
-/// dy is in screen coordinates (positive = downward), converted to macOS (positive = upward).
-///
-/// On macOS the resulting origin is clamped to the screen's `visibleFrame`
-/// (menu-bar / Dock / notch excluded). This is the authoritative safety
-/// net for the pet physics loop: even at terminal velocity or during a
-/// hard drag-throw, the window can never end up past a wall.
-
-
-
-
-
-
-
-
-
-
-
-/// Resize the expanded mini window height while keeping it top-aligned.
-/// macOS: bottom-left origin, so adjust y to keep the same top anchor.
-/// Windows: top-left origin, so just resize height.
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 #[cfg(target_os = "macos")]
 pub(crate) use crate::platform::macos::check_accessibility_permission;
 
@@ -152,21 +91,9 @@ pub(crate) use crate::platform::windows::hide_window_cmd;
 pub(crate) use crate::platform::macos::{
     activate_cursor_workspace_window, compute_frontmost_app_window_macos,
     find_terminal_app_for_pid, frontmost_app_window_cache, get_active_ghostty_terminal_id,
-    get_frontmost_app_name, get_notch_offset, get_tty_for_pid,
-    pet_context_schedule_restore_alpha, pet_passthrough_poll,
+    get_frontmost_app_name, get_notch_offset, get_tty_for_pid, pet_context_schedule_restore_alpha,
+    pet_passthrough_poll,
 };
-
-
-
-
-
-
-
-
-
-
-
-
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -178,9 +105,83 @@ pub fn run() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build());
     asset::register(builder)
         .setup(setup::init)
-        .invoke_handler(tauri::generate_handler![get_status, send_chat, open_detail_panel, get_agents, get_health, get_agent_metrics, interrupt_agent, get_agent_extra_info, open_mini, close_mini, set_mini_expanded, set_mini_size, set_efficiency_hover_tracking, resize_mini_height, move_mini_by, get_mini_origin, get_mini_monitor_rect, get_pet_floor_info, get_frontmost_app_window, set_sprite_pad_fractions, set_mini_origin, set_ime_mode, get_agent_sessions, get_session_preview, get_session_messages, get_active_sessions, proxy_post, play_sound, get_claude_sessions, get_claude_conversation, install_claude_hooks, install_cursor_hooks, remove_claude_session, resolve_claude_permission, get_claude_stats, open_url, activate_app, focus_cursor_terminal, check_ax_permission, request_ax_permission, jump_to_claude_terminal, check_for_update, run_update, close_ssh, read_local_file, exit_app, get_ssh_key_info, reset_ssh, get_ui_scale, list_custom_codex_pets, open_codex_pets_dir, import_codex_pet, pick_codex_pet_folder, reassert_floating, spawn_demo_mascot, close_demo_mascot, close_demo_mascots, debug_log, update_tray_language, set_pet_mode_window, set_pet_context_menu, set_pet_pomodoro_active, get_now_playing, get_system_idle_time, set_stroll_mode, set_throw_tracking, voice_toggle, voice_is_recording])
-        .manage(ActiveAgentPid { pid: Mutex::new(None) })
-        .manage(ClaudeState { sessions: Arc::new(Mutex::new(HashMap::new())), pending_permissions: Arc::new(Mutex::new(HashMap::new())) })
+        .invoke_handler(tauri::generate_handler![
+            get_status,
+            send_chat,
+            open_detail_panel,
+            get_agents,
+            get_health,
+            get_agent_metrics,
+            interrupt_agent,
+            get_agent_extra_info,
+            open_mini,
+            close_mini,
+            set_mini_expanded,
+            set_mini_size,
+            set_efficiency_hover_tracking,
+            resize_mini_height,
+            move_mini_by,
+            get_mini_origin,
+            get_mini_monitor_rect,
+            get_pet_floor_info,
+            get_frontmost_app_window,
+            set_sprite_pad_fractions,
+            set_mini_origin,
+            set_ime_mode,
+            get_agent_sessions,
+            get_session_preview,
+            get_session_messages,
+            get_active_sessions,
+            proxy_post,
+            play_sound,
+            get_claude_sessions,
+            get_claude_conversation,
+            install_claude_hooks,
+            install_cursor_hooks,
+            remove_claude_session,
+            resolve_claude_permission,
+            get_claude_stats,
+            open_url,
+            activate_app,
+            focus_cursor_terminal,
+            check_ax_permission,
+            request_ax_permission,
+            jump_to_claude_terminal,
+            check_for_update,
+            run_update,
+            close_ssh,
+            read_local_file,
+            exit_app,
+            get_ssh_key_info,
+            reset_ssh,
+            get_ui_scale,
+            list_custom_codex_pets,
+            open_codex_pets_dir,
+            import_codex_pet,
+            pick_codex_pet_folder,
+            reassert_floating,
+            spawn_demo_mascot,
+            close_demo_mascot,
+            close_demo_mascots,
+            debug_log,
+            update_tray_language,
+            set_pet_mode_window,
+            set_pet_context_menu,
+            set_pet_pomodoro_active,
+            get_now_playing,
+            get_system_idle_time,
+            set_stroll_mode,
+            set_throw_tracking,
+            voice_toggle,
+            voice_is_recording
+        ])
+        .manage(ActiveAgentPid {
+            pid: Mutex::new(None),
+        })
+        .manage(ClaudeState {
+            sessions: Arc::new(Mutex::new(HashMap::new())),
+            pending_permissions: Arc::new(Mutex::new(HashMap::new())),
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

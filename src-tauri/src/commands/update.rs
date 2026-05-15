@@ -62,7 +62,10 @@ fn pick_localized_notes(notes_i18n: &serde_json::Value, lang: Option<&str>) -> O
 }
 
 #[tauri::command]
-pub async fn check_for_update(app: tauri::AppHandle, lang: Option<String>) -> Result<serde_json::Value, String> {
+pub async fn check_for_update(
+    app: tauri::AppHandle,
+    lang: Option<String>,
+) -> Result<serde_json::Value, String> {
     let current = app.config().version.clone().unwrap_or_default();
 
     let update_url = if cfg!(debug_assertions) {
@@ -71,26 +74,26 @@ pub async fn check_for_update(app: tauri::AppHandle, lang: Option<String>) -> Re
         "https://pawbae.ai/update/latest.json"
     };
     log::info!("[update] checking {} (current={})", update_url, current);
-    let mut client_builder = reqwest::Client::builder()
-        .user_agent("pawbae");
+    let mut client_builder = reqwest::Client::builder().user_agent("pawbae");
     if cfg!(debug_assertions) {
         client_builder = client_builder.no_proxy();
     }
     let client = client_builder
         .build()
         .map_err(|e| format!("client build error: {e}"))?;
-    let resp = client
-        .get(update_url)
-        .send()
-        .await
-        .map_err(|e| { log::warn!("[update] fetch error: {e}"); format!("fetch error: {e}") })?;
+    let resp = client.get(update_url).send().await.map_err(|e| {
+        log::warn!("[update] fetch error: {e}");
+        format!("fetch error: {e}")
+    })?;
     if !resp.status().is_success() {
         let msg = format!("update check failed: HTTP {}", resp.status());
         log::warn!("[update] {msg}");
         return Err(msg);
     }
-    let json: serde_json::Value = resp.json().await
-        .map_err(|e| { log::warn!("[update] json parse error: {e}"); format!("json parse error: {e}") })?;
+    let json: serde_json::Value = resp.json().await.map_err(|e| {
+        log::warn!("[update] json parse error: {e}");
+        format!("json parse error: {e}")
+    })?;
 
     // Per-platform update: each platform has its own version and url under
     // json["platforms"]["<platform>"]["version"] and ["url"].
@@ -103,19 +106,37 @@ pub async fn check_for_update(app: tauri::AppHandle, lang: Option<String>) -> Re
     let platform_key = "linux";
 
     let platform = &json["platforms"][platform_key];
-    let latest = platform["version"].as_str()
+    let latest = platform["version"]
+        .as_str()
         .or_else(|| json["version"].as_str())
         .unwrap_or("");
-    let url = platform["url"].as_str()
+    let url = platform["url"]
+        .as_str()
         .or_else(|| json["url"].as_str())
         .unwrap_or("");
     let notes = pick_localized_notes(&platform["notes_i18n"], lang.as_deref())
         .or_else(|| pick_localized_notes(&json["notes_i18n"], lang.as_deref()))
-        .or_else(|| platform["notes"].as_str().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()))
-        .or_else(|| json["notes"].as_str().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()))
+        .or_else(|| {
+            platform["notes"]
+                .as_str()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+        })
+        .or_else(|| {
+            json["notes"]
+                .as_str()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+        })
         .unwrap_or_default();
     let has_update = version_cmp(latest, &current);
-    log::info!("[update] platform={} latest={} current={} hasUpdate={}", platform_key, latest, current, has_update);
+    log::info!(
+        "[update] platform={} latest={} current={} hasUpdate={}",
+        platform_key,
+        latest,
+        current,
+        has_update
+    );
 
     // Pass through any `ui` block as-is. This lets us push UI-level
     // config (e.g. the codex-pets.net URL inside the Create section)
@@ -134,16 +155,18 @@ pub async fn check_for_update(app: tauri::AppHandle, lang: Option<String>) -> Re
 }
 
 fn version_cmp(latest: &str, current: &str) -> bool {
-    let parse = |s: &str| -> Vec<u32> {
-        s.split('.').filter_map(|p| p.parse().ok()).collect()
-    };
+    let parse = |s: &str| -> Vec<u32> { s.split('.').filter_map(|p| p.parse().ok()).collect() };
     let l = parse(latest);
     let c = parse(current);
     for i in 0..l.len().max(c.len()) {
         let lv = l.get(i).copied().unwrap_or(0);
         let cv = c.get(i).copied().unwrap_or(0);
-        if lv > cv { return true; }
-        if lv < cv { return false; }
+        if lv > cv {
+            return true;
+        }
+        if lv < cv {
+            return false;
+        }
     }
     false
 }
@@ -218,7 +241,11 @@ pub async fn run_update(app: tauri::AppHandle, dmg_url: String) -> Result<(), St
     #[cfg(target_os = "macos")]
     let installer_filename = "pawbae-update.dmg";
     #[cfg(target_os = "windows")]
-    let installer_filename = if dmg_url.ends_with(".msi") { "pawbae-update.msi" } else { "pawbae-update.exe" };
+    let installer_filename = if dmg_url.ends_with(".msi") {
+        "pawbae-update.msi"
+    } else {
+        "pawbae-update.exe"
+    };
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     let installer_filename = "pawbae-update";
 
@@ -242,7 +269,8 @@ pub async fn run_update(app: tauri::AppHandle, dmg_url: String) -> Result<(), St
             .await
             .map_err(|e| format!("failed to write temp file: {e}"))?;
         downloaded_bytes += chunk.len() as u64;
-        let progress = total_bytes.map(|total| ((downloaded_bytes.saturating_mul(100)) / total.max(1)).min(100));
+        let progress = total_bytes
+            .map(|total| ((downloaded_bytes.saturating_mul(100)) / total.max(1)).min(100));
         if progress != last_progress {
             let message = if let Some(total) = total_bytes {
                 format!(
@@ -253,7 +281,14 @@ pub async fn run_update(app: tauri::AppHandle, dmg_url: String) -> Result<(), St
             } else {
                 format!("正在下载更新 {}", format_update_bytes(downloaded_bytes))
             };
-            emit_update_progress(&app, "downloading", progress, downloaded_bytes, total_bytes, &message);
+            emit_update_progress(
+                &app,
+                "downloading",
+                progress,
+                downloaded_bytes,
+                total_bytes,
+                &message,
+            );
             last_progress = progress;
         }
     }
@@ -274,7 +309,8 @@ pub async fn run_update(app: tauri::AppHandle, dmg_url: String) -> Result<(), St
     #[cfg(target_os = "macos")]
     {
         // Spawn a detached helper that waits for the app to quit, then swaps the bundle.
-        let script = format!(r#"#!/bin/bash
+        let script = format!(
+            r#"#!/bin/bash
 set -euo pipefail
 PID="{pid}"
 APP_BUNDLE="/Applications/pawbae-app.app"
@@ -345,7 +381,8 @@ open -n "$APP_BUNDLE"
             dmg_path = dmg_path.display(),
             log_path = log_path.display(),
         );
-        std::fs::write(&helper_path, script).map_err(|e| format!("failed to write helper script: {e}"))?;
+        std::fs::write(&helper_path, script)
+            .map_err(|e| format!("failed to write helper script: {e}"))?;
         {
             use std::os::unix::fs::PermissionsExt;
             std::fs::set_permissions(&helper_path, std::fs::Permissions::from_mode(0o755))
@@ -373,7 +410,8 @@ open -n "$APP_BUNDLE"
         // On Windows: spawn the downloaded installer (MSI or EXE) with silent flags.
         // The installer will handle replacing the old version and relaunching.
         let helper_path = work_dir.join("install-update.ps1");
-        let script = format!(r#"
+        let script = format!(
+            r#"
 $ErrorActionPreference = 'Stop'
 # NOTE: $pid is a read-only automatic variable in PowerShell (current process PID).
 # Use $appPid instead to avoid "VariableNotWritable" errors.
@@ -456,18 +494,29 @@ if ($appPath) {{
 }}
 "#,
             pid = std::process::id(),
-            installer_path = dmg_path.display().to_string().replace('\\', "\\\\").replace('\'', "''"),
-            log_path = log_path.display().to_string().replace('\\', "\\\\").replace('\'', "''"),
+            installer_path = dmg_path
+                .display()
+                .to_string()
+                .replace('\\', "\\\\")
+                .replace('\'', "''"),
+            log_path = log_path
+                .display()
+                .to_string()
+                .replace('\\', "\\\\")
+                .replace('\'', "''"),
         );
-        std::fs::write(&helper_path, &script).map_err(|e| format!("failed to write helper script: {e}"))?;
+        std::fs::write(&helper_path, &script)
+            .map_err(|e| format!("failed to write helper script: {e}"))?;
 
         let mut update_cmd = std::process::Command::new("powershell");
-        update_cmd.args(["-ExecutionPolicy", "Bypass", "-File"])
+        update_cmd
+            .args(["-ExecutionPolicy", "Bypass", "-File"])
             .arg(&helper_path)
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null());
         hide_window_cmd(&mut update_cmd);
-        update_cmd.spawn()
+        update_cmd
+            .spawn()
             .map_err(|e| format!("failed to start installer helper: {e}"))?;
     }
 

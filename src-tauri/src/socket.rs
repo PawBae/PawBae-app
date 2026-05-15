@@ -35,26 +35,24 @@ pub async fn resolve_claude_permission(
     };
 
     let response_json = match decision.as_str() {
-        "deny" => {
-            serde_json::json!({
-                "continue": true,
-                "suppressOutput": true,
-                "hookSpecificOutput": {
-                    "hookEventName": "PermissionRequest",
-                    "decision": { "behavior": "deny" }
-                }
-            }).to_string()
-        }
-        "allow_once" => {
-            serde_json::json!({
-                "continue": true,
-                "suppressOutput": true,
-                "hookSpecificOutput": {
-                    "hookEventName": "PermissionRequest",
-                    "decision": { "behavior": "allow" }
-                }
-            }).to_string()
-        }
+        "deny" => serde_json::json!({
+            "continue": true,
+            "suppressOutput": true,
+            "hookSpecificOutput": {
+                "hookEventName": "PermissionRequest",
+                "decision": { "behavior": "deny" }
+            }
+        })
+        .to_string(),
+        "allow_once" => serde_json::json!({
+            "continue": true,
+            "suppressOutput": true,
+            "hookSpecificOutput": {
+                "hookEventName": "PermissionRequest",
+                "decision": { "behavior": "allow" }
+            }
+        })
+        .to_string(),
         "allow_all" => {
             let rules = if let Some(name) = &tool_name {
                 serde_json::json!([{ "toolName": name }])
@@ -76,38 +74,49 @@ pub async fn resolve_claude_permission(
                         }]
                     }
                 }
-            }).to_string()
+            })
+            .to_string()
         }
-        "auto_approve" => {
-            serde_json::json!({
-                "continue": true,
-                "suppressOutput": true,
-                "hookSpecificOutput": {
-                    "hookEventName": "PermissionRequest",
-                    "decision": {
-                        "behavior": "allow",
-                        "updatedPermissions": [{
-                            "type": "setMode",
-                            "destination": "session",
-                            "mode": "bypassPermissions"
-                        }]
-                    }
+        "auto_approve" => serde_json::json!({
+            "continue": true,
+            "suppressOutput": true,
+            "hookSpecificOutput": {
+                "hookEventName": "PermissionRequest",
+                "decision": {
+                    "behavior": "allow",
+                    "updatedPermissions": [{
+                        "type": "setMode",
+                        "destination": "session",
+                        "mode": "bypassPermissions"
+                    }]
                 }
-            }).to_string()
-        }
+            }
+        })
+        .to_string(),
         _ => return Err(format!("Unknown decision: {}", decision)),
     };
 
     let tx = {
-        let mut map = state.pending_permissions.lock().map_err(|e| e.to_string())?;
+        let mut map = state
+            .pending_permissions
+            .lock()
+            .map_err(|e| e.to_string())?;
         map.remove(&session_id)
     };
 
     if let Some(tx) = tx {
-        tx.send(response_json).map_err(|_| "Failed to send permission response".to_string())?;
-        log::info!("[resolve_permission] sent '{}' for session={}", decision, &session_id[..session_id.len().min(8)]);
+        tx.send(response_json)
+            .map_err(|_| "Failed to send permission response".to_string())?;
+        log::info!(
+            "[resolve_permission] sent '{}' for session={}",
+            decision,
+            &session_id[..session_id.len().min(8)]
+        );
     } else {
-        log::warn!("[resolve_permission] no pending permission for session={}", &session_id[..session_id.len().min(8)]);
+        log::warn!(
+            "[resolve_permission] no pending permission for session={}",
+            &session_id[..session_id.len().min(8)]
+        );
     }
 
     Ok(())
@@ -125,7 +134,10 @@ pub(crate) fn start_cursor_socket_server(
         let _ = std::fs::remove_file(socket_path);
         let listener = match std::os::unix::net::UnixListener::bind(socket_path) {
             Ok(l) => l,
-            Err(e) => { log::warn!("[cursor_socket] bind failed: {}", e); return; }
+            Err(e) => {
+                log::warn!("[cursor_socket] bind failed: {}", e);
+                return;
+            }
         };
         log::info!("[cursor_socket] listening on {}", socket_path);
 
@@ -154,7 +166,10 @@ pub(crate) fn start_cursor_socket_server(
     {
         let listener = match std::net::TcpListener::bind("127.0.0.1:19284") {
             Ok(l) => l,
-            Err(e) => { log::warn!("[cursor_socket] TCP bind failed: {}", e); return; }
+            Err(e) => {
+                log::warn!("[cursor_socket] TCP bind failed: {}", e);
+                return;
+            }
         };
         log::info!("[cursor_socket] listening on 127.0.0.1:19284");
 
@@ -198,7 +213,10 @@ pub(crate) fn start_claude_socket_server(
 
             let listener = match std::os::unix::net::UnixListener::bind(sock_path) {
                 Ok(l) => l,
-                Err(e) => { log::error!("Failed to bind claude socket: {}", e); return; }
+                Err(e) => {
+                    log::error!("Failed to bind claude socket: {}", e);
+                    return;
+                }
             };
             log::info!("Claude socket server listening on {}", sock_path);
 
@@ -213,14 +231,19 @@ pub(crate) fn start_claude_socket_server(
                             let mut s = s;
                             let mut buf = String::new();
                             let _ = s.read_to_string(&mut buf);
-                            if let Some((session_id, hook_event)) = process_claude_event(&buf, &state, &app, None) {
+                            if let Some((session_id, hook_event)) =
+                                process_claude_event(&buf, &state, &app, None)
+                            {
                                 if hook_event == "PermissionRequest" {
                                     let (tx, rx) = std::sync::mpsc::channel::<String>();
                                     {
                                         let mut map = pending.lock().unwrap();
                                         map.insert(session_id.clone(), tx);
                                     }
-                                    log::info!("[claude_socket] blocking for PermissionRequest session={}", &session_id[..session_id.len().min(8)]);
+                                    log::info!(
+                                        "[claude_socket] blocking for PermissionRequest session={}",
+                                        &session_id[..session_id.len().min(8)]
+                                    );
                                     match rx.recv_timeout(std::time::Duration::from_secs(600)) {
                                         Ok(response_json) => {
                                             log::info!("[claude_socket] sending permission response for session={}", &session_id[..session_id.len().min(8)]);
@@ -228,7 +251,10 @@ pub(crate) fn start_claude_socket_server(
                                             let _ = s.flush();
                                         }
                                         Err(_) => {
-                                            log::warn!("[claude_socket] permission timeout for session={}", &session_id[..session_id.len().min(8)]);
+                                            log::warn!(
+                                                "[claude_socket] permission timeout for session={}",
+                                                &session_id[..session_id.len().min(8)]
+                                            );
                                         }
                                     }
                                     let mut map = pending.lock().unwrap();
@@ -237,7 +263,9 @@ pub(crate) fn start_claude_socket_server(
                             }
                         });
                     }
-                    Err(e) => { log::error!("Claude socket accept error: {}", e); }
+                    Err(e) => {
+                        log::error!("Claude socket accept error: {}", e);
+                    }
                 }
             }
         });
@@ -252,7 +280,10 @@ pub(crate) fn start_claude_socket_server(
             use std::net::TcpListener;
             let listener = match TcpListener::bind("127.0.0.1:19283") {
                 Ok(l) => l,
-                Err(e) => { log::error!("Failed to bind claude TCP socket: {}", e); return; }
+                Err(e) => {
+                    log::error!("Failed to bind claude TCP socket: {}", e);
+                    return;
+                }
             };
             log::info!("Claude TCP server listening on 127.0.0.1:19283");
 
@@ -264,7 +295,8 @@ pub(crate) fn start_claude_socket_server(
                         let pending = pending.clone();
                         std::thread::spawn(move || {
                             use std::io::{Read, Write};
-                            s.set_read_timeout(Some(std::time::Duration::from_secs(5))).ok();
+                            s.set_read_timeout(Some(std::time::Duration::from_secs(5)))
+                                .ok();
                             let mut buf = Vec::new();
                             let mut chunk = [0u8; 4096];
                             loop {
@@ -272,7 +304,9 @@ pub(crate) fn start_claude_socket_server(
                                     Ok(0) => break,
                                     Ok(n) => buf.extend_from_slice(&chunk[..n]),
                                     Err(e) => {
-                                        if !buf.is_empty() { break; }
+                                        if !buf.is_empty() {
+                                            break;
+                                        }
                                         log::warn!("[claude_tcp] read error with empty buf: {}", e);
                                         return;
                                     }
@@ -291,11 +325,15 @@ pub(crate) fn start_claude_socket_server(
                                 log::info!("[claude_tcp] dropping cursor-originated event on windows (len={})", text.len());
                                 return;
                             }
-                            if text.contains("\"source\":\"codex\"") || text.contains("\"source\": \"codex\"") {
+                            if text.contains("\"source\":\"codex\"")
+                                || text.contains("\"source\": \"codex\"")
+                            {
                                 log::info!("[claude_tcp] dropping codex-originated event on windows (len={})", text.len());
                                 return;
                             }
-                            if let Some((session_id, hook_event)) = process_claude_event(&text, &state, &app, None) {
+                            if let Some((session_id, hook_event)) =
+                                process_claude_event(&text, &state, &app, None)
+                            {
                                 if hook_event == "PermissionRequest" {
                                     let (tx, rx) = std::sync::mpsc::channel::<String>();
                                     {
@@ -309,7 +347,10 @@ pub(crate) fn start_claude_socket_server(
                                             let _ = s.flush();
                                         }
                                         Err(_) => {
-                                            log::warn!("[claude_tcp] permission timeout for session={}", &session_id[..session_id.len().min(8)]);
+                                            log::warn!(
+                                                "[claude_tcp] permission timeout for session={}",
+                                                &session_id[..session_id.len().min(8)]
+                                            );
                                         }
                                     }
                                     let mut map = pending.lock().unwrap();
@@ -318,7 +359,9 @@ pub(crate) fn start_claude_socket_server(
                             }
                         });
                     }
-                    Err(e) => { log::error!("Claude TCP accept error: {}", e); }
+                    Err(e) => {
+                        log::error!("Claude TCP accept error: {}", e);
+                    }
                 }
             }
         });

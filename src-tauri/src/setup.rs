@@ -2,18 +2,18 @@
 
 use crate::app_init;
 use crate::commands::hook::{install_claude_hooks, install_cursor_hooks};
-#[cfg(target_os = "macos")]
-use crate::platform::macos::{get_notch_offset, install_wry_webview_ime_fix};
-#[cfg(target_os = "macos")]
-use crate::state::{MINI_WINDOW_FRAME, NOTCH_SCREEN_INFO};
 #[cfg(target_os = "windows")]
 use crate::mascot::MASCOT_TOP_INSET;
+#[cfg(target_os = "macos")]
+use crate::platform::macos::{get_notch_offset, install_wry_webview_ime_fix};
 #[cfg(target_os = "windows")]
 use crate::platform::windows::fullscreen_foreground_monitor;
+#[cfg(target_os = "macos")]
+use crate::speech;
 #[cfg(target_os = "windows")]
 use crate::state::FULLSCREEN_HIDING;
 #[cfg(target_os = "macos")]
-use crate::speech;
+use crate::state::{MINI_WINDOW_FRAME, NOTCH_SCREEN_INFO};
 use crate::{socket, tray};
 
 use tauri::Manager;
@@ -24,7 +24,9 @@ pub(crate) fn init_webview2_env() {
     let key = "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS";
     let flag = "--disable-accelerated-video-decode";
     let merged = match std::env::var(key) {
-        Ok(existing) if !existing.contains(flag) && !existing.trim().is_empty() => format!("{} {}", existing, flag),
+        Ok(existing) if !existing.contains(flag) && !existing.trim().is_empty() => {
+            format!("{} {}", existing, flag)
+        }
         Ok(existing) if existing.contains(flag) => existing,
         _ => flag.to_string(),
     };
@@ -66,16 +68,22 @@ pub(crate) fn init(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error
         speech::init_speech_thread(app.handle().clone());
         log::info!("[voice] speech thread started, registering shortcut");
         use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
-        if let Err(e) = app.global_shortcut().on_shortcut("ctrl+shift+v", move |_app, _shortcut, event| {
-            if event.state == ShortcutState::Pressed {
-                log::info!("[voice] shortcut pressed, recording={}", speech::is_recording());
-                if speech::is_recording() {
-                    let _ = speech::stop_recording();
-                } else {
-                    let _ = speech::start_recording();
-                }
-            }
-        }) {
+        if let Err(e) =
+            app.global_shortcut()
+                .on_shortcut("ctrl+shift+v", move |_app, _shortcut, event| {
+                    if event.state == ShortcutState::Pressed {
+                        log::info!(
+                            "[voice] shortcut pressed, recording={}",
+                            speech::is_recording()
+                        );
+                        if speech::is_recording() {
+                            let _ = speech::stop_recording();
+                        } else {
+                            let _ = speech::start_recording();
+                        }
+                    }
+                })
+        {
             log::warn!("[voice] failed to register shortcut: {}", e);
         }
         log::info!("[voice] shortcut registered, setup continuing");
@@ -84,8 +92,8 @@ pub(crate) fn init(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error
     // Hide from Dock, show only in menu bar (macOS only)
     #[cfg(target_os = "macos")]
     {
-        use objc2::runtime::{AnyClass, AnyObject};
         use objc2::msg_send;
+        use objc2::runtime::{AnyClass, AnyObject};
         unsafe {
             let ns_app_cls = AnyClass::get(c"NSApplication").unwrap();
             let ns_app: *mut AnyObject = msg_send![ns_app_cls, sharedApplication];
@@ -100,9 +108,9 @@ pub(crate) fn init(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error
     if let Some(win) = app.get_webview_window("main") {
         let win_clone = win.clone();
         let _ = app.handle().run_on_main_thread(move || {
-            use objc2::runtime::AnyObject;
             use objc2::msg_send;
-            use objc2_foundation::{NSRect, NSPoint, NSSize};
+            use objc2::runtime::AnyObject;
+            use objc2_foundation::{NSPoint, NSRect, NSSize};
 
             if let Ok(ns_win) = win_clone.ns_window() {
                 let obj = unsafe { &*(ns_win as *mut AnyObject) };
@@ -121,7 +129,13 @@ pub(crate) fn init(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error
                         let sf: NSRect = msg_send![&*screen, frame];
                         let notch_off = get_notch_offset(screen);
                         if let Ok(mut info) = NOTCH_SCREEN_INFO.lock() {
-                            *info = Some((sf.origin.x, sf.origin.y, sf.size.width, sf.size.height, notch_off));
+                            *info = Some((
+                                sf.origin.x,
+                                sf.origin.y,
+                                sf.size.width,
+                                sf.size.height,
+                                notch_off,
+                            ));
                         }
                     }
                     let wf: NSRect = msg_send![obj, frame];
@@ -156,8 +170,10 @@ pub(crate) fn init(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error
     {
         let app_handle = app.handle().clone();
         std::thread::spawn(move || {
-            use windows::Win32::Graphics::Gdi::{HMONITOR, MonitorFromPoint, MONITOR_DEFAULTTONEAREST};
             use windows::Win32::Foundation::POINT;
+            use windows::Win32::Graphics::Gdi::{
+                MonitorFromPoint, HMONITOR, MONITOR_DEFAULTTONEAREST,
+            };
 
             let mut was_hidden = false;
             let mut saved_pos: Option<tauri::LogicalPosition<f64>> = None;
@@ -177,10 +193,7 @@ pub(crate) fn init(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error
                         hidden_monitor
                     } else if let Ok(pos) = win.outer_position() {
                         Some(unsafe {
-                            MonitorFromPoint(
-                                POINT { x: pos.x, y: pos.y },
-                                MONITOR_DEFAULTTONEAREST,
-                            )
+                            MonitorFromPoint(POINT { x: pos.x, y: pos.y }, MONITOR_DEFAULTTONEAREST)
                         })
                     } else {
                         None
@@ -212,7 +225,10 @@ pub(crate) fn init(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error
                                 saved_pos = Some(pos);
                             }
                             let _ = win.set_always_on_top(false);
-                            let _ = win.set_position(tauri::LogicalPosition::new(-9999.0_f64, -9999.0_f64));
+                            let _ = win.set_position(tauri::LogicalPosition::new(
+                                -9999.0_f64,
+                                -9999.0_f64,
+                            ));
                             was_hidden = true;
                         }
                     } else if was_hidden {

@@ -5,8 +5,8 @@ use tauri::Manager;
 
 #[cfg(target_os = "macos")]
 use crate::platform::macos::{
-    get_frontmost_bundle_id, is_any_music_app_playing, is_browser, is_music_app,
-    is_video_app, nowplaying_cli_status,
+    get_frontmost_bundle_id, is_any_music_app_playing, is_browser, is_music_app, is_video_app,
+    nowplaying_cli_status,
 };
 
 #[cfg(target_os = "windows")]
@@ -28,14 +28,12 @@ pub async fn get_system_idle_time(app: tauri::AppHandle) -> Result<f64, String> 
         app.run_on_main_thread(move || {
             #[link(name = "CoreGraphics", kind = "framework")]
             extern "C" {
-                fn CGEventSourceSecondsSinceLastEventType(
-                    state_id: i32,
-                    event_type: u32,
-                ) -> f64;
+                fn CGEventSourceSecondsSinceLastEventType(state_id: i32, event_type: u32) -> f64;
             }
             let idle = unsafe { CGEventSourceSecondsSinceLastEventType(0, 0xFFFFFFFF) };
             let _ = tx.send(idle);
-        }).map_err(|e| e.to_string())?;
+        })
+        .map_err(|e| e.to_string())?;
         rx.recv().map_err(|e| e.to_string())
     }
     #[cfg(not(target_os = "macos"))]
@@ -53,13 +51,21 @@ pub async fn get_now_playing(app: tauri::AppHandle) -> Result<String, String> {
             let cli_status = nowplaying_cli_status();
 
             let result = if let Some((playing, ref source)) = cli_status {
-                if !playing || source.contains("openclaw") || source.contains("ooclaw") || source.contains("com.apple.webkit") {
+                if !playing
+                    || source.contains("openclaw")
+                    || source.contains("ooclaw")
+                    || source.contains("com.apple.webkit")
+                {
                     // Not playing, or our own pet SFX hijacked the Now Playing session.
                     // WebView audio (HTML5 Audio / <video>) reports as "com.apple.WebKit.GPU",
                     // not the host app's bundle ID, so we must also filter that.
                     // Fall back to AppleScript to check if a real music app is still playing,
                     // because nowplaying-cli only reports one source at a time.
-                    if is_any_music_app_playing() { "music" } else { "none" }
+                    if is_any_music_app_playing() {
+                        "music"
+                    } else {
+                        "none"
+                    }
                 } else if is_music_app(source) {
                     "music"
                 } else if is_video_app(source) || is_browser(source) {
@@ -77,10 +83,13 @@ pub async fn get_now_playing(app: tauri::AppHandle) -> Result<String, String> {
             };
             log::info!(
                 "[now_playing] frontmost_bid={} cli_status={:?} result={}",
-                bid, cli_status, result
+                bid,
+                cli_status,
+                result
             );
             let _ = tx.send(result.into());
-        }).map_err(|e| e.to_string())?;
+        })
+        .map_err(|e| e.to_string())?;
         rx.recv().map_err(|e| e.to_string())
     }
     #[cfg(target_os = "windows")]
@@ -110,7 +119,8 @@ pub async fn get_now_playing(app: tauri::AppHandle) -> Result<String, String> {
                         Err(_) => continue,
                     };
 
-                let source = session.SourceAppUserModelId()
+                let source = session
+                    .SourceAppUserModelId()
                     .map(|s| s.to_string_lossy().to_lowercase())
                     .unwrap_or_default();
 
@@ -125,7 +135,8 @@ pub async fn get_now_playing(app: tauri::AppHandle) -> Result<String, String> {
 
                 log::info!(
                     "[now_playing/gsmtc] source={} status={:?}",
-                    source, status.0
+                    source,
+                    status.0
                 );
 
                 if status != GlobalSystemMediaTransportControlsSessionPlaybackStatus::Playing {
@@ -164,22 +175,21 @@ pub async fn get_now_playing(app: tauri::AppHandle) -> Result<String, String> {
 pub async fn play_sound(name: String) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
-        use objc2::runtime::{AnyClass, AnyObject};
         use objc2::msg_send;
+        use objc2::runtime::{AnyClass, AnyObject};
         let name_clone = name.clone();
-        std::thread::spawn(move || {
-            unsafe {
-                let cls = match AnyClass::get(c"NSSound") {
-                    Some(c) => c,
-                    None => return,
-                };
-                let ns_string_cls = AnyClass::get(c"NSString").unwrap();
-                let c_str = std::ffi::CString::new(name_clone.as_bytes()).unwrap();
-                let ns_name: *mut AnyObject = msg_send![ns_string_cls, stringWithUTF8String: c_str.as_ptr()];
-                let sound: *mut AnyObject = msg_send![cls, soundNamed: ns_name];
-                if !sound.is_null() {
-                    let _: () = msg_send![&*sound, play];
-                }
+        std::thread::spawn(move || unsafe {
+            let cls = match AnyClass::get(c"NSSound") {
+                Some(c) => c,
+                None => return,
+            };
+            let ns_string_cls = AnyClass::get(c"NSString").unwrap();
+            let c_str = std::ffi::CString::new(name_clone.as_bytes()).unwrap();
+            let ns_name: *mut AnyObject =
+                msg_send![ns_string_cls, stringWithUTF8String: c_str.as_ptr()];
+            let sound: *mut AnyObject = msg_send![cls, soundNamed: ns_name];
+            if !sound.is_null() {
+                let _: () = msg_send![&*sound, play];
             }
         });
     }
@@ -197,9 +207,12 @@ pub async fn play_sound(name: String) -> Result<(), String> {
         };
         let sound_name = win_sound.to_string();
         std::thread::spawn(move || {
-            use windows::Win32::Media::Audio::{PlaySoundW, SND_ALIAS, SND_ASYNC};
             use windows::core::PCWSTR;
-            let wide: Vec<u16> = sound_name.encode_utf16().chain(std::iter::once(0)).collect();
+            use windows::Win32::Media::Audio::{PlaySoundW, SND_ALIAS, SND_ASYNC};
+            let wide: Vec<u16> = sound_name
+                .encode_utf16()
+                .chain(std::iter::once(0))
+                .collect();
             unsafe {
                 let _ = PlaySoundW(PCWSTR(wide.as_ptr()), None, SND_ALIAS | SND_ASYNC);
             }

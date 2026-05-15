@@ -44,7 +44,11 @@ fn build_asset_response(
             // Serve byte ranges for media files so WKWebView/Safari can stream
             // video containers like HEVC .mov/.mp4 reliably.
             if total_len > 0 {
-                if let Some(range_header) = req.headers().get("Range").or_else(|| req.headers().get("range")) {
+                if let Some(range_header) = req
+                    .headers()
+                    .get("Range")
+                    .or_else(|| req.headers().get("range"))
+                {
                     if let Ok(range) = range_header.to_str() {
                         if let Some(spec) = range.strip_prefix("bytes=") {
                             let mut parts = spec.splitn(2, '-');
@@ -77,7 +81,8 @@ fn build_asset_response(
                             if let Some((start, end)) = parsed {
                                 body = body[start..=end].to_vec();
                                 status = 206;
-                                content_range = Some(format!("bytes {}-{}/{}", start, end, total_len));
+                                content_range =
+                                    Some(format!("bytes {}-{}/{}", start, end, total_len));
                             }
                         }
                     }
@@ -113,9 +118,22 @@ pub(crate) fn register<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::
             let raw_path = req.uri().path();
             let path = percent_decode_str(raw_path).decode_utf8_lossy();
             let resource_dir = ctx.app_handle().path().resource_dir().unwrap_or_default();
-            let file_path = resource_dir.join("assets").join("builtin").join(path.trim_start_matches('/'));
-            log::info!("[localasset] request={} resolved={}", raw_path, file_path.display());
-            build_asset_response(&req, path.as_ref(), &file_path, cfg!(target_os = "windows"), "localasset")
+            let file_path = resource_dir
+                .join("assets")
+                .join("builtin")
+                .join(path.trim_start_matches('/'));
+            log::info!(
+                "[localasset] request={} resolved={}",
+                raw_path,
+                file_path.display()
+            );
+            build_asset_response(
+                &req,
+                path.as_ref(),
+                &file_path,
+                cfg!(target_os = "windows"),
+                "localasset",
+            )
         })
         .register_uri_scheme_protocol("codexpet", |_ctx, req| {
             // Custom codex pets the user dropped into `~/.codex/pets`.
@@ -125,6 +143,12 @@ pub(crate) fn register<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::
             let path = percent_decode_str(raw_path).decode_utf8_lossy();
             let root = codex_pets_dir().unwrap_or_default();
             let file_path = root.join(path.trim_start_matches('/'));
-            build_asset_response(&req, path.as_ref(), &file_path, cfg!(target_os = "windows"), "codexpet")
+            build_asset_response(
+                &req,
+                path.as_ref(),
+                &file_path,
+                cfg!(target_os = "windows"),
+                "codexpet",
+            )
         })
 }

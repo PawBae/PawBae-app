@@ -35,17 +35,21 @@ pub(crate) fn sanitized_mascot_scale(scale: Option<f64>) -> f64 {
 }
 
 pub(crate) fn collapsed_mascot_window_size(scale: f64) -> (f64, f64) {
-    (COLLAPSED_MASCOT_BASE_W * scale, COLLAPSED_MASCOT_BASE_H * scale)
+    (
+        COLLAPSED_MASCOT_BASE_W * scale,
+        COLLAPSED_MASCOT_BASE_H * scale,
+    )
 }
 
 pub(crate) fn large_collapsed_mascot_window_size(scale: f64, large_scale: f64) -> (f64, f64) {
-    let lms = if large_scale.is_finite() && large_scale >= 1.0 && large_scale <= 6.0 { large_scale } else { LARGE_MASCOT_SIZE_MULTIPLIER };
+    let lms = if large_scale.is_finite() && large_scale >= 1.0 && large_scale <= 6.0 {
+        large_scale
+    } else {
+        LARGE_MASCOT_SIZE_MULTIPLIER
+    };
     let size = 43.0 * scale * lms;
     (size, size)
 }
-
-
-
 
 pub(crate) fn current_sprite_pad() -> SpritePadFracs {
     SPRITE_PAD.lock().map(|g| *g).unwrap_or(SpritePadFracs {

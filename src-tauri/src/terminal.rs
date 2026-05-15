@@ -15,25 +15,30 @@ pub(crate) fn is_pid_alive(pid: u32) -> bool {
     }
     #[cfg(windows)]
     {
-        use windows::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
         use windows::Win32::Foundation::CloseHandle;
+        use windows::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
         unsafe {
             let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
             match handle {
-                Ok(h) => { let _ = CloseHandle(h); true }
+                Ok(h) => {
+                    let _ = CloseHandle(h);
+                    true
+                }
                 Err(_) => false,
             }
         }
     }
 }
 
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn get_active_ghostty_terminal_id() -> Option<String> {
+    None
+}
 
 #[cfg(not(target_os = "macos"))]
-pub(crate) fn get_active_ghostty_terminal_id() -> Option<String> { None }
-
-
-#[cfg(not(target_os = "macos"))]
-pub(crate) fn get_frontmost_app_name() -> String { String::new() }
+pub(crate) fn get_frontmost_app_name() -> String {
+    String::new()
+}
 
 pub(crate) fn is_cursor_frontmost_app(name: &str) -> bool {
     name == "Cursor" || name == "pawbae-app"

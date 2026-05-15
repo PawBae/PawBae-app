@@ -32,16 +32,18 @@ pub(crate) fn fix_path() {
     }
 }
 
-
-
 /// Get the user home directory string in a cross-platform way.
 pub(crate) fn home_dir_string() -> String {
     dirs::home_dir()
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_else(|| {
             #[cfg(unix)]
-            { std::env::var("HOME").unwrap_or_else(|_| "/tmp".into()) }
+            {
+                std::env::var("HOME").unwrap_or_else(|_| "/tmp".into())
+            }
             #[cfg(windows)]
-            { std::env::var("USERPROFILE").unwrap_or_else(|_| "C:\\".into()) }
+            {
+                std::env::var("USERPROFILE").unwrap_or_else(|_| "C:\\".into())
+            }
         })
 }
