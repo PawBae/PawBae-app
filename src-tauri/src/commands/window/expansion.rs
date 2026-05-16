@@ -12,7 +12,9 @@ use crate::mascot::{
 };
 #[cfg(target_os = "macos")]
 use crate::platform::macos::{get_notch_offset, pet_context_schedule_restore_alpha};
-use crate::state::{PetState, WindowState};
+#[cfg(target_os = "macos")]
+use crate::state::PetState;
+use crate::state::WindowState;
 #[cfg(target_os = "macos")]
 use std::sync::atomic::Ordering;
 
@@ -38,7 +40,6 @@ pub async fn set_mini_expanded(
         .get_webview_window("main")
         .ok_or("mini window not found")?;
     let ws = app.state::<Arc<WindowState>>();
-    let ps = app.state::<Arc<PetState>>();
     let pos = position.unwrap_or_else(|| "right".to_string());
     let mascot_scale = sanitized_mascot_scale(mascot_scale);
     let large_mascot_scale = large_mascot_scale.unwrap_or(LARGE_MASCOT_SIZE_MULTIPLIER);
@@ -51,7 +52,6 @@ pub async fn set_mini_expanded(
     {
         let win_clone = win.clone();
         let ws2 = Arc::clone(&*ws);
-        let ps2 = Arc::clone(&*ps);
         app.run_on_main_thread(move || {
             use objc2::runtime::{AnyClass, AnyObject};
             use objc2::msg_send;
@@ -240,7 +240,6 @@ pub async fn resize_mini_height(
     let win = app
         .get_webview_window("main")
         .ok_or("mini window not found")?;
-    let ws = app.state::<Arc<WindowState>>();
     let limit = max_height.unwrap_or(350.0).clamp(200.0, 2000.0);
     // Scale height limits on Windows to match DPI-aware window sizes
     #[cfg(target_os = "windows")]
@@ -258,7 +257,7 @@ pub async fn resize_mini_height(
     #[cfg(target_os = "macos")]
     {
         let win_clone = win.clone();
-        let ws2 = Arc::clone(&*ws);
+        let ws2 = Arc::clone(&*app.state::<Arc<WindowState>>());
         app.run_on_main_thread(move || {
             use objc2::msg_send;
             use objc2::runtime::{AnyClass, AnyObject};
@@ -345,7 +344,6 @@ pub async fn set_mini_size(
         .get_webview_window("main")
         .ok_or("mini window not found")?;
     let ws = app.state::<Arc<WindowState>>();
-    let ps = app.state::<Arc<PetState>>();
     let pos = position.unwrap_or_else(|| "right".to_string());
     let want_top = keep_on_top.unwrap_or(restore);
     let is_pet_context = pet_context.unwrap_or(false);
@@ -356,7 +354,7 @@ pub async fn set_mini_size(
     {
         let win_clone = win.clone();
         let ws2 = Arc::clone(&*ws);
-        let ps2 = Arc::clone(&*ps);
+        let ps2 = Arc::clone(&*app.state::<Arc<PetState>>());
         app.run_on_main_thread(move || {
             use objc2::runtime::{AnyClass, AnyObject};
             use objc2::msg_send;

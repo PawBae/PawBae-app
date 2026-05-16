@@ -2,13 +2,16 @@
 
 #[cfg(target_os = "macos")]
 use std::sync::atomic::Ordering;
+#[cfg(target_os = "macos")]
 use std::sync::Arc;
 
 #[cfg(target_os = "macos")]
 use tauri::menu::CheckMenuItem;
 use tauri::menu::{Menu, MenuItem};
+#[cfg(target_os = "macos")]
 use tauri::Manager;
 
+#[cfg(target_os = "macos")]
 use crate::state::PetState;
 
 #[tauri::command]

@@ -1,5 +1,6 @@
 //! Window positioning commands: move_mini_by, get_mini_origin, get_mini_monitor_rect, set_mini_origin, set_ime_mode.
 
+#[cfg(target_os = "macos")]
 use std::sync::Arc;
 
 use tauri::Manager;
@@ -7,6 +8,7 @@ use tauri::Manager;
 #[cfg(target_os = "macos")]
 use crate::mascot::current_sprite_pad;
 use crate::mascot::MASCOT_TOP_INSET;
+#[cfg(target_os = "macos")]
 use crate::state::{PetState, WindowState};
 
 #[cfg(target_os = "windows")]
@@ -17,10 +19,10 @@ pub async fn move_mini_by(app: tauri::AppHandle, dx: f64, dy: f64) -> Result<(),
     let win = app
         .get_webview_window("main")
         .ok_or("mini window not found")?;
-    let ws = app.state::<Arc<WindowState>>();
-    let ps = app.state::<Arc<PetState>>();
     #[cfg(target_os = "macos")]
     {
+        let ws = app.state::<Arc<WindowState>>();
+        let ps = app.state::<Arc<PetState>>();
         let win_clone = win.clone();
         let ws2 = Arc::clone(&*ws);
         let ps2 = Arc::clone(&*ps);
@@ -305,11 +307,10 @@ pub async fn set_mini_origin(
         confine
     );
     let win = app.get_webview_window("main").ok_or("mini not found")?;
-    let ws = app.state::<Arc<WindowState>>();
     #[cfg(target_os = "macos")]
     {
         let win_clone = win.clone();
-        let ws2 = Arc::clone(&*ws);
+        let ws2 = Arc::clone(&*app.state::<Arc<WindowState>>());
         app.run_on_main_thread(move || {
             use objc2::runtime::{AnyClass, AnyObject};
             use objc2::msg_send;
