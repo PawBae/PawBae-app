@@ -131,6 +131,80 @@ pub(super) fn clean_user_message(text: &str) -> String {
     s.trim().to_string()
 }
 
+/// Strip all [[...]] markers from text.
+pub(super) fn strip_brackets(text: &str) -> String {
+    let mut s = text.to_string();
+    while let Some(start) = s.find("[[") {
+        if let Some(end) = s[start..].find("]]") {
+            s = format!("{}{}", &s[..start], &s[start + end + 2..]);
+        } else {
+            break;
+        }
+    }
+    s.trim().to_string()
+}
+
+/// Extract last user + assistant message from a .jsonl session file (reads from end).
+pub(super) fn extract_last_messages(content: &str) -> (Option<String>, Option<String>) {
+    let mut last_user: Option<String> = None;
+    let mut last_assistant: Option<String> = None;
+    for line in content.lines() {
+        let val: serde_json::Value = match serde_json::from_str(line) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        if val["type"].as_str() != Some("message") {
+            continue;
+        }
+        let msg = &val["message"];
+        let role = msg["role"].as_str().unwrap_or("");
+        let text = if let Some(arr) = msg["content"].as_array() {
+            arr.iter()
+                .filter(|i| i["type"].as_str() == Some("text"))
+                .filter_map(|i| i["text"].as_str())
+                .collect::<Vec<_>>()
+                .join("\n")
+        } else if let Some(s) = msg["content"].as_str() {
+            s.to_string()
+        } else {
+            continue;
+        };
+        if text.is_empty() {
+            continue;
+        }
+        match role {
+            "user" => {
+                let cleaned = clean_user_message(&text);
+                if cleaned.is_empty() {
+                    continue;
+                }
+                let truncated = if cleaned.chars().count() > 120 {
+                    let s: String = cleaned.chars().take(120).collect();
+                    format!("{}...", s)
+                } else {
+                    cleaned
+                };
+                last_user = Some(truncated);
+            }
+            "assistant" => {
+                let cleaned = strip_brackets(&text);
+                if cleaned.is_empty() {
+                    continue;
+                }
+                let truncated = if cleaned.chars().count() > 120 {
+                    let s: String = cleaned.chars().take(120).collect();
+                    format!("{}...", s)
+                } else {
+                    cleaned
+                };
+                last_assistant = Some(truncated);
+            }
+            _ => {}
+        }
+    }
+    (last_user, last_assistant)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -204,78 +278,4 @@ mod tests {
         assert_eq!(user.as_deref(), Some("hello"));
         assert!(assistant.is_none());
     }
-}
-
-/// Strip all [[...]] markers from text.
-pub(super) fn strip_brackets(text: &str) -> String {
-    let mut s = text.to_string();
-    while let Some(start) = s.find("[[") {
-        if let Some(end) = s[start..].find("]]") {
-            s = format!("{}{}", &s[..start], &s[start + end + 2..]);
-        } else {
-            break;
-        }
-    }
-    s.trim().to_string()
-}
-
-/// Extract last user + assistant message from a .jsonl session file (reads from end).
-pub(super) fn extract_last_messages(content: &str) -> (Option<String>, Option<String>) {
-    let mut last_user: Option<String> = None;
-    let mut last_assistant: Option<String> = None;
-    for line in content.lines() {
-        let val: serde_json::Value = match serde_json::from_str(line) {
-            Ok(v) => v,
-            Err(_) => continue,
-        };
-        if val["type"].as_str() != Some("message") {
-            continue;
-        }
-        let msg = &val["message"];
-        let role = msg["role"].as_str().unwrap_or("");
-        let text = if let Some(arr) = msg["content"].as_array() {
-            arr.iter()
-                .filter(|i| i["type"].as_str() == Some("text"))
-                .filter_map(|i| i["text"].as_str())
-                .collect::<Vec<_>>()
-                .join("\n")
-        } else if let Some(s) = msg["content"].as_str() {
-            s.to_string()
-        } else {
-            continue;
-        };
-        if text.is_empty() {
-            continue;
-        }
-        match role {
-            "user" => {
-                let cleaned = clean_user_message(&text);
-                if cleaned.is_empty() {
-                    continue;
-                }
-                let truncated = if cleaned.chars().count() > 120 {
-                    let s: String = cleaned.chars().take(120).collect();
-                    format!("{}...", s)
-                } else {
-                    cleaned
-                };
-                last_user = Some(truncated);
-            }
-            "assistant" => {
-                let cleaned = strip_brackets(&text);
-                if cleaned.is_empty() {
-                    continue;
-                }
-                let truncated = if cleaned.chars().count() > 120 {
-                    let s: String = cleaned.chars().take(120).collect();
-                    format!("{}...", s)
-                } else {
-                    cleaned
-                };
-                last_assistant = Some(truncated);
-            }
-            _ => {}
-        }
-    }
-    (last_user, last_assistant)
 }

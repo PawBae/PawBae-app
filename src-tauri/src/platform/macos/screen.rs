@@ -47,6 +47,7 @@ pub(super) mod cg_window {
         pub fn CGWindowListCopyWindowInfo(option: u32, relative_to_window: u32) -> CFArrayRef;
     }
 
+    #[allow(clashing_extern_declarations)]
     #[link(name = "CoreFoundation", kind = "framework")]
     extern "C" {
         pub fn CFArrayGetCount(arr: CFArrayRef) -> CFIndex;
