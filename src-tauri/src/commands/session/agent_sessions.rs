@@ -5,6 +5,10 @@ use std::path::PathBuf;
 use super::helpers::{clean_user_message, extract_last_messages, strip_brackets};
 use super::{ChatMessage, MiniSessionInfo, SessionPreview};
 
+use std::sync::Arc;
+
+use tauri::Manager;
+
 use crate::agent_gateway::{
     check_agent_active_from_lines, extract_sessions, invoke_tool, is_remote_session_active,
     is_session_active, remote_sessions_json_path, sessions_json_path,
@@ -12,12 +16,14 @@ use crate::agent_gateway::{
 use crate::app_init::home_dir_string;
 use crate::lsof::lsof_open_jsonl_paths;
 use crate::ssh_core::{ssh_exec, ssh_read_file};
+use crate::state::SshState;
 
 #[cfg(target_os = "windows")]
 use crate::platform::windows::tail_lines_from_file;
 
 #[tauri::command]
 pub async fn get_agent_sessions(
+    app: tauri::AppHandle,
     agent_id: String,
     mode: Option<String>,
     url: Option<String>,
@@ -32,14 +38,13 @@ pub async fn get_agent_sessions(
         ssh_host
     );
     if mode.as_deref() == Some("remote") {
+        let ssh = app.state::<Arc<SshState>>();
         let sh = ssh_host.as_deref().unwrap_or("");
         let su = ssh_user.as_deref().unwrap_or("");
         if !sh.is_empty() && !su.is_empty() {
-            // SSH: only read sessions.json metadata (1 SSH call).
-            // Session file content is loaded lazily via get_session_preview.
             let sess_path = remote_sessions_json_path(&agent_id);
             log::info!("[get_agent_sessions] SSH reading metadata: {}", sess_path);
-            let content = match ssh_read_file(sh, su, &sess_path).await {
+            let content = match ssh_read_file(&ssh, sh, su, &sess_path).await {
                 Ok(c) => {
                     log::info!("[get_agent_sessions] SSH read OK, len={}", c.len());
                     c
@@ -279,6 +284,7 @@ pub async fn get_agent_sessions(
 
 #[tauri::command]
 pub async fn get_session_preview(
+    app: tauri::AppHandle,
     session_file: String,
     mode: Option<String>,
     ssh_host: Option<String>,
@@ -290,12 +296,13 @@ pub async fn get_session_preview(
         mode
     );
     if mode.as_deref() == Some("remote") {
+        let ssh = app.state::<Arc<SshState>>();
         let sh = ssh_host.as_deref().unwrap_or("");
         let su = ssh_user.as_deref().unwrap_or("");
         if !sh.is_empty() && !su.is_empty() {
             let escaped = session_file.replace('"', r#"\""#);
             let cmd = format!("tail -50 \"{}\" 2>/dev/null", escaped);
-            let output = ssh_exec(sh, su, &cmd).await.map_err(|e| {
+            let output = ssh_exec(&ssh, sh, su, &cmd).await.map_err(|e| {
                 log::error!("[get_session_preview] SSH failed: {}", e);
                 format!("session preview: {}", e)
             })?;
@@ -334,7 +341,9 @@ pub async fn get_session_preview(
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn get_session_messages(
+    app: tauri::AppHandle,
     agent_id: String,
     session_key: String,
     mode: Option<String>,
@@ -344,19 +353,19 @@ pub async fn get_session_messages(
     ssh_user: Option<String>,
 ) -> Result<Vec<ChatMessage>, String> {
     if mode.as_deref() == Some("remote") {
+        let ssh = app.state::<Arc<SshState>>();
         let sh = ssh_host.as_deref().unwrap_or("");
         let su = ssh_user.as_deref().unwrap_or("");
         if !sh.is_empty() && !su.is_empty() {
-            // SSH-based: read .jsonl session file like local mode
             let sess_path = remote_sessions_json_path(&agent_id);
-            let content = ssh_read_file(sh, su, &sess_path)
+            let content = ssh_read_file(&ssh, sh, su, &sess_path)
                 .await
                 .map_err(|e| format!("read remote sessions.json: {}", e))?;
             let map: serde_json::Map<String, serde_json::Value> =
                 serde_json::from_str(&content).map_err(|e| e.to_string())?;
             let session = map.get(&session_key).ok_or("session not found")?;
             let file = session["sessionFile"].as_str().ok_or("no sessionFile")?;
-            let jsonl = ssh_read_file(sh, su, file)
+            let jsonl = ssh_read_file(&ssh, sh, su, file)
                 .await
                 .map_err(|e| format!("read remote session file: {}", e))?;
 
@@ -548,6 +557,7 @@ pub async fn get_session_messages(
 /// Only does lsof + reads sessions.json (no .jsonl content parsing).
 #[tauri::command]
 pub async fn get_active_sessions(
+    app: tauri::AppHandle,
     mode: Option<String>,
     url: Option<String>,
     token: Option<String>,
@@ -555,12 +565,12 @@ pub async fn get_active_sessions(
     ssh_user: Option<String>,
 ) -> Result<Vec<String>, String> {
     if mode.as_deref() == Some("remote") {
+        let ssh = app.state::<Arc<SshState>>();
         let sh = ssh_host.as_deref().unwrap_or("");
         let su = ssh_user.as_deref().unwrap_or("");
         if !sh.is_empty() && !su.is_empty() {
-            // Step 1: Single SSH command to read all sessions.json files
             let list_cmd = r#"for d in $HOME/.openclaw/agents/*/; do id=$(basename "$d"); sj="$d/sessions.json"; [ -f "$sj" ] || continue; echo "AGENT_SESSIONS:$id"; cat "$sj"; echo ""; echo "END_AGENT_SESSIONS"; done"#;
-            let list_output = ssh_exec(sh, su, list_cmd).await.unwrap_or_default();
+            let list_output = ssh_exec(&ssh, sh, su, list_cmd).await.unwrap_or_default();
             log::info!(
                 "[get_active_sessions] remote step1 output len={}",
                 list_output.len()
@@ -637,7 +647,7 @@ pub async fn get_active_sessions(
                 })
                 .collect();
             let check_cmd = check_parts.join("\n");
-            let check_output = ssh_exec(sh, su, &check_cmd).await.unwrap_or_default();
+            let check_output = ssh_exec(&ssh, sh, su, &check_cmd).await.unwrap_or_default();
 
             // Parse: check each session's tail for activity
             let mut active_keys: Vec<String> = vec![];

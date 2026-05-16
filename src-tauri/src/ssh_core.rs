@@ -6,7 +6,7 @@ use std::time::SystemTime;
 
 use crate::agent_gateway::check_agent_active_from_lines;
 use crate::app_init::home_dir_string;
-use crate::state::{ssh_backoff_map, ssh_key_map, SshBackoffState};
+use crate::state::{SshBackoffState, SshState};
 
 #[cfg(target_os = "windows")]
 use crate::platform::windows::{hide_window_tokio_cmd, win_ssh_mux};
@@ -18,8 +18,8 @@ fn unix_now() -> u64 {
         .as_secs()
 }
 
-fn ssh_backoff_remaining(host_key: &str) -> Option<u64> {
-    let map = ssh_backoff_map().lock().unwrap();
+fn ssh_backoff_remaining(ssh: &SshState, host_key: &str) -> Option<u64> {
+    let map = ssh.backoff.lock().unwrap();
     let state = map.get(host_key)?;
     if state.fail_count == 0 {
         return None;
@@ -33,8 +33,8 @@ fn ssh_backoff_remaining(host_key: &str) -> Option<u64> {
     }
 }
 
-fn ssh_backoff_record_failure(host_key: &str) {
-    let mut map = ssh_backoff_map().lock().unwrap();
+fn ssh_backoff_record_failure(ssh: &SshState, host_key: &str) {
+    let mut map = ssh.backoff.lock().unwrap();
     let state = map.entry(host_key.to_string()).or_insert(SshBackoffState {
         fail_count: 0,
         fail_epoch: 0,
@@ -43,8 +43,8 @@ fn ssh_backoff_record_failure(host_key: &str) {
     state.fail_epoch = unix_now();
 }
 
-pub(crate) fn ssh_backoff_reset(host_key: &str) {
-    let mut map = ssh_backoff_map().lock().unwrap();
+pub(crate) fn ssh_backoff_reset(ssh: &SshState, host_key: &str) {
+    let mut map = ssh.backoff.lock().unwrap();
     map.remove(host_key);
 }
 /// Get the SSH control socket path for a given host.
@@ -69,9 +69,9 @@ fn ssh_control_path(ssh_user: &str, ssh_host: &str) -> String {
 /// and create a marker file. Each ssh_exec call will open its own SSH connection.
 /// Implements exponential backoff on connection failure (15s, 30s, 60s, … capped at 300s)
 /// to avoid flooding the server with reconnection attempts.
-async fn ensure_ssh_master(ssh_host: &str, ssh_user: &str) -> Result<(), String> {
+async fn ensure_ssh_master(ssh: &SshState, ssh_host: &str, ssh_user: &str) -> Result<(), String> {
     let host_key = format!("{}@{}", ssh_user, ssh_host);
-    if let Some(remaining) = ssh_backoff_remaining(&host_key) {
+    if let Some(remaining) = ssh_backoff_remaining(ssh, &host_key) {
         return Err(format!(
             "SSH connection to {} backing off, retry in {}s",
             host_key, remaining
@@ -143,7 +143,7 @@ async fn ensure_ssh_master(ssh_host: &str, ssh_user: &str) -> Result<(), String>
         let output = match result {
             Ok(Ok(o)) => o,
             Ok(Err(e)) => {
-                ssh_backoff_record_failure(&host_key);
+                ssh_backoff_record_failure(ssh, &host_key);
                 return Err(format!("ssh master wait: {}", e));
             }
             Err(_) => {
@@ -152,15 +152,16 @@ async fn ensure_ssh_master(ssh_host: &str, ssh_user: &str) -> Result<(), String>
                         libc::kill(pid as i32, libc::SIGKILL);
                     }
                 }
-                ssh_backoff_record_failure(&host_key);
+                ssh_backoff_record_failure(ssh, &host_key);
                 return Err(format!("ssh master to {} timed out after 15s", host_key));
             }
         };
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            ssh_backoff_record_failure(&host_key);
-            let count = ssh_backoff_map()
+            ssh_backoff_record_failure(ssh, &host_key);
+            let count = ssh
+                .backoff
                 .lock()
                 .unwrap()
                 .get(&host_key)
@@ -187,7 +188,7 @@ async fn ensure_ssh_master(ssh_host: &str, ssh_user: &str) -> Result<(), String>
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
         if !std::path::Path::new(&control_path).exists() {
-            ssh_backoff_record_failure(&host_key);
+            ssh_backoff_record_failure(ssh, &host_key);
             return Err(format!("ssh master socket for {} never appeared", host_key));
         }
     }
@@ -198,8 +199,9 @@ async fn ensure_ssh_master(ssh_host: &str, ssh_user: &str) -> Result<(), String>
         // connections. This avoids the TCP+SSH handshake overhead on every call and
         // prevents hitting server-side MaxStartups limits.
         if let Err(e) = win_ssh_mux::ensure(ssh_user, ssh_host).await {
-            ssh_backoff_record_failure(&host_key);
-            let count = ssh_backoff_map()
+            ssh_backoff_record_failure(ssh, &host_key);
+            let count = ssh
+                .backoff
                 .lock()
                 .unwrap()
                 .get(&host_key)
@@ -231,7 +233,7 @@ async fn ensure_ssh_master(ssh_host: &str, ssh_user: &str) -> Result<(), String>
                 let expanded = path.replace("~", &home_dir_string());
                 if std::path::Path::new(&expanded).exists() {
                     log::info!("[ssh] {} will use key: {}", host_key, expanded);
-                    ssh_key_map()
+                    ssh.key_used
                         .lock()
                         .unwrap()
                         .insert(host_key.clone(), expanded);
@@ -241,7 +243,7 @@ async fn ensure_ssh_master(ssh_host: &str, ssh_user: &str) -> Result<(), String>
         }
     }
 
-    ssh_backoff_reset(&host_key);
+    ssh_backoff_reset(ssh, &host_key);
     Ok(())
 }
 /// Execute a command on remote host via SSH.
@@ -249,8 +251,13 @@ async fn ensure_ssh_master(ssh_host: &str, ssh_user: &str) -> Result<(), String>
 /// On Windows: routes through a persistent SSH subprocess (win_ssh_mux) so all
 ///   commands share a single TCP connection instead of opening one per call.
 /// If the command fails (e.g. stale socket), removes the socket and retries once.
-pub(crate) async fn ssh_exec(ssh_host: &str, ssh_user: &str, cmd: &str) -> Result<String, String> {
-    ensure_ssh_master(ssh_host, ssh_user).await?;
+pub(crate) async fn ssh_exec(
+    ssh: &SshState,
+    ssh_host: &str,
+    ssh_user: &str,
+    cmd: &str,
+) -> Result<String, String> {
+    ensure_ssh_master(ssh, ssh_host, ssh_user).await?;
     let safe_cmd = format!(
         "export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH && {}",
         cmd
@@ -269,7 +276,7 @@ pub(crate) async fn ssh_exec(ssh_host: &str, ssh_user: &str, cmd: &str) -> Resul
             {
                 log::warn!("[ssh] transport error, removing marker and retrying: {}", e);
                 let _ = tokio::fs::remove_file(&ssh_control_path(ssh_user, ssh_host)).await;
-                ensure_ssh_master(ssh_host, ssh_user).await?;
+                ensure_ssh_master(ssh, ssh_host, ssh_user).await?;
                 return win_ssh_mux::exec(ssh_user, ssh_host, &safe_cmd).await;
             }
             Err(e) => Err(e),
@@ -314,7 +321,7 @@ pub(crate) async fn ssh_exec(ssh_host: &str, ssh_user: &str, cmd: &str) -> Resul
 
         log::warn!("[ssh] transport error (exit 255), removing stale socket and retrying");
         let _ = tokio::fs::remove_file(&control_path).await;
-        ensure_ssh_master(ssh_host, ssh_user).await?;
+        ensure_ssh_master(ssh, ssh_host, ssh_user).await?;
 
         let mut ssh_args2: Vec<&str> =
             vec!["-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "-o", &cp];
@@ -349,7 +356,11 @@ pub(crate) async fn ssh_exec(ssh_host: &str, ssh_user: &str, cmd: &str) -> Resul
     }
 }
 /// Close an active SSH ControlMaster socket (macOS/Linux) or persistent mux subprocess (Windows).
-pub(crate) async fn close_ssh_master(ssh_host: &str, ssh_user: &str) -> Result<(), String> {
+pub(crate) async fn close_ssh_master(
+    ssh: &SshState,
+    ssh_host: &str,
+    ssh_user: &str,
+) -> Result<(), String> {
     let control_path = ssh_control_path(ssh_user, ssh_host);
     #[cfg(unix)]
     {
@@ -369,7 +380,7 @@ pub(crate) async fn close_ssh_master(ssh_host: &str, ssh_user: &str) -> Result<(
         win_ssh_mux::kill(ssh_user, ssh_host).await;
     }
     let _ = tokio::fs::remove_file(&control_path).await;
-    ssh_backoff_reset(&format!("{}@{}", ssh_user, ssh_host));
+    ssh_backoff_reset(ssh, &format!("{}@{}", ssh_user, ssh_host));
     log::info!(
         "[close_ssh_master] closed socket for {}@{}",
         ssh_user,
@@ -378,33 +389,34 @@ pub(crate) async fn close_ssh_master(ssh_host: &str, ssh_user: &str) -> Result<(
     Ok(())
 }
 pub(crate) async fn ssh_read_file(
+    ssh: &SshState,
     ssh_host: &str,
     ssh_user: &str,
     path: &str,
 ) -> Result<String, String> {
-    // Use double quotes so ~ expands, but escape any embedded double quotes
     let escaped = path.replace('"', r#"\""#);
-    ssh_exec(ssh_host, ssh_user, &format!("cat \"{}\"", escaped)).await
+    ssh_exec(ssh, ssh_host, ssh_user, &format!("cat \"{}\"", escaped)).await
 }
 
-/// Check if an agent is active by reading the tail of the latest .jsonl file via SSH.
-/// If the last message-type entry is a user message (no assistant response yet), agent is working.
-pub(crate) async fn ssh_is_agent_active(ssh_host: &str, ssh_user: &str, agent_id: &str) -> bool {
+pub(crate) async fn ssh_is_agent_active(
+    ssh: &SshState,
+    ssh_host: &str,
+    ssh_user: &str,
+    agent_id: &str,
+) -> bool {
     let agent_dir = if agent_id.is_empty() {
         "main"
     } else {
         agent_id
     };
-    // Read the last 5 lines of the newest .jsonl file
     let cmd = format!(
         "f=$(ls -t $HOME/.openclaw/agents/{}/sessions/*.jsonl 2>/dev/null | head -1); [ -f \"$f\" ] && tail -5 \"$f\"",
         agent_dir
     );
-    let output = match ssh_exec(ssh_host, ssh_user, &cmd).await {
+    let output = match ssh_exec(ssh, ssh_host, ssh_user, &cmd).await {
         Ok(s) => s,
         Err(_) => return false,
     };
-    // Walk backwards through lines to find the last message entry
     let lines: Vec<String> = output.lines().map(|l| l.to_string()).collect();
     check_agent_active_from_lines(&lines)
 }

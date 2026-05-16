@@ -3,12 +3,17 @@
 #[cfg(windows)]
 use std::path::PathBuf;
 
+use std::sync::Arc;
+
+use tauri::Manager;
+
 use crate::agent_gateway::{
     build_agent_health_from_meta, check_agent_active_from_lines, extract_sessions, invoke_tool,
     is_remote_session_active, is_session_active,
 };
 use crate::app_init::home_dir_string;
 use crate::ssh_core::{ssh_exec, ssh_read_file};
+use crate::state::SshState;
 
 #[cfg(target_os = "windows")]
 use crate::platform::windows::tail_lines_from_file;
@@ -20,6 +25,7 @@ use super::{AgentHealth, AgentInfo, HealthResult};
 
 #[tauri::command]
 pub async fn get_agents(
+    app: tauri::AppHandle,
     mode: Option<String>,
     url: Option<String>,
     token: Option<String>,
@@ -28,15 +34,16 @@ pub async fn get_agents(
 ) -> Result<Vec<AgentInfo>, String> {
     log::info!("[get_agents] mode={:?} ssh_host={:?}", mode, ssh_host);
     if mode.as_deref() == Some("remote") {
+        let ssh = app.state::<Arc<SshState>>();
         let sh = ssh_host.as_deref().unwrap_or("");
         let su = ssh_user.as_deref().unwrap_or("");
         if !sh.is_empty() && !su.is_empty() {
-            let dirs = ssh_exec(sh, su, "ls -1 $HOME/.openclaw/agents/ 2>/dev/null").await?;
+            let dirs = ssh_exec(&ssh, sh, su, "ls -1 $HOME/.openclaw/agents/ 2>/dev/null").await?;
             let mut agents: Vec<AgentInfo> = Vec::new();
             for id in dirs.lines().filter(|l| !l.trim().is_empty()) {
                 let id = id.trim().to_string();
                 let config_path = format!("$HOME/.openclaw/agents/{}/agent.json", id);
-                let (name, emoji) = match ssh_read_file(sh, su, &config_path).await {
+                let (name, emoji) = match ssh_read_file(&ssh, sh, su, &config_path).await {
                     Ok(c) => {
                         let val: serde_json::Value = serde_json::from_str(&c).unwrap_or_default();
                         (
@@ -189,6 +196,7 @@ pub async fn get_agents(
 
 #[tauri::command]
 pub async fn get_health(
+    app: tauri::AppHandle,
     mode: Option<String>,
     url: Option<String>,
     token: Option<String>,
@@ -197,12 +205,12 @@ pub async fn get_health(
 ) -> Result<HealthResult, String> {
     log::info!("[get_health] mode={:?} ssh_host={:?}", mode, ssh_host);
     if mode.as_deref() == Some("remote") {
+        let ssh = app.state::<Arc<SshState>>();
         let sh = ssh_host.as_deref().unwrap_or("");
         let su = ssh_user.as_deref().unwrap_or("");
         if !sh.is_empty() && !su.is_empty() {
-            // Single SSH command: read sessions.json + tail each session file per agent
             let cmd = r#"for d in $HOME/.openclaw/agents/*/; do id=$(basename "$d"); sj="$d/sessions/sessions.json"; echo "AGENT:$id"; if [ -f "$sj" ]; then echo "META_START"; cat "$sj"; echo ""; echo "META_END"; fi; for f in "$d"sessions/*.jsonl; do [ -f "$f" ] || continue; echo "TAIL:$(basename "$f")"; tail -5 "$f"; echo "END_TAIL"; done; echo "END_AGENT"; done"#;
-            let output = ssh_exec(sh, su, cmd).await.unwrap_or_default();
+            let output = ssh_exec(&ssh, sh, su, cmd).await.unwrap_or_default();
 
             let mut agents = Vec::new();
             let mut current_id: Option<String> = None;
