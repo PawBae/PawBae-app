@@ -2,6 +2,7 @@
 
 #[cfg(target_os = "macos")]
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
 
 #[cfg(target_os = "macos")]
 use tauri::menu::CheckMenuItem;
@@ -10,12 +11,12 @@ use tauri::tray::TrayIconBuilder;
 use tauri::{Emitter, Manager};
 
 #[cfg(target_os = "macos")]
-use crate::state::{STROLL_MODE_ENABLED, THROW_TRACKING_ENABLED};
+use crate::state::PetState;
+#[cfg(target_os = "windows")]
+use crate::state::{PetState, WindowState};
 
 #[cfg(target_os = "windows")]
 use crate::platform::windows::win_ui_scale;
-#[cfg(target_os = "windows")]
-use crate::state::FULLSCREEN_HIDING;
 
 // Tray label tuple: (show, hide, stroll, settings, quit). The `stroll` slot is
 // populated for every language but only inserted into the tray menu on
@@ -72,12 +73,13 @@ pub(crate) fn init<R: tauri::Runtime>(app: &mut tauri::App<R>) -> tauri::Result<
     let quit = MenuItem::with_id(app, "quit", quit_label, true, None::<&str>)?;
     #[cfg(target_os = "macos")]
     let menu = {
+        let ps = app.handle().state::<Arc<PetState>>();
         let stroll = CheckMenuItem::with_id(
             app,
             "stroll",
             stroll_label,
             true,
-            STROLL_MODE_ENABLED.load(Ordering::SeqCst),
+            ps.stroll_enabled.load(Ordering::SeqCst),
             None::<&str>,
         )?;
         Menu::with_items(app, &[&show, &hide, &stroll, &settings, &quit])?
@@ -98,7 +100,9 @@ pub(crate) fn init<R: tauri::Runtime>(app: &mut tauri::App<R>) -> tauri::Result<
                 if let Some(win) = app.get_webview_window("main") {
                     #[cfg(target_os = "windows")]
                     {
-                        FULLSCREEN_HIDING.store(false, std::sync::atomic::Ordering::SeqCst);
+                        let ws = app.state::<Arc<WindowState>>();
+                        ws.fullscreen_hiding
+                            .store(false, std::sync::atomic::Ordering::SeqCst);
                         if let Ok(Some(monitor)) = win.primary_monitor() {
                             let scale = monitor.scale_factor();
                             let sw = monitor.size().width as f64 / scale;
@@ -123,13 +127,14 @@ pub(crate) fn init<R: tauri::Runtime>(app: &mut tauri::App<R>) -> tauri::Result<
                 // through the frontend (which owns settings.json),
                 // and broadcast the new value so Mini.tsx can flip
                 // the physics loop on/off without a polling read.
-                let prev = STROLL_MODE_ENABLED.load(Ordering::SeqCst);
+                let ps = app.state::<Arc<PetState>>();
+                let prev = ps.stroll_enabled.load(Ordering::SeqCst);
                 let next = !prev;
-                STROLL_MODE_ENABLED.store(next, Ordering::SeqCst);
+                ps.stroll_enabled.store(next, Ordering::SeqCst);
                 // If the user disables stroll, also drop throw
                 // tracking so we stop sampling drag velocities.
                 if !next {
-                    THROW_TRACKING_ENABLED.store(false, Ordering::SeqCst);
+                    ps.throw_tracking.store(false, Ordering::SeqCst);
                 }
                 let _ = app.emit("stroll-mode-changed", next);
             }
@@ -137,7 +142,9 @@ pub(crate) fn init<R: tauri::Runtime>(app: &mut tauri::App<R>) -> tauri::Result<
                 if let Some(win) = app.get_webview_window("main") {
                     #[cfg(target_os = "windows")]
                     {
-                        FULLSCREEN_HIDING.store(false, std::sync::atomic::Ordering::SeqCst);
+                        let ws = app.state::<Arc<WindowState>>();
+                        ws.fullscreen_hiding
+                            .store(false, std::sync::atomic::Ordering::SeqCst);
                         if let Ok(Some(monitor)) = win.primary_monitor() {
                             let scale = monitor.scale_factor();
                             let sw = monitor.size().width as f64 / scale;

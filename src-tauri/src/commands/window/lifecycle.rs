@@ -1,5 +1,7 @@
 //! Window lifecycle commands: open_mini, close_mini, open_detail_panel, reassert_floating, get_ui_scale.
 
+use std::sync::Arc;
+
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 
 #[cfg(target_os = "macos")]
@@ -8,24 +10,30 @@ use crate::mascot::{
     collapsed_mascot_window_size, COLLAPSED_MASCOT_BASE_H, COLLAPSED_MASCOT_BASE_W,
 };
 use crate::pet_core::reassert_mini_floating;
-use crate::state::MINI_WINDOW_FRAME;
+use crate::state::WindowState;
 
 #[cfg(target_os = "macos")]
 use crate::platform::macos::get_notch_offset;
 
 #[cfg(target_os = "windows")]
 use crate::platform::windows::win_ui_scale;
-#[cfg(target_os = "windows")]
-use crate::state::FULLSCREEN_HIDING;
 
 #[tauri::command]
 pub async fn open_mini(app: tauri::AppHandle) -> Result<(), String> {
     log::info!("[mini-pos] open_mini called");
+    let ws = app.state::<Arc<WindowState>>();
     if let Some(win) = app.get_webview_window("main") {
         // Reposition to collapsed position before showing
         #[cfg(target_os = "macos")]
         {
             let win_clone = win.clone();
+            let cached_frame_size = ws
+                .mini_frame
+                .lock()
+                .ok()
+                .and_then(|g| *g)
+                .map(|(_, _, w, h)| (w, h))
+                .unwrap_or_else(|| collapsed_mascot_window_size(1.0));
             let _ = app.run_on_main_thread(move || {
                 use objc2::runtime::{AnyClass, AnyObject};
                 use objc2::msg_send;
@@ -54,12 +62,7 @@ pub async fn open_mini(app: tauri::AppHandle) -> Result<(), String> {
                         Some((frame.origin.x, frame.origin.y, frame.size.width, frame.size.height, notch_off))
                     };
                     if let Some((sx, sy, sw, sh, notch_off)) = screen_info {
-                        let (win_w, win_h) = MINI_WINDOW_FRAME
-                            .lock()
-                            .ok()
-                            .and_then(|g| *g)
-                            .map(|(_, _, w, h)| (w, h))
-                            .unwrap_or_else(|| collapsed_mascot_window_size(1.0));
+                        let (win_w, win_h) = cached_frame_size;
                         let x = sx + sw / 2.0 + notch_off;
                         // Pull the window down by MASCOT_TOP_INSET so it
                         // does not sit under the menu bar / notch on launch.
@@ -84,7 +87,8 @@ pub async fn open_mini(app: tauri::AppHandle) -> Result<(), String> {
                 let scale = monitor.scale_factor();
                 let sw = monitor.size().width as f64 / scale;
                 let ui = win_ui_scale(&monitor);
-                let (base_w, base_h) = MINI_WINDOW_FRAME
+                let (base_w, base_h) = ws
+                    .mini_frame
                     .lock()
                     .ok()
                     .and_then(|g| *g)
@@ -101,7 +105,10 @@ pub async fn open_mini(app: tauri::AppHandle) -> Result<(), String> {
                 );
                 let _ = win.set_position(tauri::LogicalPosition::new(x, 0.0));
             }
-            if !FULLSCREEN_HIDING.load(std::sync::atomic::Ordering::SeqCst) {
+            if !ws
+                .fullscreen_hiding
+                .load(std::sync::atomic::Ordering::SeqCst)
+            {
                 win.show().map_err(|e| e.to_string())?;
                 win.set_focus().map_err(|e| e.to_string())?;
             }
@@ -203,7 +210,10 @@ pub async fn open_mini(app: tauri::AppHandle) -> Result<(), String> {
             );
             let _ = win.set_position(tauri::LogicalPosition::new(x, 0.0));
         }
-        if !FULLSCREEN_HIDING.load(std::sync::atomic::Ordering::SeqCst) {
+        if !ws
+            .fullscreen_hiding
+            .load(std::sync::atomic::Ordering::SeqCst)
+        {
             let _ = win.show();
         }
     }

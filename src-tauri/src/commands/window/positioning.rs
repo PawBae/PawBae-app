@@ -1,14 +1,13 @@
 //! Window positioning commands: move_mini_by, get_mini_origin, get_mini_monitor_rect, set_mini_origin, set_ime_mode.
 
+use std::sync::Arc;
+
 use tauri::Manager;
 
 #[cfg(target_os = "macos")]
 use crate::mascot::current_sprite_pad;
 use crate::mascot::MASCOT_TOP_INSET;
-#[cfg(target_os = "macos")]
-use crate::state::MINI_WINDOW_FRAME;
-#[cfg(target_os = "macos")]
-use crate::state::PET_MENU_RESTORE_FRAME;
+use crate::state::{PetState, WindowState};
 
 #[cfg(target_os = "windows")]
 use crate::platform::windows::win_ui_scale;
@@ -18,9 +17,13 @@ pub async fn move_mini_by(app: tauri::AppHandle, dx: f64, dy: f64) -> Result<(),
     let win = app
         .get_webview_window("main")
         .ok_or("mini window not found")?;
+    let ws = app.state::<Arc<WindowState>>();
+    let ps = app.state::<Arc<PetState>>();
     #[cfg(target_os = "macos")]
     {
         let win_clone = win.clone();
+        let ws2 = Arc::clone(&*ws);
+        let ps2 = Arc::clone(&*ps);
         app.run_on_main_thread(move || {
             use objc2::msg_send;
             use objc2::runtime::{AnyClass, AnyObject};
@@ -82,7 +85,7 @@ pub async fn move_mini_by(app: tauri::AppHandle, dx: f64, dy: f64) -> Result<(),
                         // when the sprite div doesn't fill the window
                         // (centered, with empty pixels around) — only an
                         // absolute pixel value captures that offset.
-                        let pad = current_sprite_pad();
+                        let pad = current_sprite_pad(&ps2);
                         let pad_bottom = pad.bottom_px.unwrap_or(frame.size.height * pad.bottom);
                         let pad_top = pad.top_px.unwrap_or(frame.size.height * pad.top);
                         let pad_left = pad.left_px.unwrap_or(frame.size.width * pad.left);
@@ -133,7 +136,7 @@ pub async fn move_mini_by(app: tauri::AppHandle, dx: f64, dy: f64) -> Result<(),
                 unsafe {
                     let _: () = msg_send![obj, setFrame: new_frame, display: true, animate: false];
                 }
-                if let Ok(mut f) = MINI_WINDOW_FRAME.lock() {
+                if let Ok(mut f) = ws2.mini_frame.lock() {
                     *f = Some((
                         new_frame.origin.x,
                         new_frame.origin.y,
@@ -148,7 +151,7 @@ pub async fn move_mini_by(app: tauri::AppHandle, dx: f64, dy: f64) -> Result<(),
                 // restore frame from the real window position.
                 let actual_dx = clamped_x - frame.origin.x;
                 let actual_dy_top_down = frame.origin.y - clamped_y;
-                if let Ok(mut saved) = PET_MENU_RESTORE_FRAME.lock() {
+                if let Ok(mut saved) = ps2.menu_restore_frame.lock() {
                     if let Some(ref mut s) = *saved {
                         s.0 += actual_dx;
                         s.1 -= actual_dy_top_down;
@@ -302,9 +305,11 @@ pub async fn set_mini_origin(
         confine
     );
     let win = app.get_webview_window("main").ok_or("mini not found")?;
+    let ws = app.state::<Arc<WindowState>>();
     #[cfg(target_os = "macos")]
     {
         let win_clone = win.clone();
+        let ws2 = Arc::clone(&*ws);
         app.run_on_main_thread(move || {
             use objc2::runtime::{AnyClass, AnyObject};
             use objc2::msg_send;
@@ -357,7 +362,7 @@ pub async fn set_mini_origin(
                 unsafe {
                     let _: () = msg_send![obj, setFrame: new_frame, display: true, animate: false];
                 }
-                if let Ok(mut f) = MINI_WINDOW_FRAME.lock() {
+                if let Ok(mut f) = ws2.mini_frame.lock() {
                     *f = Some((new_frame.origin.x, new_frame.origin.y, new_frame.size.width, new_frame.size.height));
                 }
             }

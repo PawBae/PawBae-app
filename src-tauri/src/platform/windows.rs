@@ -1,13 +1,13 @@
 //! Windows-specific helpers. Gated by the outer `#[cfg(target_os = "windows")]` in `platform/mod.rs`.
 
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
 use tauri::Manager;
 
 use crate::mascot::large_collapsed_mascot_window_size;
 #[allow(unused_imports)]
 use crate::platform::common::*;
-#[allow(unused_imports)]
-use crate::state::*;
+use crate::state::{PetState, WindowState};
 
 /// Apply CREATE_NO_WINDOW on Windows to prevent console popups from child processes.
 pub(crate) fn hide_window_cmd(cmd: &mut std::process::Command) {
@@ -398,6 +398,8 @@ pub(crate) fn is_browser_win(id: &str) -> bool {
 /// window is interactive so menu buttons receive clicks.
 pub(crate) fn pet_passthrough_poll_windows(
     app: tauri::AppHandle,
+    _ws: Arc<WindowState>,
+    ps: Arc<PetState>,
     mascot_scale: f64,
     large_mascot_scale: f64,
 ) {
@@ -405,7 +407,7 @@ pub(crate) fn pet_passthrough_poll_windows(
     use windows::Win32::Foundation::POINT;
     use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
 
-    PET_PASSTHROUGH_THREAD_ALIVE.store(true, Ordering::SeqCst);
+    ps.passthrough_thread_alive.store(true, Ordering::SeqCst);
     // mascot dimensions in logical pixels (matches CSS px on Windows WebView2).
     let (mascot_w_logical, mascot_h_logical) =
         large_collapsed_mascot_window_size(mascot_scale, large_mascot_scale);
@@ -417,9 +419,9 @@ pub(crate) fn pet_passthrough_poll_windows(
 
     let mut last_state: Option<bool> = None;
 
-    while PET_PASSTHROUGH_ACTIVE.load(Ordering::SeqCst) {
-        let menu_open = PET_CONTEXT_MENU_OPEN.load(Ordering::SeqCst);
-        let pomodoro_active = PET_POMODORO_ACTIVE.load(Ordering::SeqCst);
+    while ps.passthrough_active.load(Ordering::SeqCst) {
+        let menu_open = ps.context_menu_open.load(Ordering::SeqCst);
+        let pomodoro_active = ps.pomodoro_active.load(Ordering::SeqCst);
 
         let should_be_interactive = if menu_open || pomodoro_active {
             true
@@ -504,5 +506,5 @@ pub(crate) fn pet_passthrough_poll_windows(
     if let Some(win) = app.get_webview_window("main") {
         let _ = win.set_ignore_cursor_events(false);
     }
-    PET_PASSTHROUGH_THREAD_ALIVE.store(false, Ordering::SeqCst);
+    ps.passthrough_thread_alive.store(false, Ordering::SeqCst);
 }

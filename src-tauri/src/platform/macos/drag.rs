@@ -1,9 +1,10 @@
 //! Drag handling: cursor position, mouse buttons, drag-apply scheduling.
 
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
 use tauri::Manager;
 
-use crate::state::*;
+use crate::state::{PetState, WindowState};
 
 /// Schedule a main-thread task that snaps the mini window origin to
 /// `(cursor_now - DRAG_ANCHOR)` — i.e. wherever the cursor currently is,
@@ -12,18 +13,24 @@ use crate::state::*;
 /// reads the freshest cursor position. This keeps drag tracking tight
 /// even when the poll thread runs much faster than the main thread can
 /// repaint, and avoids the cumulative lag of relative-delta translation.
-pub(crate) fn request_drag_apply(app: &tauri::AppHandle) {
-    if DRAG_TASK_PENDING.swap(true, Ordering::SeqCst) {
+pub(crate) fn request_drag_apply(
+    app: &tauri::AppHandle,
+    ws: &Arc<WindowState>,
+    ps: &Arc<PetState>,
+) {
+    if ps.drag_task_pending.swap(true, Ordering::SeqCst) {
         return;
     }
     let app_clone = app.clone();
+    let ps2 = Arc::clone(ps);
+    let ws2 = Arc::clone(ws);
     let _ = app.run_on_main_thread(move || {
         use objc2::msg_send;
         use objc2::runtime::AnyObject;
         use objc2_foundation::NSPoint;
 
-        DRAG_TASK_PENDING.store(false, Ordering::SeqCst);
-        let anchor = drag_anchor().lock().ok().and_then(|g| *g);
+        ps2.drag_task_pending.store(false, Ordering::SeqCst);
+        let anchor = ps2.drag_anchor.lock().ok().and_then(|g| *g);
         let Some((ax, ay)) = anchor else { return };
 
         let cursor = macos_cursor_position();
@@ -39,7 +46,7 @@ pub(crate) fn request_drag_apply(app: &tauri::AppHandle) {
                 unsafe {
                     let _: () = msg_send![obj, setFrameOrigin: new_origin];
                 }
-                if let Ok(mut f) = MINI_WINDOW_FRAME.lock() {
+                if let Ok(mut f) = ws2.mini_frame.lock() {
                     if let Some((_, _, w, h)) = *f {
                         *f = Some((new_origin.x, new_origin.y, w, h));
                     }
