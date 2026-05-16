@@ -2,7 +2,9 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, AtomicU64};
+use std::sync::atomic::AtomicBool;
+#[cfg(target_os = "macos")]
+use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex};
 
 pub(crate) struct SshBackoffState {

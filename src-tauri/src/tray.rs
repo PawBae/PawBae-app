@@ -13,7 +13,7 @@ use tauri::{Emitter, Manager};
 #[cfg(target_os = "macos")]
 use crate::state::PetState;
 #[cfg(target_os = "windows")]
-use crate::state::{PetState, WindowState};
+use crate::state::WindowState;
 
 #[cfg(target_os = "windows")]
 use crate::platform::windows::win_ui_scale;

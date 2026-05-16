@@ -313,7 +313,12 @@ fn macos_pressed_mouse_buttons() -> usize {
     0
 }
 #[cfg(not(target_os = "macos"))]
-fn request_drag_apply(_app: &tauri::AppHandle) {}
+fn request_drag_apply(
+    _app: &tauri::AppHandle,
+    _ws: &std::sync::Arc<crate::state::WindowState>,
+    _ps: &std::sync::Arc<crate::state::PetState>,
+) {
+}
 pub(crate) fn reassert_mini_floating(app: &tauri::AppHandle) {
     use tauri::Manager;
     let Some(win) = app.get_webview_window("main") else {
