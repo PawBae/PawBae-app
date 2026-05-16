@@ -6,8 +6,8 @@ use crate::mascot::{
     collapsed_mascot_window_size, large_collapsed_mascot_window_size, sanitized_mascot_scale,
     LARGE_MASCOT_SIZE_MULTIPLIER, MASCOT_TOP_INSET,
 };
+#[cfg(target_os = "macos")]
 use crate::state::MINI_WINDOW_FRAME;
-
 #[cfg(target_os = "macos")]
 use crate::mascot::collapsed_x;
 #[cfg(target_os = "macos")]

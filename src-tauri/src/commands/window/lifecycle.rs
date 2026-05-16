@@ -4,8 +4,9 @@ use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 
 use crate::mascot::{
     collapsed_mascot_window_size, COLLAPSED_MASCOT_BASE_H, COLLAPSED_MASCOT_BASE_W,
-    MASCOT_TOP_INSET,
 };
+#[cfg(target_os = "macos")]
+use crate::mascot::MASCOT_TOP_INSET;
 use crate::pet_core::reassert_mini_floating;
 use crate::state::MINI_WINDOW_FRAME;
 
