@@ -49,6 +49,10 @@ pub(crate) static PET_CONTEXT_MENU_OPEN: AtomicBool = AtomicBool::new(false);
 /// stop button receives clicks (it sits in the centered hitbox's bottom
 /// inset region and would otherwise pass through to whatever is behind).
 pub(crate) static PET_POMODORO_ACTIVE: AtomicBool = AtomicBool::new(false);
+/// Whether the Windows poll thread is running in efficiency/coding mode
+/// (hover detection + drag) rather than pet mode (click-through + drag + throw).
+#[cfg(target_os = "windows")]
+pub(crate) static EFFICIENCY_MODE_POLL: AtomicBool = AtomicBool::new(false);
 
 /// Coalesces drag-apply tasks so we never queue more than one
 /// setFrameOrigin: call on the main thread at a time. The poll thread

@@ -21,6 +21,8 @@ use std::sync::atomic::Ordering;
 use crate::platform::windows::win_ui_scale;
 #[cfg(target_os = "windows")]
 use crate::state::FULLSCREEN_HIDING;
+#[cfg(target_os = "windows")]
+use crate::state::MINI_WINDOW_FRAME;
 
 /// Resize/reposition the mini window between collapsed (small, right of notch)
 /// and expanded (larger, centered on notch) states.
@@ -214,6 +216,20 @@ pub async fn set_mini_expanded(
                         );
                         let _ = win.set_position(tauri::LogicalPosition::new(x, y));
                     }
+                }
+            }
+        }
+        // Cache frame for the Windows poll thread (hover + drag).
+        if let Ok(pos) = win.outer_position() {
+            if let Ok(size) = win.outer_size() {
+                let scale = win.scale_factor().unwrap_or(1.0);
+                if let Ok(mut f) = MINI_WINDOW_FRAME.lock() {
+                    *f = Some((
+                        pos.x as f64 / scale,
+                        pos.y as f64 / scale,
+                        size.width as f64 / scale,
+                        size.height as f64 / scale,
+                    ));
                 }
             }
         }

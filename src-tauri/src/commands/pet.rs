@@ -246,10 +246,36 @@ pub async fn set_efficiency_hover_tracking(
     app: tauri::AppHandle,
     active: bool,
 ) -> Result<(), String> {
+    log::info!(
+        "[hover-tracking] active={} HOVER_ALIVE={} PASSTHROUGH_ALIVE={}",
+        active,
+        EFFICIENCY_HOVER_THREAD_ALIVE.load(Ordering::SeqCst),
+        PET_PASSTHROUGH_THREAD_ALIVE.load(Ordering::SeqCst),
+    );
     EFFICIENCY_HOVER_ACTIVE.store(active, Ordering::SeqCst);
     if active && !EFFICIENCY_HOVER_THREAD_ALIVE.load(Ordering::SeqCst) {
         let app2 = app.clone();
         std::thread::spawn(move || efficiency_hover_poll(app2));
+    }
+    #[cfg(target_os = "windows")]
+    {
+        use crate::state::EFFICIENCY_MODE_POLL;
+        if active && !PET_PASSTHROUGH_THREAD_ALIVE.load(Ordering::SeqCst) {
+            log::info!("[hover-tracking] WIN: spawning poll thread");
+            EFFICIENCY_MODE_POLL.store(true, Ordering::SeqCst);
+            PET_PASSTHROUGH_ACTIVE.store(true, Ordering::SeqCst);
+            let app2 = app.clone();
+            std::thread::spawn(move || {
+                log::info!("[hover-tracking] WIN: poll thread started");
+                pet_passthrough_poll_windows(app2, 1.0, 5.0);
+                log::info!("[hover-tracking] WIN: poll thread exited");
+            });
+        } else if active && PET_PASSTHROUGH_THREAD_ALIVE.load(Ordering::SeqCst) {
+            EFFICIENCY_MODE_POLL.store(true, Ordering::SeqCst);
+        }
+        if !active {
+            EFFICIENCY_MODE_POLL.store(false, Ordering::SeqCst);
+        }
     }
     Ok(())
 }

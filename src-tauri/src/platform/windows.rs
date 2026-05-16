@@ -1,7 +1,7 @@
 //! Windows-specific helpers. Gated by the outer `#[cfg(target_os = "windows")]` in `platform/mod.rs`.
 
 use std::sync::atomic::Ordering;
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 use crate::mascot::large_collapsed_mascot_window_size;
 #[allow(unused_imports)]
@@ -401,106 +401,244 @@ pub(crate) fn pet_passthrough_poll_windows(
     mascot_scale: f64,
     large_mascot_scale: f64,
 ) {
-    use std::time::Duration;
+    use std::collections::VecDeque;
+    use std::time::{Duration, Instant};
     use windows::Win32::Foundation::POINT;
     use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
 
+    extern "system" {
+        fn GetAsyncKeyState(v_key: i32) -> i16;
+    }
+
+    use crate::state::{EFFICIENCY_HOVER_ACTIVE, EFFICIENCY_MODE_POLL};
+
     PET_PASSTHROUGH_THREAD_ALIVE.store(true, Ordering::SeqCst);
-    // mascot dimensions in logical pixels (matches CSS px on Windows WebView2).
     let (mascot_w_logical, mascot_h_logical) =
         large_collapsed_mascot_window_size(mascot_scale, large_mascot_scale);
     let hit_w = mascot_w_logical * (1.8 / 3.0);
     let hit_h = mascot_h_logical * (2.5 / 3.0);
     let inset_x_logical = (mascot_w_logical - hit_w) / 2.0;
     let inset_y_logical = (mascot_h_logical - hit_h) / 2.0;
-    let edge_threshold_logical = 30.0_f64;
+    let _edge_threshold_logical = 30.0_f64;
 
     let mut last_state: Option<bool> = None;
 
-    while PET_PASSTHROUGH_ACTIVE.load(Ordering::SeqCst) {
+    // Drag state machine (mirrors macOS efficiency_hover_poll logic).
+    let mut drag_active = false;
+    let mut drag_anchor: Option<(f64, f64)> = None;
+    let mut last_cursor: (f64, f64) = (0.0, 0.0);
+    let mut last_walk_dir: i32 = 0;
+    let mut was_pressed = false;
+
+    // Hover detection state (Coding mode).
+    let mut was_hover_inside = false;
+    let mut last_hover_emit = Instant::now();
+
+    // Throw velocity sampling (same approach as macOS).
+    let mut throw_samples: VecDeque<(Instant, f64, f64)> = VecDeque::with_capacity(32);
+    const THROW_SAMPLE_CAP: usize = 24;
+    const THROW_AVG_WINDOW_MS: u128 = 250;
+    const MAX_THROW_SPEED: f64 = 30.0;
+
+    while PET_PASSTHROUGH_ACTIVE.load(Ordering::SeqCst)
+        || EFFICIENCY_HOVER_ACTIVE.load(Ordering::SeqCst)
+    {
         let menu_open = PET_CONTEXT_MENU_OPEN.load(Ordering::SeqCst);
         let pomodoro_active = PET_POMODORO_ACTIVE.load(Ordering::SeqCst);
 
-        let should_be_interactive = if menu_open || pomodoro_active {
-            true
+        let cursor = unsafe {
+            let mut pt = POINT::default();
+            if GetCursorPos(&mut pt).is_ok() {
+                Some((pt.x as f64, pt.y as f64))
+            } else {
+                None
+            }
+        };
+        // VK_LBUTTON = 0x01
+        let left_pressed = unsafe { (GetAsyncKeyState(0x01) as u16 & 0x8000) != 0 };
+
+        let is_efficiency = EFFICIENCY_MODE_POLL.load(Ordering::SeqCst);
+        let (over_mascot, should_be_interactive) = if menu_open || pomodoro_active {
+            (false, true)
         } else {
-            // Read cursor position and window geometry in physical pixels.
-            let cursor = unsafe {
-                let mut pt = POINT::default();
-                if GetCursorPos(&mut pt).is_ok() {
-                    Some((pt.x as f64, pt.y as f64))
-                } else {
-                    None
-                }
-            };
             let win = app.get_webview_window("main");
             match (win, cursor) {
                 (Some(win), Some((cx, cy))) => {
                     let pos = win.outer_position().ok();
                     let size = win.outer_size().ok();
                     let scale = win.scale_factor().unwrap_or(1.0);
-                    let monitor = win.current_monitor().ok().flatten();
                     if let (Some(pos), Some(size)) = (pos, size) {
                         let fx = pos.x as f64;
                         let fy = pos.y as f64;
                         let fw = size.width as f64;
                         let fh = size.height as f64;
 
-                        // Mascot is anchored at `left: petBaseWinW - mascotW` and `bottom: 0`,
-                        // i.e. the right-bottom corner of the no-menu window. When the menu
-                        // is closed, fw == petBaseWinW so the mascot's right edge in screen
-                        // physical px is fx + fw and its bottom is fy + fh.
-                        let mascot_w = mascot_w_logical * scale;
-                        let mascot_h = mascot_h_logical * scale;
-                        let inset_x = inset_x_logical * scale;
-                        let inset_y = inset_y_logical * scale;
-                        let edge_threshold = edge_threshold_logical * scale;
-
-                        let mascot_right = fx + fw;
-                        let mascot_left = mascot_right - mascot_w;
-                        let mascot_bottom = fy + fh;
-                        let mascot_top = mascot_bottom - mascot_h;
-
-                        let near_edge = if let Some(monitor) = monitor {
-                            let mp = monitor.position();
-                            let ms = monitor.size();
-                            let monitor_left = mp.x as f64;
-                            let monitor_right = monitor_left + ms.width as f64;
-                            mascot_left < monitor_left + edge_threshold
-                                || mascot_right > monitor_right - edge_threshold
+                        let hit = if is_efficiency {
+                            // Coding mode: whole window is the mascot
+                            cx >= fx && cx <= fx + fw && cy >= fy && cy <= fy + fh
                         } else {
-                            false
+                            // Pet mode: mascot anchored at bottom-right with insets
+                            let mascot_w = mascot_w_logical * scale;
+                            let mascot_h = mascot_h_logical * scale;
+                            let inset_x = inset_x_logical * scale;
+                            let inset_y = inset_y_logical * scale;
+
+                            let mascot_right = fx + fw;
+                            let mascot_left = mascot_right - mascot_w;
+                            let mascot_bottom = fy + fh;
+                            let mascot_top = mascot_bottom - mascot_h;
+
+                            let hit_left = mascot_left + inset_x;
+                            let hit_right = mascot_right - inset_x;
+                            let hit_top = mascot_top + inset_y;
+                            let hit_bottom = mascot_bottom - inset_y;
+
+                            cx >= hit_left && cx <= hit_right
+                                && cy >= hit_top && cy <= hit_bottom
                         };
-
-                        // Keep edge hitbox slightly relaxed on X only; do not use
-                        // full-rect hitboxes, which feel too large during peek.
-                        let ix = if near_edge { inset_x * 0.5 } else { inset_x };
-                        let iy = inset_y;
-                        let hit_left = mascot_left + ix;
-                        let hit_right = mascot_right - ix;
-                        let hit_top = mascot_top + iy;
-                        let hit_bottom = mascot_bottom - iy;
-
-                        cx >= hit_left && cx <= hit_right && cy >= hit_top && cy <= hit_bottom
+                        (hit, hit || drag_active)
                     } else {
-                        false
+                        (false, drag_active)
                     }
                 }
-                _ => false,
+                _ => (false, drag_active),
             }
         };
 
-        if last_state != Some(should_be_interactive) {
-            if let Some(win) = app.get_webview_window("main") {
-                let _ = win.set_ignore_cursor_events(!should_be_interactive);
+        // ── Drag state machine ──
+        if let Some((cx, cy)) = cursor {
+            if drag_active {
+                if left_pressed {
+                    if let Some((ax, ay)) = drag_anchor {
+                        if let Some(win) = app.get_webview_window("main") {
+                            let scale = win.scale_factor().unwrap_or(1.0);
+                            let new_x = (cx - ax) / scale;
+                            let new_y = (cy - ay) / scale;
+                            let _ =
+                                win.set_position(tauri::LogicalPosition::new(new_x, new_y));
+                        }
+                    }
+                    let dx = cx - last_cursor.0;
+                    let dy = cy - last_cursor.1;
+                    last_cursor = (cx, cy);
+                    let walk_dir = if dx > 0.5 {
+                        1
+                    } else if dx < -0.5 {
+                        -1
+                    } else {
+                        last_walk_dir
+                    };
+                    if walk_dir != last_walk_dir {
+                        let _ = app.emit("mini-mascot-walk", walk_dir);
+                        last_walk_dir = walk_dir;
+                    }
+                    if THROW_TRACKING_ENABLED.load(Ordering::SeqCst) {
+                        let now = Instant::now();
+                        throw_samples.push_back((now, dx, dy));
+                        while throw_samples.len() > THROW_SAMPLE_CAP {
+                            throw_samples.pop_front();
+                        }
+                    }
+                } else {
+                    // Drag released
+                    drag_active = false;
+                    drag_anchor = None;
+                    if last_walk_dir != 0 {
+                        let _ = app.emit("mini-mascot-walk", 0i32);
+                        last_walk_dir = 0;
+                    }
+                    if THROW_TRACKING_ENABLED.load(Ordering::SeqCst)
+                        && !throw_samples.is_empty()
+                    {
+                        let cutoff = Instant::now();
+                        let mut sum_dx = 0.0;
+                        let mut sum_dy = 0.0;
+                        let mut count = 0u32;
+                        for (t, dx, dy) in throw_samples.iter().rev() {
+                            if cutoff.duration_since(*t).as_millis() > THROW_AVG_WINDOW_MS {
+                                break;
+                            }
+                            if dx.abs() < 0.5 && dy.abs() < 0.5 {
+                                continue;
+                            }
+                            sum_dx += *dx;
+                            sum_dy += *dy;
+                            count += 1;
+                        }
+                        if count > 0 {
+                            let vx =
+                                (sum_dx / count as f64).clamp(-MAX_THROW_SPEED, MAX_THROW_SPEED);
+                            let vy =
+                                (sum_dy / count as f64).clamp(-MAX_THROW_SPEED, MAX_THROW_SPEED);
+                            let _ = app.emit(
+                                "mini-mascot-drag-throw",
+                                serde_json::json!({ "vx": vx, "vy": vy }),
+                            );
+                        }
+                    }
+                    throw_samples.clear();
+                    let _ = app.emit("mini-mascot-drag-end", ());
+                }
+            } else if over_mascot && left_pressed && !was_pressed {
+                drag_active = true;
+                last_cursor = (cx, cy);
+                throw_samples.clear();
+                if let Some(win) = app.get_webview_window("main") {
+                    if let Ok(pos) = win.outer_position() {
+                        let anchor = (cx - pos.x as f64, cy - pos.y as f64);
+                        drag_anchor = Some(anchor);
+                    }
+                }
+                let _ = app.emit("mini-mascot-drag-start", ());
             }
-            last_state = Some(should_be_interactive);
+        }
+        was_pressed = left_pressed;
+
+        // ── Coding-mode hover detection (uses live window pos, same as drag) ──
+        if is_efficiency && !drag_active {
+            let hover_inside = over_mascot;
+            if hover_inside
+                && (!was_hover_inside
+                    || last_hover_emit.elapsed() > Duration::from_millis(300))
+            {
+                let _ = app.emit("mini-mascot-hover", true);
+                last_hover_emit = Instant::now();
+            } else if !hover_inside && was_hover_inside {
+                let _ = app.emit("mini-mascot-hover", false);
+            }
+            was_hover_inside = hover_inside;
         }
 
-        std::thread::sleep(Duration::from_millis(20));
+        // Toggle click-through
+        if is_efficiency {
+            // Coding mode: always interactive (clicks must reach webview)
+            if last_state != Some(true) {
+                if let Some(win) = app.get_webview_window("main") {
+                    let _ = win.set_ignore_cursor_events(false);
+                }
+                last_state = Some(true);
+            }
+        } else {
+            // Pet mode: toggle based on mascot hit-test
+            let interactive = should_be_interactive || drag_active;
+            if last_state != Some(interactive) {
+                if let Some(win) = app.get_webview_window("main") {
+                    let _ = win.set_ignore_cursor_events(!interactive);
+                }
+                last_state = Some(interactive);
+            }
+        }
+
+        let sleep_ms = if drag_active {
+            16
+        } else if is_efficiency {
+            50
+        } else {
+            20
+        };
+        std::thread::sleep(Duration::from_millis(sleep_ms));
     }
 
-    // Re-enable click events on exit so the window stays usable when leaving pet mode.
     if let Some(win) = app.get_webview_window("main") {
         let _ = win.set_ignore_cursor_events(false);
     }

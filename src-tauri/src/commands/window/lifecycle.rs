@@ -100,6 +100,9 @@ pub async fn open_mini(app: tauri::AppHandle) -> Result<(), String> {
                     x, 0.0, win_w, win_h, ui, notch_off
                 );
                 let _ = win.set_position(tauri::LogicalPosition::new(x, 0.0));
+                if let Ok(mut f) = MINI_WINDOW_FRAME.lock() {
+                    *f = Some((x, 0.0, win_w, win_h));
+                }
             }
             if !FULLSCREEN_HIDING.load(std::sync::atomic::Ordering::SeqCst) {
                 win.show().map_err(|e| e.to_string())?;
@@ -202,6 +205,9 @@ pub async fn open_mini(app: tauri::AppHandle) -> Result<(), String> {
                 x, 0.0, win_w, win_h, ui, notch_off
             );
             let _ = win.set_position(tauri::LogicalPosition::new(x, 0.0));
+            if let Ok(mut f) = MINI_WINDOW_FRAME.lock() {
+                *f = Some((x, 0.0, win_w, win_h));
+            }
         }
         if !FULLSCREEN_HIDING.load(std::sync::atomic::Ordering::SeqCst) {
             let _ = win.show();

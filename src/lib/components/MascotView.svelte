@@ -44,9 +44,7 @@
   const mascotSize = $derived(Math.round(60 * settingsStore.mascotScale));
 
   $effect(() => {
-    if (!isWindows) {
-      invoke('set_efficiency_hover_tracking', { active: true }).catch(() => {});
-    }
+    invoke('set_efficiency_hover_tracking', { active: true }).catch(() => {});
     let disposed = false;
     let unlisten: (() => void) | null = null;
     listen<boolean>('mini-mascot-hover', (e) => {
@@ -58,9 +56,7 @@
     return () => {
       disposed = true;
       unlisten?.();
-      if (!isWindows) {
-        invoke('set_efficiency_hover_tracking', { active: false }).catch(() => {});
-      }
+      invoke('set_efficiency_hover_tracking', { active: false }).catch(() => {});
     };
   });
 
