@@ -1,10 +1,11 @@
 //! Pet interaction: passthrough polling and alpha-restore scheduling.
 
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
 use tauri::Manager;
 
 use crate::mascot::large_collapsed_mascot_window_size;
-use crate::state::*;
+use crate::state::{PetState, WindowState};
 
 use super::drag::macos_cursor_position;
 
@@ -13,7 +14,10 @@ use super::drag::macos_cursor_position;
 /// the main queue so the restore runs at a precise time without thread-spawn
 /// overhead.  A generation counter (`PET_ALPHA_GEN`) prevents stale callbacks
 /// from restoring alpha during a subsequent resize (fast double-clicks).
-pub(crate) fn pet_context_schedule_restore_alpha(ns_win_ptr: *mut std::ffi::c_void) {
+pub(crate) fn pet_context_schedule_restore_alpha(
+    ns_win_ptr: *mut std::ffi::c_void,
+    ps: &Arc<PetState>,
+) {
     extern "C" {
         // dispatch_get_main_queue() is a C macro; the real symbol is a global.
         #[link_name = "_dispatch_main_q"]
@@ -31,12 +35,13 @@ pub(crate) fn pet_context_schedule_restore_alpha(ns_win_ptr: *mut std::ffi::c_vo
     struct RestoreCtx {
         ns_win: *mut std::ffi::c_void,
         gen: u64,
+        ps: Arc<PetState>,
     }
 
     extern "C" fn restore_alpha(ctx_raw: *mut std::ffi::c_void) {
         let ctx = unsafe { Box::from_raw(ctx_raw as *mut RestoreCtx) };
         // Only restore if no newer resize has happened since we were scheduled.
-        if PET_ALPHA_GEN.load(Ordering::SeqCst) != ctx.gen {
+        if ctx.ps.alpha_gen.load(Ordering::SeqCst) != ctx.gen {
             return;
         }
         use objc2::msg_send;
@@ -46,10 +51,11 @@ pub(crate) fn pet_context_schedule_restore_alpha(ns_win_ptr: *mut std::ffi::c_vo
         }
     }
 
-    let gen = PET_ALPHA_GEN.fetch_add(1, Ordering::SeqCst) + 1;
+    let gen = ps.alpha_gen.fetch_add(1, Ordering::SeqCst) + 1;
     let ctx = Box::new(RestoreCtx {
         ns_win: ns_win_ptr,
         gen,
+        ps: Arc::clone(ps),
     });
     unsafe {
         // 34ms ≈ 2 frames at 60Hz — minimal delay for the webview to
@@ -71,11 +77,13 @@ pub(crate) fn pet_context_schedule_restore_alpha(ns_win_ptr: *mut std::ffi::c_vo
 /// pass through to whatever is behind.
 pub(crate) fn pet_passthrough_poll(
     app: tauri::AppHandle,
+    ws: Arc<WindowState>,
+    ps: Arc<PetState>,
     mascot_scale: f64,
     large_mascot_scale: f64,
 ) {
     use std::time::Duration;
-    PET_PASSTHROUGH_THREAD_ALIVE.store(true, Ordering::SeqCst);
+    ps.passthrough_thread_alive.store(true, Ordering::SeqCst);
     let mut was_interactive = false;
     let (mascot_w, mascot_h) = large_collapsed_mascot_window_size(mascot_scale, large_mascot_scale);
     // Keep these ratios aligned with frontend `Mini.tsx` so hover cursor and
@@ -109,10 +117,10 @@ pub(crate) fn pet_passthrough_poll(
         rx.recv().ok().flatten()
     };
 
-    while PET_PASSTHROUGH_ACTIVE.load(Ordering::SeqCst) {
-        let menu_open = PET_CONTEXT_MENU_OPEN.load(Ordering::SeqCst);
-        let pomodoro_active = PET_POMODORO_ACTIVE.load(Ordering::SeqCst);
-        let frame = MINI_WINDOW_FRAME.lock().ok().and_then(|g| *g);
+    while ps.passthrough_active.load(Ordering::SeqCst) {
+        let menu_open = ps.context_menu_open.load(Ordering::SeqCst);
+        let pomodoro_active = ps.pomodoro_active.load(Ordering::SeqCst);
+        let frame = ws.mini_frame.lock().ok().and_then(|g| *g);
 
         let should_be_interactive = if menu_open || pomodoro_active {
             true
@@ -179,5 +187,5 @@ pub(crate) fn pet_passthrough_poll(
             }
         }
     });
-    PET_PASSTHROUGH_THREAD_ALIVE.store(false, Ordering::SeqCst);
+    ps.passthrough_thread_alive.store(false, Ordering::SeqCst);
 }

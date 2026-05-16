@@ -1,13 +1,11 @@
 //! Pet-mode helpers: efficiency_hover_poll, mini-window floating reassert, codex utility-session detection.
 
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
 
 use tauri::Emitter;
 
-use crate::state::{
-    drag_anchor, ClaudeSession, EFFICIENCY_EXPANDED, EFFICIENCY_HOVER_ACTIVE,
-    EFFICIENCY_HOVER_THREAD_ALIVE, MINI_WINDOW_FRAME, NOTCH_SCREEN_INFO, THROW_TRACKING_ENABLED,
-};
+use crate::state::{ClaudeSession, PetState, WindowState};
 
 #[cfg(target_os = "macos")]
 use crate::platform::macos::{
@@ -20,9 +18,13 @@ use crate::platform::macos::{
 ///    50 px tall at the top of the screen) — much wider than the actual
 ///    window so the user can approach from either side.
 ///  - **Expanded**: the panel area (500 × 400 px, top-center).
-pub(crate) fn efficiency_hover_poll(app: tauri::AppHandle) {
+pub(crate) fn efficiency_hover_poll(
+    app: tauri::AppHandle,
+    ws: Arc<WindowState>,
+    ps: Arc<PetState>,
+) {
     use std::time::{Duration, Instant};
-    EFFICIENCY_HOVER_THREAD_ALIVE.store(true, Ordering::SeqCst);
+    ws.hover_thread_alive.store(true, Ordering::SeqCst);
     let mut was_inside = false;
     let mut was_over_mascot = false;
     let mut last_enter_emit = Instant::now();
@@ -58,14 +60,14 @@ pub(crate) fn efficiency_hover_poll(app: tauri::AppHandle) {
     const THROW_AVG_WINDOW_MS: u128 = 250;
     const MAX_THROW_SPEED: f64 = 30.0;
 
-    while EFFICIENCY_HOVER_ACTIVE.load(Ordering::SeqCst) {
-        let info = NOTCH_SCREEN_INFO.lock().ok().and_then(|g| *g);
+    while ws.hover_active.load(Ordering::SeqCst) {
+        let info = ws.notch_screen_info.lock().ok().and_then(|g| *g);
         let sleep_ms = if let Some((sx, sy, sw, sh, notch_off)) = info {
             let cursor = macos_cursor_position();
             let buttons = macos_pressed_mouse_buttons();
             let left_pressed = (buttons & 1) != 0;
-            let is_expanded = EFFICIENCY_EXPANDED.load(Ordering::SeqCst);
-            let frame = MINI_WINDOW_FRAME.lock().ok().and_then(|g| *g);
+            let is_expanded = ws.expanded.load(Ordering::SeqCst);
+            let frame = ws.mini_frame.lock().ok().and_then(|g| *g);
 
             let inside = if is_expanded {
                 if let Some((fx, fy, fw, fh)) = frame {
@@ -121,7 +123,7 @@ pub(crate) fn efficiency_hover_poll(app: tauri::AppHandle) {
                         // task reads cursor position itself, so even if many
                         // requests collapse into one, the window still ends
                         // up under the live cursor.
-                        request_drag_apply(&app);
+                        request_drag_apply(&app, &ws, &ps);
                         let dx = cursor.0 - last_cursor.0;
                         // macOS NSEvent y axis is bottom-up; flip to
                         // top-down so the throw velocity matches the
@@ -139,7 +141,7 @@ pub(crate) fn efficiency_hover_poll(app: tauri::AppHandle) {
                             let _ = app.emit("mini-mascot-walk", walk_dir);
                             last_walk_dir = walk_dir;
                         }
-                        if THROW_TRACKING_ENABLED.load(Ordering::SeqCst) {
+                        if ps.throw_tracking.load(Ordering::SeqCst) {
                             let now = Instant::now();
                             throw_samples.push_back((now, dx, dy_topdown));
                             while throw_samples.len() > THROW_SAMPLE_CAP {
@@ -150,7 +152,7 @@ pub(crate) fn efficiency_hover_poll(app: tauri::AppHandle) {
                         // Drag finished. Clear anchor + walk dir and notify
                         // the frontend so it can persist the new origin.
                         drag_active = false;
-                        if let Ok(mut a) = drag_anchor().lock() {
+                        if let Ok(mut a) = ps.drag_anchor.lock() {
                             *a = None;
                         }
                         if last_walk_dir != 0 {
@@ -161,9 +163,7 @@ pub(crate) fn efficiency_hover_poll(app: tauri::AppHandle) {
                         // recent ~80 ms of samples. Older samples are
                         // dropped so a long pause before release doesn't
                         // dilute the final velocity.
-                        if THROW_TRACKING_ENABLED.load(Ordering::SeqCst)
-                            && !throw_samples.is_empty()
-                        {
+                        if ps.throw_tracking.load(Ordering::SeqCst) && !throw_samples.is_empty() {
                             let cutoff = Instant::now();
                             // Average only over samples where the cursor
                             // actually moved. Users typically pause for
@@ -222,7 +222,7 @@ pub(crate) fn efficiency_hover_poll(app: tauri::AppHandle) {
                     // the main-thread task can place the window absolutely
                     // each frame instead of summing deltas.
                     if let Some((fx, fy, _, _)) = frame {
-                        if let Ok(mut a) = drag_anchor().lock() {
+                        if let Ok(mut a) = ps.drag_anchor.lock() {
                             *a = Some((cursor.0 - fx, cursor.1 - fy));
                         }
                     }
@@ -243,14 +243,14 @@ pub(crate) fn efficiency_hover_poll(app: tauri::AppHandle) {
                         "[drag-start] cursor=({:.1},{:.1}) tracking={}",
                         cursor.0,
                         cursor.1,
-                        THROW_TRACKING_ENABLED.load(Ordering::SeqCst),
+                        ps.throw_tracking.load(Ordering::SeqCst),
                     );
                     let _ = app.emit("mini-mascot-drag-start", ());
                 }
             } else if drag_active {
                 drag_active = false;
                 throw_samples.clear();
-                if let Ok(mut a) = drag_anchor().lock() {
+                if let Ok(mut a) = ps.drag_anchor.lock() {
                     *a = None;
                 }
                 if last_walk_dir != 0 {
@@ -297,7 +297,7 @@ pub(crate) fn efficiency_hover_poll(app: tauri::AppHandle) {
         };
         std::thread::sleep(Duration::from_millis(sleep_ms));
     }
-    EFFICIENCY_HOVER_THREAD_ALIVE.store(false, Ordering::SeqCst);
+    ws.hover_thread_alive.store(false, Ordering::SeqCst);
 }
 #[cfg(not(target_os = "macos"))]
 fn macos_cursor_position() -> (f64, f64) {
@@ -313,7 +313,12 @@ fn macos_pressed_mouse_buttons() -> usize {
     0
 }
 #[cfg(not(target_os = "macos"))]
-fn request_drag_apply(_app: &tauri::AppHandle) {}
+fn request_drag_apply(
+    _app: &tauri::AppHandle,
+    _ws: &std::sync::Arc<crate::state::WindowState>,
+    _ps: &std::sync::Arc<crate::state::PetState>,
+) {
+}
 pub(crate) fn reassert_mini_floating(app: &tauri::AppHandle) {
     use tauri::Manager;
     let Some(win) = app.get_webview_window("main") else {

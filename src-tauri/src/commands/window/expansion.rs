@@ -1,5 +1,7 @@
 //! Window expansion/sizing commands: set_mini_expanded, resize_mini_height, set_mini_size.
 
+use std::sync::Arc;
+
 use tauri::Manager;
 
 #[cfg(target_os = "macos")]
@@ -11,16 +13,13 @@ use crate::mascot::{
 #[cfg(target_os = "macos")]
 use crate::platform::macos::{get_notch_offset, pet_context_schedule_restore_alpha};
 #[cfg(target_os = "macos")]
-use crate::state::MINI_WINDOW_FRAME;
-#[cfg(target_os = "macos")]
-use crate::state::{EFFICIENCY_EXPANDED, NOTCH_SCREEN_INFO, PET_MENU_RESTORE_FRAME};
+use crate::state::PetState;
+use crate::state::WindowState;
 #[cfg(target_os = "macos")]
 use std::sync::atomic::Ordering;
 
 #[cfg(target_os = "windows")]
 use crate::platform::windows::win_ui_scale;
-#[cfg(target_os = "windows")]
-use crate::state::FULLSCREEN_HIDING;
 
 /// Resize/reposition the mini window between collapsed (small, right of notch)
 /// and expanded (larger, centered on notch) states.
@@ -40,6 +39,7 @@ pub async fn set_mini_expanded(
     let win = app
         .get_webview_window("main")
         .ok_or("mini window not found")?;
+    let ws = app.state::<Arc<WindowState>>();
     let pos = position.unwrap_or_else(|| "right".to_string());
     let mascot_scale = sanitized_mascot_scale(mascot_scale);
     let large_mascot_scale = large_mascot_scale.unwrap_or(LARGE_MASCOT_SIZE_MULTIPLIER);
@@ -51,6 +51,7 @@ pub async fn set_mini_expanded(
     #[cfg(target_os = "macos")]
     {
         let win_clone = win.clone();
+        let ws2 = Arc::clone(&*ws);
         app.run_on_main_thread(move || {
             use objc2::runtime::{AnyClass, AnyObject};
             use objc2::msg_send;
@@ -80,10 +81,10 @@ pub async fn set_mini_expanded(
 
                 if let Some((sx, sy, sw, sh, notch_off)) = screen_info {
                     // Cache screen geometry for the efficiency hover poll thread.
-                    if let Ok(mut info) = NOTCH_SCREEN_INFO.lock() {
+                    if let Ok(mut info) = ws2.notch_screen_info.lock() {
                         *info = Some((sx, sy, sw, sh, notch_off));
                     }
-                    EFFICIENCY_EXPANDED.store(expanded, Ordering::SeqCst);
+                    ws2.expanded.store(expanded, Ordering::SeqCst);
 
                     unsafe {
                         let _: () = msg_send![obj, setLevel: 27isize];
@@ -145,7 +146,7 @@ pub async fn set_mini_expanded(
                         (x, y, win_w, win_h)
                     };
                     // Cache the real window frame for the hover poll thread.
-                    if let Ok(mut f) = MINI_WINDOW_FRAME.lock() {
+                    if let Ok(mut f) = ws2.mini_frame.lock() {
                         *f = Some((final_x, final_y, final_w, final_h));
                     }
                 }
@@ -217,7 +218,10 @@ pub async fn set_mini_expanded(
                 }
             }
         }
-        if !FULLSCREEN_HIDING.load(std::sync::atomic::Ordering::SeqCst) {
+        if !ws
+            .fullscreen_hiding
+            .load(std::sync::atomic::Ordering::SeqCst)
+        {
             let _ = win.set_always_on_top(true);
         }
     }
@@ -253,6 +257,7 @@ pub async fn resize_mini_height(
     #[cfg(target_os = "macos")]
     {
         let win_clone = win.clone();
+        let ws2 = Arc::clone(&*app.state::<Arc<WindowState>>());
         app.run_on_main_thread(move || {
             use objc2::msg_send;
             use objc2::runtime::{AnyClass, AnyObject};
@@ -297,7 +302,7 @@ pub async fn resize_mini_height(
                     let _: () =
                         msg_send![obj, setFrame: new_frame, display: true, animate: do_animate];
                 }
-                if let Ok(mut f) = MINI_WINDOW_FRAME.lock() {
+                if let Ok(mut f) = ws2.mini_frame.lock() {
                     *f = Some((cur.origin.x, new_y, cur.size.width, capped_h));
                 }
             }
@@ -338,6 +343,7 @@ pub async fn set_mini_size(
     let win = app
         .get_webview_window("main")
         .ok_or("mini window not found")?;
+    let ws = app.state::<Arc<WindowState>>();
     let pos = position.unwrap_or_else(|| "right".to_string());
     let want_top = keep_on_top.unwrap_or(restore);
     let is_pet_context = pet_context.unwrap_or(false);
@@ -347,6 +353,8 @@ pub async fn set_mini_size(
     #[cfg(target_os = "macos")]
     {
         let win_clone = win.clone();
+        let ws2 = Arc::clone(&*ws);
+        let ps2 = Arc::clone(&*app.state::<Arc<PetState>>());
         app.run_on_main_thread(move || {
             use objc2::runtime::{AnyClass, AnyObject};
             use objc2::msg_send;
@@ -377,13 +385,13 @@ pub async fn set_mini_size(
                 if let Some((sx, sy, sw, sh, notch_off)) = screen_info {
                     // Keep the hover poll's screen geometry cache fresh even when
                     // the mini window is temporarily resized into settings/update mode.
-                    if let Ok(mut info) = NOTCH_SCREEN_INFO.lock() {
+                    if let Ok(mut info) = ws2.notch_screen_info.lock() {
                         *info = Some((sx, sy, sw, sh, notch_off));
                     }
                     if is_pet_context {
                         if restore {
                             let current: NSRect = unsafe { msg_send![obj, frame] };
-                            if let Ok(mut saved) = PET_MENU_RESTORE_FRAME.lock() {
+                            if let Ok(mut saved) = ps2.menu_restore_frame.lock() {
                                 if let Some((x, y, win_w, win_h)) = *saved {
                                     let frame = NSRect::new(NSPoint::new(x, y), NSSize::new(win_w, win_h));
                                     // Hide window before shrink to avoid compositor
@@ -398,7 +406,7 @@ pub async fn set_mini_size(
                                         }
                                     }
                                     *saved = None;
-                                    if let Ok(mut f) = MINI_WINDOW_FRAME.lock() {
+                                    if let Ok(mut f) = ws2.mini_frame.lock() {
                                         *f = Some((x, y, win_w, win_h));
                                     }
                                     // Restore alpha after the webview repaints at
@@ -406,7 +414,7 @@ pub async fn set_mini_size(
                                     // queue with a
                                     // short delay lets the compositor
                                     // finish compositing the new frame.
-                                    pet_context_schedule_restore_alpha(ns_win);
+                                    pet_context_schedule_restore_alpha(ns_win, &ps2);
                                     return;
                                 }
                             }
@@ -431,14 +439,14 @@ pub async fn set_mini_size(
                                     let _: () = msg_send![obj, orderFrontRegardless];
                                 }
                             }
-                            if let Ok(mut f) = MINI_WINDOW_FRAME.lock() {
+                            if let Ok(mut f) = ws2.mini_frame.lock() {
                                 *f = Some((x, y, target_w, target_h));
                             }
-                            pet_context_schedule_restore_alpha(ns_win);
+                            pet_context_schedule_restore_alpha(ns_win, &ps2);
                             return;
                         } else {
                             let current: NSRect = unsafe { msg_send![obj, frame] };
-                            if let Ok(mut saved) = PET_MENU_RESTORE_FRAME.lock() {
+                            if let Ok(mut saved) = ps2.menu_restore_frame.lock() {
                                 *saved = Some((current.origin.x, current.origin.y, current.size.width, current.size.height));
                             }
                             // Expand LEFT and UP, keeping the bottom-right corner
@@ -465,10 +473,10 @@ pub async fn set_mini_size(
                                     let _: () = msg_send![obj, orderFrontRegardless];
                                 }
                             }
-                            if let Ok(mut f) = MINI_WINDOW_FRAME.lock() {
+                            if let Ok(mut f) = ws2.mini_frame.lock() {
                                 *f = Some((x, y, win_w, win_h));
                             }
-                            pet_context_schedule_restore_alpha(ns_win);
+                            pet_context_schedule_restore_alpha(ns_win, &ps2);
                             return;
                         }
                     }
@@ -498,8 +506,8 @@ pub async fn set_mini_size(
                         // Restoring from settings/update mode returns the widget to
                         // the collapsed notch state, so the hover poll must switch
                         // back to collapsed-region detection immediately.
-                        EFFICIENCY_EXPANDED.store(false, Ordering::SeqCst);
-                        if let Ok(mut f) = MINI_WINDOW_FRAME.lock() {
+                        ws2.expanded.store(false, Ordering::SeqCst);
+                        if let Ok(mut f) = ws2.mini_frame.lock() {
                             *f = Some((x, y, win_w, win_h));
                         }
                     } else {
@@ -518,8 +526,8 @@ pub async fn set_mini_size(
                         // Settings/update mode is not the normal expanded panel.
                         // Clear the expanded hover state so a stale panel frame does
                         // not survive after the window is later restored.
-                        EFFICIENCY_EXPANDED.store(false, Ordering::SeqCst);
-                        if let Ok(mut f) = MINI_WINDOW_FRAME.lock() {
+                        ws2.expanded.store(false, Ordering::SeqCst);
+                        if let Ok(mut f) = ws2.mini_frame.lock() {
                             *f = Some((x, y, win_w, win_h));
                         }
                     }
@@ -548,7 +556,10 @@ pub async fn set_mini_size(
                 let win_h = (base_h * ui).round();
                 let _ = win.set_size(tauri::LogicalSize::new(win_w, win_h));
                 let _ = win.set_always_on_top(
-                    want_top && !FULLSCREEN_HIDING.load(std::sync::atomic::Ordering::SeqCst),
+                    want_top
+                        && !ws
+                            .fullscreen_hiding
+                            .load(std::sync::atomic::Ordering::SeqCst),
                 );
                 if large_mascot.unwrap_or(false) {
                     let margin = (10.0 * ui).round();
@@ -573,7 +584,10 @@ pub async fn set_mini_size(
                 let win_h = (sh * 0.85).round();
                 let x = mx + (sw - win_w) / 2.0;
                 let _ = win.set_always_on_top(
-                    want_top && !FULLSCREEN_HIDING.load(std::sync::atomic::Ordering::SeqCst),
+                    want_top
+                        && !ws
+                            .fullscreen_hiding
+                            .load(std::sync::atomic::Ordering::SeqCst),
                 );
                 let _ = win.set_size(tauri::LogicalSize::new(win_w, win_h));
                 let _ = win.set_position(tauri::LogicalPosition::new(x, my));

@@ -1,6 +1,7 @@
 //! Tauri pet-physics, efficiency-hover, stroll-mode, demo-mascot, and context-menu commands.
 
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
 
 use tauri::Manager;
 
@@ -10,12 +11,7 @@ use crate::mascot::{
 };
 use crate::pet_core::efficiency_hover_poll;
 use crate::platform::common::AppWindowInfo;
-use crate::state::{
-    EFFICIENCY_HOVER_ACTIVE, EFFICIENCY_HOVER_THREAD_ALIVE, MINI_WINDOW_FRAME,
-    PET_CONTEXT_MENU_OPEN, PET_MENU_RESTORE_FRAME, PET_PASSTHROUGH_ACTIVE,
-    PET_PASSTHROUGH_THREAD_ALIVE, PET_POMODORO_ACTIVE, SPRITE_PAD, STROLL_MODE_ENABLED,
-    THROW_TRACKING_ENABLED,
-};
+use crate::state::{PetState, WindowState};
 
 #[cfg(target_os = "macos")]
 use crate::platform::macos::{
@@ -25,8 +21,6 @@ use crate::platform::macos::{
 
 #[cfg(target_os = "windows")]
 use crate::platform::windows::pet_passthrough_poll_windows;
-#[cfg(target_os = "windows")]
-use crate::state::FULLSCREEN_HIDING;
 
 #[tauri::command]
 pub async fn get_frontmost_app_window(
@@ -76,6 +70,7 @@ pub async fn get_frontmost_app_window(
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub async fn set_sprite_pad_fractions(
+    app: tauri::AppHandle,
     top: Option<f64>,
     right: Option<f64>,
     bottom: Option<f64>,
@@ -86,7 +81,8 @@ pub async fn set_sprite_pad_fractions(
     left_px: Option<f64>,
     reset_px: Option<bool>,
 ) -> Result<(), String> {
-    let mut g = SPRITE_PAD.lock().map_err(|e| e.to_string())?;
+    let ps = app.state::<Arc<PetState>>();
+    let mut g = ps.sprite_pad.lock().map_err(|e| e.to_string())?;
     if reset_px.unwrap_or(false) {
         g.top_px = None;
         g.right_px = None;
@@ -246,10 +242,14 @@ pub async fn set_efficiency_hover_tracking(
     app: tauri::AppHandle,
     active: bool,
 ) -> Result<(), String> {
-    EFFICIENCY_HOVER_ACTIVE.store(active, Ordering::SeqCst);
-    if active && !EFFICIENCY_HOVER_THREAD_ALIVE.load(Ordering::SeqCst) {
+    let ws = app.state::<Arc<WindowState>>();
+    let ps = app.state::<Arc<PetState>>();
+    ws.hover_active.store(active, Ordering::SeqCst);
+    if active && !ws.hover_thread_alive.load(Ordering::SeqCst) {
         let app2 = app.clone();
-        std::thread::spawn(move || efficiency_hover_poll(app2));
+        let ws2 = Arc::clone(&*ws);
+        let ps2 = Arc::clone(&*ps);
+        std::thread::spawn(move || efficiency_hover_poll(app2, ws2, ps2));
     }
     Ok(())
 }
@@ -259,10 +259,11 @@ pub async fn set_efficiency_hover_tracking(
 /// switches to a non-physics pet) — in that case the frontend disables
 /// throw tracking too.
 #[tauri::command]
-pub fn set_stroll_mode(_app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
-    STROLL_MODE_ENABLED.store(enabled, Ordering::SeqCst);
+pub fn set_stroll_mode(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    let ps = app.state::<Arc<PetState>>();
+    ps.stroll_enabled.store(enabled, Ordering::SeqCst);
     if !enabled {
-        THROW_TRACKING_ENABLED.store(false, Ordering::SeqCst);
+        ps.throw_tracking.store(false, Ordering::SeqCst);
     }
     Ok(())
 }
@@ -271,9 +272,10 @@ pub fn set_stroll_mode(_app: tauri::AppHandle, enabled: bool) -> Result<(), Stri
 /// selected pet declares physics. When off the drag loop skips the
 /// per-tick VecDeque push, so legacy pets pay no perf cost.
 #[tauri::command]
-pub fn set_throw_tracking(enabled: bool) -> Result<(), String> {
+pub fn set_throw_tracking(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
     log::info!("[stroll] set_throw_tracking({})", enabled);
-    THROW_TRACKING_ENABLED.store(enabled, Ordering::SeqCst);
+    let ps = app.state::<Arc<PetState>>();
+    ps.throw_tracking.store(enabled, Ordering::SeqCst);
     Ok(())
 }
 #[tauri::command]
@@ -286,6 +288,8 @@ pub async fn set_pet_mode_window(
     let win = app
         .get_webview_window("main")
         .ok_or("mini window not found")?;
+    let ws = app.state::<Arc<WindowState>>();
+    let ps = app.state::<Arc<PetState>>();
     let mascot_scale = sanitized_mascot_scale(mascot_scale);
     let large_mascot_scale = large_mascot_scale.unwrap_or(LARGE_MASCOT_SIZE_MULTIPLIER);
 
@@ -294,6 +298,7 @@ pub async fn set_pet_mode_window(
         #[cfg(target_os = "macos")]
         {
             let win_clone = win.clone();
+            let ws2 = Arc::clone(&*ws);
             app.run_on_main_thread(move || {
                 use objc2::msg_send;
                 use objc2::runtime::{AnyClass, AnyObject};
@@ -337,7 +342,7 @@ pub async fn set_pet_mode_window(
                             let _: () = msg_send![obj, setLevel: 27isize];
                             let _: () = msg_send![obj, orderFrontRegardless];
                         }
-                        if let Ok(mut f) = MINI_WINDOW_FRAME.lock() {
+                        if let Ok(mut f) = ws2.mini_frame.lock() {
                             *f = Some((x, y, win_w, win_h));
                         }
                     }
@@ -367,38 +372,46 @@ pub async fn set_pet_mode_window(
                     let _ = win.set_position(tauri::LogicalPosition::new(x, y));
                 }
             }
-            if !FULLSCREEN_HIDING.load(std::sync::atomic::Ordering::SeqCst) {
+            if !ws
+                .fullscreen_hiding
+                .load(std::sync::atomic::Ordering::SeqCst)
+            {
                 let _ = win.set_always_on_top(true);
                 let _ = win.show();
             }
         }
 
         // Start the click-through poll thread.
-        PET_PASSTHROUGH_ACTIVE.store(true, Ordering::SeqCst);
+        ps.passthrough_active.store(true, Ordering::SeqCst);
         #[cfg(target_os = "macos")]
-        if !PET_PASSTHROUGH_THREAD_ALIVE.load(Ordering::SeqCst) {
+        if !ps.passthrough_thread_alive.load(Ordering::SeqCst) {
             let app2 = app.clone();
+            let ws2 = Arc::clone(&*ws);
+            let ps2 = Arc::clone(&*ps);
             std::thread::spawn(move || {
-                pet_passthrough_poll(app2, mascot_scale, large_mascot_scale)
+                pet_passthrough_poll(app2, ws2, ps2, mascot_scale, large_mascot_scale)
             });
         }
         #[cfg(target_os = "windows")]
-        if !PET_PASSTHROUGH_THREAD_ALIVE.load(Ordering::SeqCst) {
+        if !ps.passthrough_thread_alive.load(Ordering::SeqCst) {
             let app2 = app.clone();
+            let ws2 = Arc::clone(&*ws);
+            let ps2 = Arc::clone(&*ps);
             std::thread::spawn(move || {
-                pet_passthrough_poll_windows(app2, mascot_scale, large_mascot_scale)
+                pet_passthrough_poll_windows(app2, ws2, ps2, mascot_scale, large_mascot_scale)
             });
         }
     } else {
         // Stop the poll thread.
-        PET_PASSTHROUGH_ACTIVE.store(false, Ordering::SeqCst);
-        PET_CONTEXT_MENU_OPEN.store(false, Ordering::SeqCst);
-        PET_POMODORO_ACTIVE.store(false, Ordering::SeqCst);
+        ps.passthrough_active.store(false, Ordering::SeqCst);
+        ps.context_menu_open.store(false, Ordering::SeqCst);
+        ps.pomodoro_active.store(false, Ordering::SeqCst);
 
         // Shrink back to collapsed mascot size and re-enable mouse events.
         #[cfg(target_os = "macos")]
         {
             let win_clone = win.clone();
+            let ws2 = Arc::clone(&*ws);
             app.run_on_main_thread(move || {
                 use objc2::msg_send;
                 use objc2::runtime::AnyObject;
@@ -416,7 +429,7 @@ pub async fn set_pet_mode_window(
                         let _: () = msg_send![obj, setIgnoresMouseEvents: false];
                         let _: () = msg_send![obj, setFrame: frame, display: true, animate: false];
                     }
-                    if let Ok(mut f) = MINI_WINDOW_FRAME.lock() {
+                    if let Ok(mut f) = ws2.mini_frame.lock() {
                         *f = Some((x, y, win_w, win_h));
                     }
                 }
@@ -450,8 +463,9 @@ pub async fn set_pet_mode_window(
 /// anchored Pomodoro stop button receives clicks instead of having them
 /// pass through (it sits in the centered hitbox's bottom inset region).
 #[tauri::command]
-pub async fn set_pet_pomodoro_active(active: bool) -> Result<(), String> {
-    PET_POMODORO_ACTIVE.store(active, Ordering::SeqCst);
+pub async fn set_pet_pomodoro_active(app: tauri::AppHandle, active: bool) -> Result<(), String> {
+    let ps = app.state::<Arc<PetState>>();
+    ps.pomodoro_active.store(active, Ordering::SeqCst);
     Ok(())
 }
 
@@ -467,7 +481,9 @@ pub async fn set_pet_context_menu(
     open: bool,
     side: Option<String>,
 ) -> Result<(), String> {
-    PET_CONTEXT_MENU_OPEN.store(open, Ordering::SeqCst);
+    let ws = app.state::<Arc<WindowState>>();
+    let ps = app.state::<Arc<PetState>>();
+    ps.context_menu_open.store(open, Ordering::SeqCst);
 
     #[cfg(target_os = "macos")]
     {
@@ -475,6 +491,8 @@ pub async fn set_pet_context_menu(
         if open && side.as_deref() == Some("right") {
             if let Some(win) = app.get_webview_window("main") {
                 let win_clone = win.clone();
+                let ws2 = Arc::clone(&*ws);
+                let ps2 = Arc::clone(&*ps);
                 let (tx, rx) = std::sync::mpsc::channel::<()>();
                 let _ = app.run_on_main_thread(move || {
                     use objc2::msg_send;
@@ -483,7 +501,7 @@ pub async fn set_pet_context_menu(
                     if let Ok(ns_win) = win_clone.ns_window() {
                         let obj = unsafe { &*(ns_win as *mut AnyObject) };
                         let current: NSRect = unsafe { msg_send![obj, frame] };
-                        if let Ok(mut saved) = PET_MENU_RESTORE_FRAME.lock() {
+                        if let Ok(mut saved) = ps2.menu_restore_frame.lock() {
                             *saved = Some((
                                 current.origin.x,
                                 current.origin.y,
@@ -503,7 +521,7 @@ pub async fn set_pet_context_menu(
                             let _: () =
                                 msg_send![obj, setFrame: frame, display: true, animate: false];
                         }
-                        if let Ok(mut f) = MINI_WINDOW_FRAME.lock() {
+                        if let Ok(mut f) = ws2.mini_frame.lock() {
                             *f = Some((
                                 current.origin.x,
                                 current.origin.y,
@@ -511,7 +529,7 @@ pub async fn set_pet_context_menu(
                                 current.size.height,
                             ));
                         }
-                        pet_context_schedule_restore_alpha(ns_win);
+                        pet_context_schedule_restore_alpha(ns_win, &ps2);
                     }
                     let _ = tx.send(());
                 });
@@ -520,6 +538,8 @@ pub async fn set_pet_context_menu(
         } else if !open {
             if let Some(win) = app.get_webview_window("main") {
                 let win_clone = win.clone();
+                let ws2 = Arc::clone(&*ws);
+                let ps2 = Arc::clone(&*ps);
                 let (tx, rx) = std::sync::mpsc::channel::<()>();
                 let _ = app.run_on_main_thread(move || {
                     use objc2::runtime::AnyObject;
@@ -527,7 +547,7 @@ pub async fn set_pet_context_menu(
                     use objc2_foundation::{NSRect, NSPoint, NSSize};
                     if let Ok(ns_win) = win_clone.ns_window() {
                         let obj = unsafe { &*(ns_win as *mut AnyObject) };
-                        if let Ok(mut saved) = PET_MENU_RESTORE_FRAME.lock() {
+                        if let Ok(mut saved) = ps2.menu_restore_frame.lock() {
                             if let Some((_x, _y, w, h)) = *saved {
                                 let current: NSRect = unsafe { msg_send![obj, frame] };
                                 let frame = NSRect::new(
@@ -540,11 +560,11 @@ pub async fn set_pet_context_menu(
                                     let _: () = msg_send![obj, setAlphaValue: 0.0f64];
                                     let _: () = msg_send![obj, setFrame: frame, display: true, animate: false];
                                 }
-                                if let Ok(mut f) = MINI_WINDOW_FRAME.lock() {
+                                if let Ok(mut f) = ws2.mini_frame.lock() {
                                     *f = Some((current.origin.x, current.origin.y, w, h));
                                 }
                                 *saved = None;
-                                pet_context_schedule_restore_alpha(ns_win);
+                                pet_context_schedule_restore_alpha(ns_win, &ps2);
                             }
                         }
                     }
@@ -566,7 +586,7 @@ pub async fn set_pet_context_menu(
                         let current_y = pos.y as f64 / scale;
                         let current_w = size.width as f64 / scale;
                         let current_h = size.height as f64 / scale;
-                        if let Ok(mut saved) = PET_MENU_RESTORE_FRAME.lock() {
+                        if let Ok(mut saved) = ps.menu_restore_frame.lock() {
                             if saved.is_none() {
                                 *saved = Some((current_x, current_y, current_w, current_h));
                             }
@@ -575,7 +595,7 @@ pub async fn set_pet_context_menu(
                         // screen position via CSS right: 180.
                         let new_w = current_w + right_pad;
                         let _ = win.set_size(tauri::LogicalSize::new(new_w, current_h));
-                        if let Ok(mut f) = MINI_WINDOW_FRAME.lock() {
+                        if let Ok(mut f) = ws.mini_frame.lock() {
                             *f = Some((current_x, current_y, new_w, current_h));
                         }
                     }
@@ -583,7 +603,7 @@ pub async fn set_pet_context_menu(
             }
         } else if !open {
             if let Some(win) = app.get_webview_window("main") {
-                if let Ok(mut saved) = PET_MENU_RESTORE_FRAME.lock() {
+                if let Ok(mut saved) = ps.menu_restore_frame.lock() {
                     if let Some((_x, _y, w, h)) = *saved {
                         let (current_x, current_y) =
                             match (win.outer_position(), win.current_monitor()) {
@@ -594,7 +614,7 @@ pub async fn set_pet_context_menu(
                                 _ => (0.0, 0.0),
                             };
                         let _ = win.set_size(tauri::LogicalSize::new(w, h));
-                        if let Ok(mut f) = MINI_WINDOW_FRAME.lock() {
+                        if let Ok(mut f) = ws.mini_frame.lock() {
                             *f = Some((current_x, current_y, w, h));
                         }
                         *saved = None;

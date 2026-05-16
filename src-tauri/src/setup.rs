@@ -10,10 +10,7 @@ use crate::platform::macos::{get_notch_offset, install_wry_webview_ime_fix};
 use crate::platform::windows::fullscreen_foreground_monitor;
 #[cfg(target_os = "macos")]
 use crate::speech;
-#[cfg(target_os = "windows")]
-use crate::state::FULLSCREEN_HIDING;
-#[cfg(target_os = "macos")]
-use crate::state::{MINI_WINDOW_FRAME, NOTCH_SCREEN_INFO};
+use crate::state::WindowState;
 use crate::{socket, tray};
 
 use tauri::Manager;
@@ -107,6 +104,7 @@ pub(crate) fn init(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error
     #[cfg(target_os = "macos")]
     if let Some(win) = app.get_webview_window("main") {
         let win_clone = win.clone();
+        let ws = std::sync::Arc::clone(&*app.handle().state::<std::sync::Arc<WindowState>>());
         let _ = app.handle().run_on_main_thread(move || {
             use objc2::msg_send;
             use objc2::runtime::AnyObject;
@@ -120,7 +118,7 @@ pub(crate) fn init(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error
                     let _: () = msg_send![obj, setCollectionBehavior: behavior];
                     let _: () = msg_send![obj, setAcceptsMouseMovedEvents: true];
 
-                    // Seed NOTCH_SCREEN_INFO + MINI_WINDOW_FRAME so the
+                    // Seed notch_screen_info + mini_frame so the
                     // efficiency hover/drag poll thread can work from the
                     // first tick (otherwise it silently no-ops until the
                     // panel is toggled via set_mini_expanded).
@@ -128,7 +126,7 @@ pub(crate) fn init(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error
                     if !screen.is_null() {
                         let sf: NSRect = msg_send![&*screen, frame];
                         let notch_off = get_notch_offset(screen);
-                        if let Ok(mut info) = NOTCH_SCREEN_INFO.lock() {
+                        if let Ok(mut info) = ws.notch_screen_info.lock() {
                             *info = Some((
                                 sf.origin.x,
                                 sf.origin.y,
@@ -139,7 +137,7 @@ pub(crate) fn init(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error
                         }
                     }
                     let wf: NSRect = msg_send![obj, frame];
-                    if let Ok(mut f) = MINI_WINDOW_FRAME.lock() {
+                    if let Ok(mut f) = ws.mini_frame.lock() {
                         *f = Some((wf.origin.x, wf.origin.y, wf.size.width, wf.size.height));
                     }
                 }
@@ -169,6 +167,7 @@ pub(crate) fn init(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error
     #[cfg(target_os = "windows")]
     {
         let app_handle = app.handle().clone();
+        let ws = std::sync::Arc::clone(&*app.handle().state::<std::sync::Arc<WindowState>>());
         std::thread::spawn(move || {
             use windows::Win32::Foundation::POINT;
             use windows::Win32::Graphics::Gdi::{
@@ -207,7 +206,8 @@ pub(crate) fn init(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error
                         non_fs_streak = 0;
                         if !was_hidden {
                             log::info!("[fullscreen] detected fullscreen app on same monitor, moving mini off-screen");
-                            FULLSCREEN_HIDING.store(true, std::sync::atomic::Ordering::SeqCst);
+                            ws.fullscreen_hiding
+                                .store(true, std::sync::atomic::Ordering::SeqCst);
                             if let Ok(pos) = win.outer_position() {
                                 hidden_monitor = Some(unsafe {
                                     MonitorFromPoint(
@@ -235,7 +235,8 @@ pub(crate) fn init(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error
                         non_fs_streak += 1;
                         if non_fs_streak >= RESTORE_THRESHOLD {
                             log::info!("[fullscreen] fullscreen exited or on different monitor, restoring mini position");
-                            FULLSCREEN_HIDING.store(false, std::sync::atomic::Ordering::SeqCst);
+                            ws.fullscreen_hiding
+                                .store(false, std::sync::atomic::Ordering::SeqCst);
                             if let Some(pos) = saved_pos.take() {
                                 let _ = win.set_position(pos);
                             }

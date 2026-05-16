@@ -2,13 +2,17 @@
 
 #[cfg(target_os = "macos")]
 use std::sync::atomic::Ordering;
+#[cfg(target_os = "macos")]
+use std::sync::Arc;
 
 #[cfg(target_os = "macos")]
 use tauri::menu::CheckMenuItem;
 use tauri::menu::{Menu, MenuItem};
+#[cfg(target_os = "macos")]
+use tauri::Manager;
 
 #[cfg(target_os = "macos")]
-use crate::state::STROLL_MODE_ENABLED;
+use crate::state::PetState;
 
 #[tauri::command]
 pub fn update_tray_language(app: tauri::AppHandle, lang: String) -> Result<(), String> {
@@ -25,12 +29,13 @@ pub fn update_tray_language(app: tauri::AppHandle, lang: String) -> Result<(), S
         .map_err(|e| e.to_string())?;
     #[cfg(target_os = "macos")]
     let menu = {
+        let ps = app.state::<Arc<PetState>>();
         let stroll = CheckMenuItem::with_id(
             &app,
             "stroll",
             stroll_label,
             true,
-            STROLL_MODE_ENABLED.load(Ordering::SeqCst),
+            ps.stroll_enabled.load(Ordering::SeqCst),
             None::<&str>,
         )
         .map_err(|e| e.to_string())?;
