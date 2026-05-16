@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::{Arc, Mutex};
 
 #[cfg(target_os = "windows")]
@@ -80,26 +80,9 @@ pub(crate) static STROLL_MODE_ENABLED: AtomicBool = AtomicBool::new(true);
 // spend cycles on the VecDeque push for legacy pets.
 pub(crate) static THROW_TRACKING_ENABLED: AtomicBool = AtomicBool::new(false);
 
-/// Per-host SSH backoff state.
 pub(crate) struct SshBackoffState {
     pub(crate) fail_count: u32,
     pub(crate) fail_epoch: u64,
-}
-
-pub(crate) static SSH_BACKOFF: std::sync::OnceLock<Mutex<HashMap<String, SshBackoffState>>> =
-    std::sync::OnceLock::new();
-
-pub(crate) fn ssh_backoff_map() -> &'static Mutex<HashMap<String, SshBackoffState>> {
-    SSH_BACKOFF.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
-/// Stores which SSH key was accepted for each host (user@host → key path).
-/// Populated by ensure_ssh_master via `ssh -v` output parsing.
-pub(crate) static SSH_KEY_USED: std::sync::OnceLock<Mutex<HashMap<String, String>>> =
-    std::sync::OnceLock::new();
-
-pub(crate) fn ssh_key_map() -> &'static Mutex<HashMap<String, String>> {
-    SSH_KEY_USED.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 /// Managed state: tracks the PID of the currently running `openclaw agent` subprocess.
@@ -246,6 +229,96 @@ pub(crate) type PendingPermissions = Arc<Mutex<HashMap<String, std::sync::mpsc::
 pub(crate) struct ClaudeState {
     pub(crate) sessions: Arc<Mutex<HashMap<String, ClaudeSession>>>,
     pub(crate) pending_permissions: PendingPermissions,
+}
+
+// ── Managed state structs ─────────────────────────────────────────────
+// Registered via `.manage(Arc::new(…))` in lib.rs. Threads clone the Arc;
+// commands extract via `app.state::<Arc<T>>()`.
+
+#[allow(dead_code)]
+pub(crate) struct WindowState {
+    pub(crate) hover_active: AtomicBool,
+    pub(crate) hover_thread_alive: AtomicBool,
+    pub(crate) expanded: AtomicBool,
+    #[allow(clippy::type_complexity)]
+    pub(crate) notch_screen_info: Mutex<Option<(f64, f64, f64, f64, f64)>>,
+    pub(crate) mini_frame: Mutex<Option<(f64, f64, f64, f64)>>,
+    #[cfg(target_os = "windows")]
+    pub(crate) fullscreen_hiding: AtomicBool,
+}
+
+impl WindowState {
+    pub(crate) fn new() -> Self {
+        Self {
+            hover_active: AtomicBool::new(false),
+            hover_thread_alive: AtomicBool::new(false),
+            expanded: AtomicBool::new(false),
+            notch_screen_info: Mutex::new(None),
+            mini_frame: Mutex::new(None),
+            #[cfg(target_os = "windows")]
+            fullscreen_hiding: AtomicBool::new(false),
+        }
+    }
+}
+
+#[allow(dead_code)]
+pub(crate) struct PetState {
+    pub(crate) passthrough_active: AtomicBool,
+    pub(crate) passthrough_thread_alive: AtomicBool,
+    pub(crate) context_menu_open: AtomicBool,
+    pub(crate) pomodoro_active: AtomicBool,
+    pub(crate) menu_restore_frame: Mutex<Option<(f64, f64, f64, f64)>>,
+    pub(crate) stroll_enabled: AtomicBool,
+    pub(crate) throw_tracking: AtomicBool,
+    pub(crate) sprite_pad: Mutex<SpritePadFracs>,
+    pub(crate) drag_anchor: Mutex<Option<(f64, f64)>>,
+    #[cfg(target_os = "macos")]
+    pub(crate) drag_task_pending: AtomicBool,
+    #[cfg(target_os = "macos")]
+    pub(crate) alpha_gen: AtomicU64,
+}
+
+impl PetState {
+    pub(crate) fn new() -> Self {
+        Self {
+            passthrough_active: AtomicBool::new(false),
+            passthrough_thread_alive: AtomicBool::new(false),
+            context_menu_open: AtomicBool::new(false),
+            pomodoro_active: AtomicBool::new(false),
+            menu_restore_frame: Mutex::new(None),
+            stroll_enabled: AtomicBool::new(true),
+            throw_tracking: AtomicBool::new(false),
+            sprite_pad: Mutex::new(SpritePadFracs {
+                top: 0.40,
+                right: 0.45,
+                bottom: 0.30,
+                left: 0.45,
+                top_px: None,
+                right_px: None,
+                bottom_px: None,
+                left_px: None,
+            }),
+            drag_anchor: Mutex::new(None),
+            #[cfg(target_os = "macos")]
+            drag_task_pending: AtomicBool::new(false),
+            #[cfg(target_os = "macos")]
+            alpha_gen: AtomicU64::new(0),
+        }
+    }
+}
+
+pub(crate) struct SshState {
+    pub(crate) backoff: Mutex<HashMap<String, SshBackoffState>>,
+    pub(crate) key_used: Mutex<HashMap<String, String>>,
+}
+
+impl SshState {
+    pub(crate) fn new() -> Self {
+        Self {
+            backoff: Mutex::new(HashMap::new()),
+            key_used: Mutex::new(HashMap::new()),
+        }
+    }
 }
 
 /// Global registry of active file watchers, keyed by session ID

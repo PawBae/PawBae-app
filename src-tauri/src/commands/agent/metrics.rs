@@ -1,10 +1,15 @@
 //! Agent metrics, message extraction, and string truncation helpers.
 
+use std::sync::Arc;
+
+use tauri::Manager;
+
 use crate::agent_gateway::{
     extract_sessions, invoke_tool, is_session_active, remote_sessions_json_path, sessions_json_path,
 };
 use crate::lsof::lsof_active_agents;
 use crate::ssh_core::{ssh_is_agent_active, ssh_read_file};
+use crate::state::SshState;
 
 use super::{AgentMetrics, RecentAction, ToolCallStat};
 
@@ -88,6 +93,7 @@ pub(super) fn truncate_str(s: &str, max: usize) -> String {
 
 #[tauri::command]
 pub async fn get_agent_metrics(
+    app: tauri::AppHandle,
     agent_id: String,
     mode: Option<String>,
     url: Option<String>,
@@ -102,10 +108,11 @@ pub async fn get_agent_metrics(
         ssh_host
     );
     if mode.as_deref() == Some("remote") {
+        let ssh = app.state::<Arc<SshState>>();
         let sh = ssh_host.as_deref().unwrap_or("");
         let su = ssh_user.as_deref().unwrap_or("");
         if !sh.is_empty() && !su.is_empty() {
-            let active = ssh_is_agent_active(sh, su, &agent_id).await;
+            let active = ssh_is_agent_active(&ssh, sh, su, &agent_id).await;
 
             let mut metrics = AgentMetrics {
                 agent_id: agent_id.clone(),
@@ -131,7 +138,7 @@ pub async fn get_agent_metrics(
             };
 
             let sess_path = remote_sessions_json_path(&agent_id);
-            let sess_content = match ssh_read_file(sh, su, &sess_path).await {
+            let sess_content = match ssh_read_file(&ssh, sh, su, &sess_path).await {
                 Ok(c) => c,
                 Err(_) => return Ok(metrics),
             };
@@ -164,7 +171,7 @@ pub async fn get_agent_metrics(
                 None => return Ok(metrics),
             };
 
-            let content = match ssh_read_file(sh, su, &session_file).await {
+            let content = match ssh_read_file(&ssh, sh, su, &session_file).await {
                 Ok(c) => {
                     log::info!(
                         "[get_agent_metrics] SSH read session file OK, len={}",

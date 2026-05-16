@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 mod state;
-use crate::state::{ActiveAgentPid, ClaudeState};
+use crate::state::{ActiveAgentPid, ClaudeState, PetState, SshState, WindowState};
 
 mod platform;
 
@@ -126,6 +126,9 @@ pub fn run() {
             sessions: Arc::new(Mutex::new(HashMap::new())),
             pending_permissions: Arc::new(Mutex::new(HashMap::new())),
         })
+        .manage(Arc::new(WindowState::new()))
+        .manage(Arc::new(PetState::new()))
+        .manage(Arc::new(SshState::new()))
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

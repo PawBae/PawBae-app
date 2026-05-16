@@ -2,11 +2,15 @@
 
 use std::path::PathBuf;
 
+use std::sync::Arc;
+
+use tauri::Manager;
+
 use crate::agent_gateway::{remote_sessions_json_path, sessions_json_path};
 use crate::app_init::home_dir_string;
 use crate::lsof::lsof_open_jsonl_paths;
 use crate::ssh_core::{ssh_exec, ssh_read_file};
-use crate::state::ActiveAgentPid;
+use crate::state::{ActiveAgentPid, SshState};
 
 use super::{AgentExtraInfo, DailyCount};
 
@@ -126,12 +130,14 @@ pub async fn interrupt_agent(
 
 #[tauri::command]
 pub async fn get_agent_extra_info(
+    app: tauri::AppHandle,
     agent_id: String,
     mode: Option<String>,
     ssh_host: Option<String>,
     ssh_user: Option<String>,
 ) -> Result<AgentExtraInfo, String> {
     if mode.as_deref() == Some("remote") {
+        let ssh = app.state::<Arc<SshState>>();
         let sh = ssh_host.as_deref().unwrap_or("");
         let su = ssh_user.as_deref().unwrap_or("");
         if !sh.is_empty() && !su.is_empty() {
@@ -143,23 +149,24 @@ pub async fn get_agent_extra_info(
 
             // Skills from remote sessions.json
             let sess_path = remote_sessions_json_path(&agent_id);
-            let skills: Vec<String> = if let Ok(content) = ssh_read_file(sh, su, &sess_path).await {
-                serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&content)
-                    .ok()
-                    .and_then(|map| {
-                        map.into_values()
-                            .max_by_key(|v| v["updatedAt"].as_u64().unwrap_or(0))
-                            .and_then(|v| v["skillsSnapshot"]["skills"].as_array().cloned())
-                            .map(|arr| {
-                                arr.iter()
-                                    .filter_map(|s| s["name"].as_str().map(|n| n.to_string()))
-                                    .collect()
-                            })
-                    })
-                    .unwrap_or_default()
-            } else {
-                vec![]
-            };
+            let skills: Vec<String> =
+                if let Ok(content) = ssh_read_file(&ssh, sh, su, &sess_path).await {
+                    serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&content)
+                        .ok()
+                        .and_then(|map| {
+                            map.into_values()
+                                .max_by_key(|v| v["updatedAt"].as_u64().unwrap_or(0))
+                                .and_then(|v| v["skillsSnapshot"]["skills"].as_array().cloned())
+                                .map(|arr| {
+                                    arr.iter()
+                                        .filter_map(|s| s["name"].as_str().map(|n| n.to_string()))
+                                        .collect()
+                                })
+                        })
+                        .unwrap_or_default()
+                } else {
+                    vec![]
+                };
 
             // Daily counts from remote .jsonl files
             // Use find+exec to avoid ARG_MAX with many files, and process server-side
@@ -186,7 +193,7 @@ pub async fn get_agent_extra_info(
                 agent_dir
             );
             let mut server_today: Option<String> = None;
-            match ssh_exec(sh, su, &summary_cmd).await {
+            match ssh_exec(&ssh, sh, su, &summary_cmd).await {
                 Ok(summary) => {
                     for line in summary.lines() {
                         if let Some(date_str) = line.strip_prefix("SERVER_TODAY:") {
@@ -218,7 +225,7 @@ pub async fn get_agent_extra_info(
                         "find ~/.openclaw/agents/{}/sessions -name '*.jsonl' -exec cat {{}} + 2>/dev/null | tail -n 30000",
                         agent_dir
                     );
-                    if let Ok(content) = ssh_exec(sh, su, &cat_cmd).await {
+                    if let Ok(content) = ssh_exec(&ssh, sh, su, &cat_cmd).await {
                         let mut current_date: Option<String> = None;
                         for line in content.lines() {
                             if let Ok(obj) = serde_json::from_str::<serde_json::Value>(line) {

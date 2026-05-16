@@ -2,45 +2,51 @@
 
 #[cfg(unix)]
 use std::path::PathBuf;
+use std::sync::Arc;
+
+use tauri::Manager;
 
 use crate::ssh_core::{close_ssh_master, ssh_backoff_reset};
-use crate::state::{ssh_backoff_map, ssh_key_map};
+use crate::state::SshState;
 
 #[cfg(target_os = "windows")]
 use crate::platform::windows::win_ssh_mux;
 
-/// Returns the SSH key path that was used to authenticate a connection,
-/// or null if unknown (e.g. socket was already established before this session).
 #[tauri::command]
-pub fn get_ssh_key_info(ssh_host: String, ssh_user: String) -> Option<String> {
+pub fn get_ssh_key_info(
+    app: tauri::AppHandle,
+    ssh_host: String,
+    ssh_user: String,
+) -> Option<String> {
+    let ssh = app.state::<Arc<SshState>>();
     let key = format!("{}@{}", ssh_user, ssh_host);
-    ssh_key_map().lock().unwrap().get(&key).cloned()
+    let guard = ssh.key_used.lock().unwrap();
+    guard.get(&key).cloned()
 }
-/// Reset backoff, gracefully close the existing SSH master process, and
-/// remove the socket — so the next connection starts completely fresh.
-/// Called before user-initiated "test connection" to avoid making the user
-/// wait out a backoff timer or fight a stale/conflicting master process.
+
 #[tauri::command]
-pub async fn reset_ssh(ssh_host: String, ssh_user: String) {
+pub async fn reset_ssh(app: tauri::AppHandle, ssh_host: String, ssh_user: String) {
+    let ssh = app.state::<Arc<SshState>>();
     let host_key = format!("{}@{}", ssh_user, ssh_host);
-    ssh_backoff_reset(&host_key);
-    // Gracefully shut down the existing master process via `-O exit`,
-    // then remove the socket file. This prevents orphaned ssh processes
-    // from piling up and conflicting with the new master.
-    let _ = close_ssh_master(&ssh_host, &ssh_user).await;
-    // Clear cached key info since we're starting fresh
-    ssh_key_map().lock().unwrap().remove(&host_key);
+    ssh_backoff_reset(&ssh, &host_key);
+    let _ = close_ssh_master(&ssh, &ssh_host, &ssh_user).await;
+    ssh.key_used.lock().unwrap().remove(&host_key);
     log::info!(
         "[reset_ssh] cleared backoff, killed master, and reset for {}",
         host_key
     );
 }
+
 #[tauri::command]
-pub async fn close_ssh(ssh_host: Option<String>, ssh_user: Option<String>) -> Result<(), String> {
+pub async fn close_ssh(
+    app: tauri::AppHandle,
+    ssh_host: Option<String>,
+    ssh_user: Option<String>,
+) -> Result<(), String> {
+    let ssh = app.state::<Arc<SshState>>();
     let sh = ssh_host.unwrap_or_default();
     let su = ssh_user.unwrap_or_default();
     if sh.is_empty() || su.is_empty() {
-        // Clean up all stale SSH sockets/markers
         #[cfg(unix)]
         let scan_dir = PathBuf::from("/tmp");
         #[cfg(windows)]
@@ -59,11 +65,10 @@ pub async fn close_ssh(ssh_host: Option<String>, ssh_user: Option<String>) -> Re
         {
             win_ssh_mux::kill_all().await;
         }
-        // Clear all backoff entries
-        ssh_backoff_map().lock().unwrap().clear();
+        ssh.backoff.lock().unwrap().clear();
         return Ok(());
     }
-    close_ssh_master(&sh, &su).await
+    close_ssh_master(&ssh, &sh, &su).await
 }
 #[tauri::command]
 pub async fn read_local_file(path: String) -> Result<String, String> {
