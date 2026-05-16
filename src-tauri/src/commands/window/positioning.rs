@@ -2,11 +2,11 @@
 
 use tauri::Manager;
 
+#[cfg(target_os = "macos")]
+use crate::mascot::current_sprite_pad;
 use crate::mascot::MASCOT_TOP_INSET;
 #[cfg(target_os = "macos")]
 use crate::state::MINI_WINDOW_FRAME;
-#[cfg(target_os = "macos")]
-use crate::mascot::current_sprite_pad;
 #[cfg(target_os = "macos")]
 use crate::state::PET_MENU_RESTORE_FRAME;
 

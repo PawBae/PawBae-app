@@ -2,16 +2,16 @@
 
 use tauri::Manager;
 
+#[cfg(target_os = "macos")]
+use crate::mascot::collapsed_x;
 use crate::mascot::{
     collapsed_mascot_window_size, large_collapsed_mascot_window_size, sanitized_mascot_scale,
     LARGE_MASCOT_SIZE_MULTIPLIER, MASCOT_TOP_INSET,
 };
 #[cfg(target_os = "macos")]
-use crate::state::MINI_WINDOW_FRAME;
-#[cfg(target_os = "macos")]
-use crate::mascot::collapsed_x;
-#[cfg(target_os = "macos")]
 use crate::platform::macos::{get_notch_offset, pet_context_schedule_restore_alpha};
+#[cfg(target_os = "macos")]
+use crate::state::MINI_WINDOW_FRAME;
 #[cfg(target_os = "macos")]
 use crate::state::{EFFICIENCY_EXPANDED, NOTCH_SCREEN_INFO, PET_MENU_RESTORE_FRAME};
 #[cfg(target_os = "macos")]
