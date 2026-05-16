@@ -10,7 +10,9 @@
     "resolveJsonModule": true,
     "sourceMap": true,
     "isolatedModules": true,
-    "verbatimModuleSyntax": true
+    "verbatimModuleSyntax": true,
+    "baseUrl": ".",
+    "paths": { "$lib/*": ["src/lib/*"] }
   },
   "include": ["src/**/*.ts", "src/**/*.svelte"]
 }

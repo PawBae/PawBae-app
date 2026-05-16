@@ -1,0 +1,26 @@
+export {
+  detectEdges,
+  getActiveAppWindow,
+  getFloorInfo,
+  getMascotRect,
+  getMonitorRect,
+  invalidateActiveWindowCache,
+  invalidateFloorCache,
+  invalidateMonitorCache,
+  loadImage,
+  measureSpriteAnchorsCSS,
+  measureSpriteBottomPadCSS,
+  resetRuntimeSpritePadCSS,
+  scanCellBBox,
+  setRuntimeSpritePadCSS,
+  spritePadFor,
+} from './detect';
+export type {
+  ActiveWindowEdge,
+  EdgeState,
+  MascotRect,
+  MonitorRect,
+  PetFloorInfo,
+  SpriteAnchorsCSS,
+  SpritePad,
+} from './types';
