@@ -1,0 +1,4 @@
+linkedProjects = ["src-tauri/Cargo.toml"]
+
+[cargo]
+features = "all"
