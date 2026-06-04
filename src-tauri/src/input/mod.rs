@@ -168,7 +168,6 @@ mod macos_listener {
     use block2::RcBlock;
     use objc2::msg_send;
     use objc2::runtime::{AnyClass, AnyObject};
-    use tauri::Manager;
 
     use super::{InputListener, ListenerStatus};
     use crate::input::aggregator::InputKind;
