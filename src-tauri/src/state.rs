@@ -7,6 +7,9 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex};
 
+use crate::input::aggregator::InputAggregator;
+use crate::input::ListenerStatus;
+
 pub(crate) struct SshBackoffState {
     pub(crate) fail_count: u32,
     pub(crate) fail_epoch: u64,
@@ -230,6 +233,35 @@ impl SshState {
         Self {
             backoff: Mutex::new(HashMap::new()),
             key_used: Mutex::new(HashMap::new()),
+        }
+    }
+}
+
+/// Managed state for global input-event capture (Phase 1‑A).
+///
+/// `active`/`thread_alive` follow the same toggle pattern as `WindowState`'s
+/// hover thread. `aggregator` is shared with the platform capture layer (the
+/// macOS NSEvent handler) and drained by the flush thread. `monitors` holds
+/// retained NSEvent monitor handles as raw pointers (Send-safe `usize`) so the
+/// macOS listener can remove them on stop — macOS-only.
+pub(crate) struct InputState {
+    pub(crate) active: AtomicBool,
+    pub(crate) thread_alive: AtomicBool,
+    pub(crate) aggregator: Arc<Mutex<InputAggregator>>,
+    pub(crate) status: Mutex<ListenerStatus>,
+    #[cfg(target_os = "macos")]
+    pub(crate) monitors: Mutex<Vec<usize>>,
+}
+
+impl InputState {
+    pub(crate) fn new() -> Self {
+        Self {
+            active: AtomicBool::new(false),
+            thread_alive: AtomicBool::new(false),
+            aggregator: Arc::new(Mutex::new(InputAggregator::new())),
+            status: Mutex::new(ListenerStatus::default()),
+            #[cfg(target_os = "macos")]
+            monitors: Mutex::new(Vec::new()),
         }
     }
 }
