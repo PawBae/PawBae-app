@@ -251,6 +251,16 @@ pub async fn set_efficiency_hover_tracking(
         let ps2 = Arc::clone(&*ps);
         std::thread::spawn(move || efficiency_hover_poll(app2, ws2, ps2));
     }
+    #[cfg(target_os = "windows")]
+    if active && !ps.passthrough_thread_alive.load(Ordering::SeqCst) {
+        ps.passthrough_thread_alive.store(true, Ordering::SeqCst);
+        let app2 = app.clone();
+        let ws2 = Arc::clone(&*ws);
+        let ps2 = Arc::clone(&*ps);
+        std::thread::spawn(move || {
+            pet_passthrough_poll_windows(app2, ws2, ps2, 1.0, 5.0);
+        });
+    }
     Ok(())
 }
 /// Start or stop privacy-safe global input tracking (Phase 1‑A).
@@ -419,6 +429,7 @@ pub async fn set_pet_mode_window(
         }
         #[cfg(target_os = "windows")]
         if !ps.passthrough_thread_alive.load(Ordering::SeqCst) {
+            ps.passthrough_thread_alive.store(true, Ordering::SeqCst);
             let app2 = app.clone();
             let ws2 = Arc::clone(&*ws);
             let ps2 = Arc::clone(&*ps);
