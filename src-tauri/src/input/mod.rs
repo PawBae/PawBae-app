@@ -31,7 +31,7 @@ const FLUSH_INTERVAL_MS: u64 = 80;
 /// Which input kinds are actually being captured right now, plus an optional
 /// human-readable reason when a kind is degraded/off. Returned to the frontend
 /// so settings/logs can surface the degraded state (e.g. keyboard off when
-/// macOS Input Monitoring is denied).
+/// macOS Accessibility access is denied).
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct ListenerStatus {
     pub keyboard: bool,
@@ -103,6 +103,13 @@ pub(crate) fn start_tracking(app: &tauri::AppHandle) -> ListenerStatus {
     if let Ok(mut s) = state.status.lock() {
         *s = status.clone();
     }
+    // Nothing is actually being captured (unsupported platform, or macOS with
+    // no usable backend): don't leave `active` set or spawn a flush thread that
+    // would wake every 80 ms forever doing nothing. Roll the activation back.
+    if !status.keyboard && !status.mouse {
+        state.active.store(false, Ordering::SeqCst);
+        return status;
+    }
     if !state.thread_alive.load(Ordering::SeqCst) {
         let app2 = app.clone();
         let state2 = Arc::clone(&state);
@@ -173,16 +180,6 @@ mod macos_listener {
     use crate::input::aggregator::InputKind;
     use crate::state::InputState;
 
-    // IOKit HID access controls "Input Monitoring". Global *keyboard* monitoring
-    // requires this grant; *mouse* monitoring does not.
-    #[link(name = "IOKit", kind = "framework")]
-    unsafe extern "C" {
-        fn IOHIDCheckAccess(request: u32) -> u32;
-        fn IOHIDRequestAccess(request: u32) -> u8;
-    }
-    const KIOHID_REQUEST_TYPE_LISTEN_EVENT: u32 = 1;
-    const KIOHID_ACCESS_TYPE_GRANTED: u32 = 0;
-
     // NSEventMask = 1 << NSEventType. We monitor only key-down and mouse-down,
     // never key-up / mouse-moved (avoids floods and minimizes what we observe).
     const NSEVENT_MASK_KEY_DOWN: u64 = 1 << 10;
@@ -190,8 +187,13 @@ mod macos_listener {
     const NSEVENT_MASK_RIGHT_MOUSE_DOWN: u64 = 1 << 3;
     const NSEVENT_MASK_OTHER_MOUSE_DOWN: u64 = 1 << 25;
 
+    /// Global NSEvent **key** monitors require the app to be trusted for
+    /// **Accessibility** (per Apple's `addGlobalMonitorForEvents(matching:handler:)`
+    /// docs) — NOT IOKit "Input Monitoring" (that gates `CGEventTap`, a different
+    /// backend). Mouse-down monitors need no permission. Reuse the repo's
+    /// existing `AXIsProcessTrusted` check so behavior matches the rest of the app.
     fn keyboard_permission_granted() -> bool {
-        unsafe { IOHIDCheckAccess(KIOHID_REQUEST_TYPE_LISTEN_EVENT) == KIOHID_ACCESS_TYPE_GRANTED }
+        crate::platform::macos::check_accessibility_permission()
     }
 
     /// Install one NSEvent global monitor for `mask`, whose handler bumps the
@@ -241,10 +243,8 @@ mod macos_listener {
         fn start(&self, app: &tauri::AppHandle, state: &Arc<InputState>) -> ListenerStatus {
             let keyboard = keyboard_permission_granted();
             if !keyboard {
-                // Prompt for Input Monitoring once; non-fatal if the user denies.
-                unsafe {
-                    let _ = IOHIDRequestAccess(KIOHID_REQUEST_TYPE_LISTEN_EVENT);
-                }
+                // Prompt for Accessibility once; non-fatal if the user declines.
+                crate::platform::macos::request_accessibility_permission();
             }
             // Mouse-down needs no permission — always capture it.
             install_monitor(
@@ -264,7 +264,7 @@ mod macos_listener {
                 reason: if keyboard {
                     None
                 } else {
-                    Some("input-monitoring-denied".to_string())
+                    Some("accessibility-denied".to_string())
                 },
             }
         }
