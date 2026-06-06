@@ -74,6 +74,12 @@ fn input_flush_loop(app: tauri::AppHandle, state: Arc<InputState>) {
     state.thread_alive.store(true, Ordering::SeqCst);
     while state.active.load(Ordering::SeqCst) {
         std::thread::sleep(Duration::from_millis(FLUSH_INTERVAL_MS));
+        // Re-check after waking: if tracking stopped during the sleep, honor the
+        // off boundary and emit nothing further. "Off" is a hard boundary for a
+        // privacy toggle — no `user-input` may fire after the command returned.
+        if !state.active.load(Ordering::SeqCst) {
+            break;
+        }
         let events = match state.aggregator.lock() {
             Ok(mut agg) => {
                 if agg.is_empty() {
@@ -124,6 +130,12 @@ pub(crate) fn stop_tracking(app: &tauri::AppHandle) -> ListenerStatus {
     let state = Arc::clone(&*st);
     state.active.store(false, Ordering::SeqCst);
     make_listener().stop(app, &state);
+    // Drop any counts accumulated but not yet flushed so "off" is a hard
+    // boundary — no stale pre-stop input survives to be emitted after stop or
+    // on a later restart.
+    if let Ok(mut agg) = state.aggregator.lock() {
+        agg.clear();
+    }
     let status = ListenerStatus::disabled("stopped");
     if let Ok(mut s) = state.status.lock() {
         *s = status.clone();
@@ -170,6 +182,7 @@ mod macos_listener {
     //! the main thread (AppKit requirement), so all objc work hops there via
     //! `run_on_main_thread`, matching the codebase pattern in `setup.rs`.
 
+    use std::sync::atomic::Ordering;
     use std::sync::Arc;
 
     use block2::RcBlock;
@@ -210,11 +223,16 @@ mod macos_listener {
             let Some(cls) = AnyClass::get(c"NSEvent") else {
                 return;
             };
-            let agg = Arc::clone(&state.aggregator);
+            let handler_state = Arc::clone(&state);
             // void(^)(NSEvent*) — we take the event as an opaque pointer and
-            // never read it. Only the *kind* (known from `mask`) is recorded.
+            // never read it. Only the *kind* (known from `mask`) is recorded, and
+            // only while tracking is active: this honors the off boundary during
+            // the gap between `stop` and the async main-thread `removeMonitor`.
             let handler = RcBlock::new(move |_event: *mut AnyObject| {
-                if let Ok(mut g) = agg.lock() {
+                if !handler_state.active.load(Ordering::SeqCst) {
+                    return;
+                }
+                if let Ok(mut g) = handler_state.aggregator.lock() {
                     g.record(kind);
                 }
             });
@@ -223,9 +241,12 @@ mod macos_listener {
                 addGlobalMonitorForEventsMatchingMask: mask,
                 handler: &*handler
             ];
-            // AppKit copies the block; forgetting our RcBlock simply guarantees
-            // liveness (matches the speech.rs handler pattern).
-            std::mem::forget(handler);
+            // `addGlobalMonitorForEventsMatchingMask:handler:` *copies* the block
+            // (it is a stored handler invoked until `removeMonitor`), so AppKit
+            // owns its own retained copy. Drop our RcBlock — do NOT forget it —
+            // so the block and its captured Arc are freed when the monitor is
+            // removed; otherwise every start/stop toggle would leak one block.
+            drop(handler);
             if !monitor.is_null() {
                 // The returned monitor is autoreleased — retain so it survives
                 // past this run-loop turn until `removeMonitor` in `stop`.

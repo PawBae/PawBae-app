@@ -84,6 +84,14 @@ impl InputAggregator {
         }
         out
     }
+
+    /// Drop all accumulated counts without emitting. Used when tracking stops so
+    /// "off" is a hard event boundary: pending pre-stop counts never survive to
+    /// be emitted after the user toggled tracking off, nor on a later restart.
+    pub fn clear(&mut self) {
+        self.keyboard = 0;
+        self.mouse = 0;
+    }
 }
 
 #[cfg(test)]
@@ -196,5 +204,15 @@ mod tests {
             serde_json::to_value(&event).unwrap(),
             serde_json::json!({ "kind": "mouse", "count": 3, "at": 12345 })
         );
+    }
+
+    #[test]
+    fn clear_discards_counts_without_emitting() {
+        let mut agg = InputAggregator::new();
+        agg.record(InputKind::Keyboard);
+        agg.record(InputKind::Mouse);
+        agg.clear();
+        assert!(agg.is_empty());
+        assert!(agg.drain(1).is_empty());
     }
 }
