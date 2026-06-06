@@ -7,12 +7,14 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 mod state;
-use crate::state::{ActiveAgentPid, ClaudeState, PetState, SshState, WindowState};
+use crate::state::{ActiveAgentPid, ClaudeState, InputState, PetState, SshState, WindowState};
 
 mod platform;
 
 mod commands;
 use crate::commands::*;
+
+mod input;
 
 mod asset;
 
@@ -116,6 +118,8 @@ pub fn run() {
             get_system_idle_time,
             set_stroll_mode,
             set_throw_tracking,
+            set_input_tracking,
+            get_input_tracking_status,
             voice_toggle,
             voice_is_recording
         ])
@@ -129,6 +133,7 @@ pub fn run() {
         .manage(Arc::new(WindowState::new()))
         .manage(Arc::new(PetState::new()))
         .manage(Arc::new(SshState::new()))
+        .manage(Arc::new(InputState::new()))
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

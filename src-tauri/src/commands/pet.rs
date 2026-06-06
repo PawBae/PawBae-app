@@ -253,6 +253,31 @@ pub async fn set_efficiency_hover_tracking(
     }
     Ok(())
 }
+/// Start or stop privacy-safe global input tracking (Phase 1‑A).
+///
+/// When on, the platform listener emits batched `user-input` events
+/// (`{ kind, count, at }`) — it records only event *counts*, never key content
+/// or coordinates. Returns the resulting [`crate::input::ListenerStatus`] so the
+/// frontend can surface a degraded state (e.g. keyboard off when macOS
+/// Accessibility access is denied). OFF by default; the frontend opts in.
+#[tauri::command]
+pub async fn set_input_tracking(
+    app: tauri::AppHandle,
+    active: bool,
+) -> Result<crate::input::ListenerStatus, String> {
+    Ok(if active {
+        crate::input::start_tracking(&app)
+    } else {
+        crate::input::stop_tracking(&app)
+    })
+}
+/// Read the current input-tracking status without changing it.
+#[tauri::command]
+pub async fn get_input_tracking_status(
+    app: tauri::AppHandle,
+) -> Result<crate::input::ListenerStatus, String> {
+    Ok(crate::input::status(&app))
+}
 /// Frontend pushes the persisted stroll-mode flag back to Rust at
 /// startup so the tray check-state matches what was last toggled.
 /// Also called when the user changes pet-physics availability (e.g.

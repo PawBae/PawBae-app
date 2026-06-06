@@ -51,6 +51,61 @@ pub(crate) fn check_accessibility_permission() -> bool {
     }
     unsafe { AXIsProcessTrusted() }
 }
+/// Prompt the user for Accessibility access via the system dialog that
+/// deep-links to System Settings → Privacy & Security → Accessibility. macOS
+/// shows the prompt at most once per app launch, so repeated calls are safe.
+/// No visible effect if already trusted.
+pub(crate) fn request_accessibility_permission() {
+    use std::ffi::{c_char, c_void};
+
+    #[allow(clashing_extern_declarations)]
+    #[link(name = "CoreFoundation", kind = "framework")]
+    extern "C" {
+        fn CFStringCreateWithCString(
+            alloc: *const c_void,
+            c_str: *const c_char,
+            encoding: u32,
+        ) -> *const c_void;
+        fn CFDictionaryCreate(
+            alloc: *const c_void,
+            keys: *const *const c_void,
+            values: *const *const c_void,
+            count: isize,
+            key_cbs: *const c_void,
+            val_cbs: *const c_void,
+        ) -> *const c_void;
+        fn CFRelease(cf: *const c_void);
+        static kCFTypeDictionaryKeyCallBacks: c_void;
+        static kCFTypeDictionaryValueCallBacks: c_void;
+        static kCFBooleanTrue: *const c_void;
+    }
+
+    #[link(name = "ApplicationServices", kind = "framework")]
+    extern "C" {
+        fn AXIsProcessTrustedWithOptions(options: *const c_void) -> bool;
+    }
+
+    unsafe {
+        let key = CFStringCreateWithCString(
+            std::ptr::null(),
+            c"AXTrustedCheckOptionPrompt".as_ptr(),
+            0x08000100, // kCFStringEncodingUTF8
+        );
+        let keys = [key];
+        let values = [kCFBooleanTrue];
+        let dict = CFDictionaryCreate(
+            std::ptr::null(),
+            keys.as_ptr(),
+            values.as_ptr(),
+            1,
+            &kCFTypeDictionaryKeyCallBacks,
+            &kCFTypeDictionaryValueCallBacks,
+        );
+        AXIsProcessTrustedWithOptions(dict);
+        CFRelease(dict);
+        CFRelease(key);
+    }
+}
 pub(crate) fn activate_cursor_workspace_window(workspace_name: &str) {
     let ax_ok = check_accessibility_permission();
     let escaped_workspace = workspace_name.replace('\\', "\\\\").replace('"', "\\\"");

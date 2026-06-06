@@ -2,10 +2,11 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::atomic::AtomicBool;
-#[cfg(target_os = "macos")]
-use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::{Arc, Mutex};
+
+use crate::input::aggregator::InputAggregator;
+use crate::input::ListenerStatus;
 
 pub(crate) struct SshBackoffState {
     pub(crate) fail_count: u32,
@@ -230,6 +231,44 @@ impl SshState {
         Self {
             backoff: Mutex::new(HashMap::new()),
             key_used: Mutex::new(HashMap::new()),
+        }
+    }
+}
+
+/// Managed state for global input-event capture (Phase 1‑A).
+///
+/// `active` controls the current user-facing toggle. `generation` advances on
+/// every start/stop boundary so stale flush threads and delayed platform
+/// monitors cannot emit or record into a later tracking session. `aggregator` is
+/// shared with the platform capture layer (the macOS NSEvent handler) and
+/// drained by the flush thread. `monitors` holds retained NSEvent monitor handles
+/// as raw pointers (Send-safe `usize`) so the macOS listener can remove them on
+/// stop — macOS-only.
+pub(crate) struct InputState {
+    pub(crate) active: AtomicBool,
+    pub(crate) generation: AtomicU64,
+    pub(crate) aggregator: Arc<Mutex<InputAggregator>>,
+    pub(crate) status: Mutex<ListenerStatus>,
+    /// Serializes the flush thread's emit with `stop_tracking` so that once stop
+    /// returns, no further `user-input` event can fire — a hard privacy boundary.
+    /// The flush thread drains, then takes this gate and re-checks `active`
+    /// before emitting; stop sets `active=false` then takes the same gate (which
+    /// waits for any in-flight emit) before clearing pending counts and returning.
+    pub(crate) emit_gate: Mutex<()>,
+    #[cfg(target_os = "macos")]
+    pub(crate) monitors: Mutex<Vec<usize>>,
+}
+
+impl InputState {
+    pub(crate) fn new() -> Self {
+        Self {
+            active: AtomicBool::new(false),
+            generation: AtomicU64::new(0),
+            aggregator: Arc::new(Mutex::new(InputAggregator::new())),
+            status: Mutex::new(ListenerStatus::default()),
+            emit_gate: Mutex::new(()),
+            #[cfg(target_os = "macos")]
+            monitors: Mutex::new(Vec::new()),
         }
     }
 }

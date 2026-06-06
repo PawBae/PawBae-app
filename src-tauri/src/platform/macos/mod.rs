@@ -38,3 +38,4 @@ pub(crate) use terminal::get_active_ghostty_terminal_id;
 pub(crate) use terminal::get_frontmost_app_name;
 pub(crate) use terminal::get_tty_for_pid;
 pub(crate) use terminal::install_wry_webview_ime_fix;
+pub(crate) use terminal::request_accessibility_permission;
