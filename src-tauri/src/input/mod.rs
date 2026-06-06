@@ -54,7 +54,12 @@ impl ListenerStatus {
 /// A real Windows implementation is deferred to Phase 2.
 trait InputListener: Send + Sync {
     /// Install OS hooks. Returns which kinds are actually active.
-    fn start(&self, app: &tauri::AppHandle, state: &Arc<InputState>) -> ListenerStatus;
+    fn start(
+        &self,
+        app: &tauri::AppHandle,
+        state: &Arc<InputState>,
+        generation: u64,
+    ) -> ListenerStatus;
     /// Remove OS hooks.
     fn stop(&self, app: &tauri::AppHandle, state: &Arc<InputState>);
 }
@@ -66,17 +71,27 @@ fn now_ms() -> u64 {
         .as_millis() as u64
 }
 
+fn next_generation(state: &InputState) -> u64 {
+    state.generation.fetch_add(1, Ordering::SeqCst) + 1
+}
+
+fn invalidate_generation(state: &InputState) {
+    state.generation.fetch_add(1, Ordering::SeqCst);
+}
+
+fn active_for_generation(state: &InputState, generation: u64) -> bool {
+    state.active.load(Ordering::SeqCst) && state.generation.load(Ordering::SeqCst) == generation
+}
+
 /// Background thread: drain the aggregator on a fixed cadence and emit one
-/// `user-input` event per non-empty kind. Mirrors
-/// `pet_core::efficiency_hover_poll`'s active/alive flag pattern so a toggle
-/// never spawns duplicate threads.
-fn input_flush_loop(app: tauri::AppHandle, state: Arc<InputState>) {
-    state.thread_alive.store(true, Ordering::SeqCst);
-    while state.active.load(Ordering::SeqCst) {
+/// `user-input` event per non-empty kind. Each thread is tied to one generation,
+/// so quick stop/start cycles cannot let an old thread emit into a new session.
+fn input_flush_loop(app: tauri::AppHandle, state: Arc<InputState>, generation: u64) {
+    while active_for_generation(&state, generation) {
         std::thread::sleep(Duration::from_millis(FLUSH_INTERVAL_MS));
         // Cheap early-out: skip draining if tracking stopped during the sleep.
         // (The hard off boundary is enforced under `emit_gate` below.)
-        if !state.active.load(Ordering::SeqCst) {
+        if !active_for_generation(&state, generation) {
             break;
         }
         let events = match state.aggregator.lock() {
@@ -96,14 +111,13 @@ fn input_flush_loop(app: tauri::AppHandle, state: Arc<InputState>) {
             .emit_gate
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        if !state.active.load(Ordering::SeqCst) {
+        if !active_for_generation(&state, generation) {
             break;
         }
         for event in events {
             let _ = app.emit("user-input", event);
         }
     }
-    state.thread_alive.store(false, Ordering::SeqCst);
 }
 
 /// Begin capturing input. Idempotent: a second call while already active just
@@ -115,7 +129,8 @@ pub(crate) fn start_tracking(app: &tauri::AppHandle) -> ListenerStatus {
     if state.active.swap(true, Ordering::SeqCst) {
         return state.status.lock().map(|s| s.clone()).unwrap_or_default();
     }
-    let status = make_listener().start(app, &state);
+    let generation = next_generation(&state);
+    let status = make_listener().start(app, &state, generation);
     if let Ok(mut s) = state.status.lock() {
         *s = status.clone();
     }
@@ -124,13 +139,12 @@ pub(crate) fn start_tracking(app: &tauri::AppHandle) -> ListenerStatus {
     // would wake every 80 ms forever doing nothing. Roll the activation back.
     if !status.keyboard && !status.mouse {
         state.active.store(false, Ordering::SeqCst);
+        invalidate_generation(&state);
         return status;
     }
-    if !state.thread_alive.load(Ordering::SeqCst) {
-        let app2 = app.clone();
-        let state2 = Arc::clone(&state);
-        std::thread::spawn(move || input_flush_loop(app2, state2));
-    }
+    let app2 = app.clone();
+    let state2 = Arc::clone(&state);
+    std::thread::spawn(move || input_flush_loop(app2, state2, generation));
     status
 }
 
@@ -139,6 +153,7 @@ pub(crate) fn stop_tracking(app: &tauri::AppHandle) -> ListenerStatus {
     let st = app.state::<Arc<InputState>>();
     let state = Arc::clone(&*st);
     state.active.store(false, Ordering::SeqCst);
+    invalidate_generation(&state);
     make_listener().stop(app, &state);
     // Take the emit gate (waits for any in-flight flush emit to finish), then
     // clear pending counts. Combined with the flush thread re-checking `active`
@@ -181,11 +196,39 @@ struct NoopInputListener;
 
 #[cfg(not(target_os = "macos"))]
 impl InputListener for NoopInputListener {
-    fn start(&self, _app: &tauri::AppHandle, _state: &Arc<InputState>) -> ListenerStatus {
+    fn start(
+        &self,
+        _app: &tauri::AppHandle,
+        _state: &Arc<InputState>,
+        _generation: u64,
+    ) -> ListenerStatus {
         // No global-input backend on this platform yet (Phase 2).
         ListenerStatus::disabled("platform-unsupported")
     }
     fn stop(&self, _app: &tauri::AppHandle, _state: &Arc<InputState>) {}
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn generation_invalidates_stale_tracking_sessions_after_restart() {
+        let state = InputState::new();
+
+        let first = next_generation(&state);
+        state.active.store(true, Ordering::SeqCst);
+        assert!(active_for_generation(&state, first));
+
+        state.active.store(false, Ordering::SeqCst);
+        invalidate_generation(&state);
+        assert!(!active_for_generation(&state, first));
+
+        let second = next_generation(&state);
+        state.active.store(true, Ordering::SeqCst);
+        assert!(!active_for_generation(&state, first));
+        assert!(active_for_generation(&state, second));
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -199,7 +242,6 @@ mod macos_listener {
     //! the main thread (AppKit requirement), so all objc work hops there via
     //! `run_on_main_thread`, matching the codebase pattern in `setup.rs`.
 
-    use std::sync::atomic::Ordering;
     use std::sync::Arc;
 
     use block2::RcBlock;
@@ -232,6 +274,7 @@ mod macos_listener {
     fn install_monitor(
         app: &tauri::AppHandle,
         state: &Arc<InputState>,
+        generation: u64,
         mask: u64,
         kind: InputKind,
     ) {
@@ -243,10 +286,12 @@ mod macos_listener {
             let handler_state = Arc::clone(&state);
             // void(^)(NSEvent*) — we take the event as an opaque pointer and
             // never read it. Only the *kind* (known from `mask`) is recorded, and
-            // only while tracking is active: this honors the off boundary during
-            // the gap between `stop` and the async main-thread `removeMonitor`.
+            // only while this exact tracking generation is active: this honors the
+            // off boundary during the gap between `stop` and the async main-thread
+            // `removeMonitor`, and prevents delayed old monitors from recording
+            // into a later restart.
             let handler = RcBlock::new(move |_event: *mut AnyObject| {
-                if !handler_state.active.load(Ordering::SeqCst) {
+                if !super::active_for_generation(&handler_state, generation) {
                     return;
                 }
                 if let Ok(mut g) = handler_state.aggregator.lock() {
@@ -278,7 +323,12 @@ mod macos_listener {
     pub(super) struct MacInputListener;
 
     impl InputListener for MacInputListener {
-        fn start(&self, app: &tauri::AppHandle, state: &Arc<InputState>) -> ListenerStatus {
+        fn start(
+            &self,
+            app: &tauri::AppHandle,
+            state: &Arc<InputState>,
+            generation: u64,
+        ) -> ListenerStatus {
             let keyboard = keyboard_permission_granted();
             if !keyboard {
                 // Prompt for Accessibility once; non-fatal if the user declines.
@@ -288,13 +338,20 @@ mod macos_listener {
             install_monitor(
                 app,
                 state,
+                generation,
                 NSEVENT_MASK_LEFT_MOUSE_DOWN
                     | NSEVENT_MASK_RIGHT_MOUSE_DOWN
                     | NSEVENT_MASK_OTHER_MOUSE_DOWN,
                 InputKind::Mouse,
             );
             if keyboard {
-                install_monitor(app, state, NSEVENT_MASK_KEY_DOWN, InputKind::Keyboard);
+                install_monitor(
+                    app,
+                    state,
+                    generation,
+                    NSEVENT_MASK_KEY_DOWN,
+                    InputKind::Keyboard,
+                );
             }
             ListenerStatus {
                 keyboard,

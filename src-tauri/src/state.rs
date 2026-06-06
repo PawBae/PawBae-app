@@ -2,9 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::atomic::AtomicBool;
-#[cfg(target_os = "macos")]
-use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::{Arc, Mutex};
 
 use crate::input::aggregator::InputAggregator;
@@ -239,14 +237,16 @@ impl SshState {
 
 /// Managed state for global input-event capture (Phase 1‑A).
 ///
-/// `active`/`thread_alive` follow the same toggle pattern as `WindowState`'s
-/// hover thread. `aggregator` is shared with the platform capture layer (the
-/// macOS NSEvent handler) and drained by the flush thread. `monitors` holds
-/// retained NSEvent monitor handles as raw pointers (Send-safe `usize`) so the
-/// macOS listener can remove them on stop — macOS-only.
+/// `active` controls the current user-facing toggle. `generation` advances on
+/// every start/stop boundary so stale flush threads and delayed platform
+/// monitors cannot emit or record into a later tracking session. `aggregator` is
+/// shared with the platform capture layer (the macOS NSEvent handler) and
+/// drained by the flush thread. `monitors` holds retained NSEvent monitor handles
+/// as raw pointers (Send-safe `usize`) so the macOS listener can remove them on
+/// stop — macOS-only.
 pub(crate) struct InputState {
     pub(crate) active: AtomicBool,
-    pub(crate) thread_alive: AtomicBool,
+    pub(crate) generation: AtomicU64,
     pub(crate) aggregator: Arc<Mutex<InputAggregator>>,
     pub(crate) status: Mutex<ListenerStatus>,
     /// Serializes the flush thread's emit with `stop_tracking` so that once stop
@@ -263,7 +263,7 @@ impl InputState {
     pub(crate) fn new() -> Self {
         Self {
             active: AtomicBool::new(false),
-            thread_alive: AtomicBool::new(false),
+            generation: AtomicU64::new(0),
             aggregator: Arc::new(Mutex::new(InputAggregator::new())),
             status: Mutex::new(ListenerStatus::default()),
             emit_gate: Mutex::new(()),
