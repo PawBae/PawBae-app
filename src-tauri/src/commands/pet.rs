@@ -258,8 +258,8 @@ pub async fn set_efficiency_hover_tracking(
 /// When on, the platform listener emits batched `user-input` events
 /// (`{ kind, count, at }`) — it records only event *counts*, never key content
 /// or coordinates. Returns the resulting [`crate::input::ListenerStatus`] so the
-/// frontend can surface a degraded state (e.g. keyboard off when macOS Input
-/// Monitoring is denied). OFF by default; the frontend opts in.
+/// frontend can surface a degraded state (e.g. keyboard off when macOS
+/// Accessibility access is denied). OFF by default; the frontend opts in.
 #[tauri::command]
 pub async fn set_input_tracking(
     app: tauri::AppHandle,

@@ -249,6 +249,12 @@ pub(crate) struct InputState {
     pub(crate) thread_alive: AtomicBool,
     pub(crate) aggregator: Arc<Mutex<InputAggregator>>,
     pub(crate) status: Mutex<ListenerStatus>,
+    /// Serializes the flush thread's emit with `stop_tracking` so that once stop
+    /// returns, no further `user-input` event can fire — a hard privacy boundary.
+    /// The flush thread drains, then takes this gate and re-checks `active`
+    /// before emitting; stop sets `active=false` then takes the same gate (which
+    /// waits for any in-flight emit) before clearing pending counts and returning.
+    pub(crate) emit_gate: Mutex<()>,
     #[cfg(target_os = "macos")]
     pub(crate) monitors: Mutex<Vec<usize>>,
 }
@@ -260,6 +266,7 @@ impl InputState {
             thread_alive: AtomicBool::new(false),
             aggregator: Arc::new(Mutex::new(InputAggregator::new())),
             status: Mutex::new(ListenerStatus::default()),
+            emit_gate: Mutex::new(()),
             #[cfg(target_os = "macos")]
             monitors: Mutex::new(Vec::new()),
         }

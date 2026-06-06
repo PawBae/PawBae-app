@@ -74,9 +74,8 @@ fn input_flush_loop(app: tauri::AppHandle, state: Arc<InputState>) {
     state.thread_alive.store(true, Ordering::SeqCst);
     while state.active.load(Ordering::SeqCst) {
         std::thread::sleep(Duration::from_millis(FLUSH_INTERVAL_MS));
-        // Re-check after waking: if tracking stopped during the sleep, honor the
-        // off boundary and emit nothing further. "Off" is a hard boundary for a
-        // privacy toggle — no `user-input` may fire after the command returned.
+        // Cheap early-out: skip draining if tracking stopped during the sleep.
+        // (The hard off boundary is enforced under `emit_gate` below.)
         if !state.active.load(Ordering::SeqCst) {
             break;
         }
@@ -89,6 +88,17 @@ fn input_flush_loop(app: tauri::AppHandle, state: Arc<InputState>) {
             }
             Err(_) => continue,
         };
+        // Serialize emission with stop_tracking: hold the emit gate and re-check
+        // `active` under it. stop sets active=false then takes this same gate
+        // before returning, so once stop has returned no `user-input` can fire —
+        // a drained-but-unsent batch is dropped here instead.
+        let _gate = state
+            .emit_gate
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if !state.active.load(Ordering::SeqCst) {
+            break;
+        }
         for event in events {
             let _ = app.emit("user-input", event);
         }
@@ -130,11 +140,18 @@ pub(crate) fn stop_tracking(app: &tauri::AppHandle) -> ListenerStatus {
     let state = Arc::clone(&*st);
     state.active.store(false, Ordering::SeqCst);
     make_listener().stop(app, &state);
-    // Drop any counts accumulated but not yet flushed so "off" is a hard
-    // boundary — no stale pre-stop input survives to be emitted after stop or
-    // on a later restart.
-    if let Ok(mut agg) = state.aggregator.lock() {
-        agg.clear();
+    // Take the emit gate (waits for any in-flight flush emit to finish), then
+    // clear pending counts. Combined with the flush thread re-checking `active`
+    // under the same gate, this makes "off" a hard boundary: once we return, no
+    // further `user-input` can fire and no stale pre-stop counts survive a restart.
+    {
+        let _gate = state
+            .emit_gate
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Ok(mut agg) = state.aggregator.lock() {
+            agg.clear();
+        }
     }
     let status = ListenerStatus::disabled("stopped");
     if let Ok(mut s) = state.status.lock() {
