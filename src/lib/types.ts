@@ -67,6 +67,15 @@ export interface OcConnection {
 
 export type AppMode = 'coding' | 'pet';
 
+// Batched global-input fact emitted by the Rust backend as the Tauri "user-input" event.
+// Mirrors src-tauri/src/input/aggregator.rs `UserInputEvent` (serde rename_all = "lowercase").
+// `count` is already aggregated per ~80ms tick — one event drives at most ONE animation.
+export interface UserInputEvent {
+  kind: 'keyboard' | 'mouse';
+  count: number;
+  at: number;
+}
+
 export type PetAction =
   | 'idle'
   | 'sleep'
