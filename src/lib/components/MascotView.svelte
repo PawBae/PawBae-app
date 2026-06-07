@@ -94,10 +94,14 @@
       enabled: true,
     });
     loop.start();
+    // Sample the LIVE physics state up front so the reaction busy-guard isn't stale for the
+    // first interval tick: the loop's snapshot initialises to 'on_floor' but the real start
+    // state is 'falling'. getPhysicsState() returns the live state, not the lagging snapshot.
+    physicsState = loop.getPhysicsState();
 
     const spriteInterval = setInterval(() => {
       physicsSprite = loop.spriteName;
-      physicsState = loop.physicsState;
+      physicsState = loop.getPhysicsState();
     }, 30);
 
     let disposed = false;
@@ -170,13 +174,18 @@
     };
   });
 
-  // DEV-only synthetic emitter for manual testing without macOS input capture.
-  // Stripped from production builds by the `import.meta.env.DEV` guard.
-  if (import.meta.env.DEV) {
-    (
-      window as unknown as { __pawbaeEmitInput?: (kind: 'keyboard' | 'mouse') => void }
-    ).__pawbaeEmitInput = (kind) => handleUserInput({ kind, count: 1, at: Date.now() });
-  }
+  // DEV-only synthetic emitter for manual testing without macOS input capture. Registered in
+  // an effect so it is removed on unmount (no stale closure retained), and stripped from
+  // production builds by the `import.meta.env.DEV` guard.
+  $effect(() => {
+    if (!import.meta.env.DEV) return;
+    const w = window as unknown as { __pawbaeEmitInput?: (kind: 'keyboard' | 'mouse') => void };
+    const emit = (kind: 'keyboard' | 'mouse') => handleUserInput({ kind, count: 1, at: Date.now() });
+    w.__pawbaeEmitInput = emit;
+    return () => {
+      if (w.__pawbaeEmitInput === emit) w.__pawbaeEmitInput = undefined;
+    };
+  });
 
   function handleClick() {
     if (settingsStore.appMode === 'pet') {

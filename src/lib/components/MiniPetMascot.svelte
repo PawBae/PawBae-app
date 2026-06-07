@@ -83,14 +83,15 @@
     if (!useExternalHover) internalHover = false;
   }
 
-  // The input-reaction overlay (P1-B) outranks the hover-jump; the MascotView busy-guard
-  // ensures they are never active at once. Feature-detect the art so pets without reaction
-  // rows degrade to the base state (mirrors the `hasJump` guard above).
+  // Render priority: hover-jump > input reaction (P1-B) > base state. Hover-jump outranks the
+  // reaction so an active jump is never interrupted even when hover is tracked internally
+  // (Windows), where the MascotView guard can't observe it. Feature-detect the reaction art so
+  // pets without those rows fall through to the base state (mirrors the `hasJump` guard above).
   const hasReaction = $derived(
     reactionSprite != null && pet?.animations?.[reactionSprite] != null
   );
   const renderState: CodexPetState = $derived(
-    hasReaction ? (reactionSprite as CodexPetState) : showJump ? 'jumping' : baseState
+    showJump ? 'jumping' : hasReaction ? (reactionSprite as CodexPetState) : baseState
   );
 </script>
 
