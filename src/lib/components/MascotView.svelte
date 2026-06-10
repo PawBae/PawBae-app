@@ -157,7 +157,13 @@
   }
 
   // One-shot pet reaction to batched global input (Tauri "user-input" from P1-A; macOS-only).
+  // Capture is OFF by default in the backend (privacy) — opt in for this component's
+  // lifetime, mirroring the set_efficiency_hover_tracking lifecycle above. Safe everywhere:
+  // non-macOS gets a no-op listener and start/stop are idempotent.
   $effect(() => {
+    // TODO(settings phase): surface the returned ListenerStatus (e.g. keyboard off when
+    // macOS Accessibility is denied) in the settings UI instead of discarding it.
+    invoke('set_input_tracking', { active: true }).catch(() => {});
     let disposed = false;
     let unlisten: (() => void) | null = null;
     listen<UserInputEvent>('user-input', (e) => handleUserInput(e.payload)).then((u) => {
@@ -167,6 +173,7 @@
     return () => {
       disposed = true;
       unlisten?.();
+      invoke('set_input_tracking', { active: false }).catch(() => {});
       if (reactionTimer) {
         clearTimeout(reactionTimer);
         reactionTimer = null;
