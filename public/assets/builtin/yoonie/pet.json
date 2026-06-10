@@ -37,7 +37,9 @@
     "asking-user":          { "row": 17, "frames": 8, "fps": 6,  "loopRestMs": 700 },
     "done-success":         { "row": 6,  "frames": 6, "fps": 8 },
     "done-fail":            { "row": 18, "frames": 8, "fps": 8 },
-    "waiting":              { "row": 5, "frames": 8, "fps": 8, "loopRestMs": 1500 }
+    "waiting":              { "row": 5, "frames": 8, "fps": 8, "loopRestMs": 1500 },
+    "react-keyboard":       { "row": 14, "frames": 4, "fps": 14 },
+    "react-mouse":          { "row": 7,  "frames": 5, "fps": 14 }
   },
   "stateMap": {
     "idle":       "idle",

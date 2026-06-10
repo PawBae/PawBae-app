@@ -5,9 +5,17 @@
   import { petStore } from '../stores/pet.svelte';
   import { settingsStore } from '../stores/settings.svelte';
   import { windowStore } from '../stores/window.svelte';
+  import type { UserInputEvent } from '../types';
   import type { CodexPet, CodexPetState } from '../utils/codex-pet';
   import { petStateToCodexState } from '../utils/codex-pet';
+  import type { PhysicsState } from '../utils/pet-physics';
   import { createPhysicsLoop } from '../utils/pet-physics';
+  import {
+    endReaction,
+    initialReactionState,
+    reactionSpriteFor,
+    requestReaction,
+  } from '../utils/reaction-machine';
   import MiniPetMascot from './MiniPetMascot.svelte';
   import VoiceBubble from './VoiceBubble.svelte';
 
@@ -36,10 +44,18 @@
   const physicsEnabled = $derived(!!pet?.physics?.enabled);
 
   let physicsSprite = $state<string | null>(null);
+  let physicsState = $state<PhysicsState | null>(null); // null while physics disabled
 
   const spriteState = $derived<CodexPetState>(
     physicsSprite ?? petStateToCodexState(pet, sourceState)
   );
+
+  // One-shot input-reaction overlay (P1-B). The pure machine lives in reaction-machine.ts;
+  // this component owns the listener, the busy-guard, and the revert timer.
+  const REACTION_MS = 350; // beat duration ≈ one play of the reaction row (tune in acceptance)
+  let reactionSprite = $state<CodexPetState | null>(null);
+  const reaction = initialReactionState();
+  let reactionTimer: ReturnType<typeof setTimeout> | null = null;
 
   const mascotSize = $derived(Math.round(60 * settingsStore.mascotScale));
 
@@ -78,9 +94,14 @@
       enabled: true,
     });
     loop.start();
+    // Sample the LIVE physics state up front so the reaction busy-guard isn't stale for the
+    // first interval tick: the loop's snapshot initialises to 'on_floor' but the real start
+    // state is 'falling'. getPhysicsState() returns the live state, not the lagging snapshot.
+    physicsState = loop.getPhysicsState();
 
     const spriteInterval = setInterval(() => {
       physicsSprite = loop.spriteName;
+      physicsState = loop.getPhysicsState();
     }, 30);
 
     let disposed = false;
@@ -109,9 +130,67 @@
       loop.stop();
       clearInterval(spriteInterval);
       physicsSprite = null;
+      physicsState = null;
       for (const fn of listenerCleanups) fn();
       invoke('set_stroll_mode', { enabled: false }).catch(() => {});
       invoke('set_throw_tracking', { enabled: false }).catch(() => {});
+    };
+  });
+
+  function handleUserInput(ev: UserInputEvent) {
+    // Suppress a reaction while the pet is being manipulated or otherwise busy, so it can
+    // never interrupt drag/throw/hover/headpat or the settings interaction. Guard on the
+    // discrete physics STATE (physicsSprite is always non-null once physics runs).
+    const busy =
+      (physicsState !== null && physicsState !== 'on_floor') || // drag/throw/fall/bounce/wall
+      windowStore.mascotHover || // hover-jump in flight
+      petStore.currentAction === 'headpat' || // headpat beat
+      windowStore.settingsOpen; // settings panel open
+    if (!requestReaction(reaction, ev, { busy })) return; // coalesced or guarded → drop
+    reactionSprite = reactionSpriteFor(reaction) as CodexPetState;
+    if (reactionTimer) clearTimeout(reactionTimer);
+    reactionTimer = setTimeout(() => {
+      endReaction(reaction);
+      reactionSprite = null;
+      reactionTimer = null;
+    }, REACTION_MS);
+  }
+
+  // One-shot pet reaction to batched global input (Tauri "user-input" from P1-A; macOS-only).
+  // Capture is OFF by default in the backend (privacy) — opt in for this component's
+  // lifetime, mirroring the set_efficiency_hover_tracking lifecycle above. Safe everywhere:
+  // non-macOS gets a no-op listener and start/stop are idempotent.
+  $effect(() => {
+    // TODO(settings phase): surface the returned ListenerStatus (e.g. keyboard off when
+    // macOS Accessibility is denied) in the settings UI instead of discarding it.
+    invoke('set_input_tracking', { active: true }).catch(() => {});
+    let disposed = false;
+    let unlisten: (() => void) | null = null;
+    listen<UserInputEvent>('user-input', (e) => handleUserInput(e.payload)).then((u) => {
+      if (disposed) u();
+      else unlisten = u;
+    });
+    return () => {
+      disposed = true;
+      unlisten?.();
+      invoke('set_input_tracking', { active: false }).catch(() => {});
+      if (reactionTimer) {
+        clearTimeout(reactionTimer);
+        reactionTimer = null;
+      }
+    };
+  });
+
+  // DEV-only synthetic emitter for manual testing without macOS input capture. Registered in
+  // an effect so it is removed on unmount (no stale closure retained), and stripped from
+  // production builds by the `import.meta.env.DEV` guard.
+  $effect(() => {
+    if (!import.meta.env.DEV) return;
+    const w = window as unknown as { __pawbaeEmitInput?: (kind: 'keyboard' | 'mouse') => void };
+    const emit = (kind: 'keyboard' | 'mouse') => handleUserInput({ kind, count: 1, at: Date.now() });
+    w.__pawbaeEmitInput = emit;
+    return () => {
+      if (w.__pawbaeEmitInput === emit) w.__pawbaeEmitInput = undefined;
     };
   });
 
@@ -143,6 +222,7 @@
       externalHover={windowStore.mascotHover}
       useExternalHover={!isWindows}
       suppressHover={windowStore.moveMode}
+      {reactionSprite}
     />
   {/if}
 

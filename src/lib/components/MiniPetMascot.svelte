@@ -10,6 +10,7 @@
     externalHover?: boolean;
     useExternalHover?: boolean;
     suppressHover?: boolean;
+    reactionSprite?: CodexPetState | null;
     class?: string;
     style?: string;
   }
@@ -22,6 +23,7 @@
     externalHover = false,
     useExternalHover = false,
     suppressHover = false,
+    reactionSprite = null,
     class: className = '',
     style = '',
   }: MiniPetMascotProps = $props();
@@ -81,7 +83,16 @@
     if (!useExternalHover) internalHover = false;
   }
 
-  const renderState: CodexPetState = $derived(showJump ? 'jumping' : baseState);
+  // Render priority: hover-jump > input reaction (P1-B) > base state. Hover-jump outranks the
+  // reaction so an active jump is never interrupted even when hover is tracked internally
+  // (Windows), where the MascotView guard can't observe it. Feature-detect the reaction art so
+  // pets without those rows fall through to the base state (mirrors the `hasJump` guard above).
+  const hasReaction = $derived(
+    reactionSprite != null && pet?.animations?.[reactionSprite] != null
+  );
+  const renderState: CodexPetState = $derived(
+    showJump ? 'jumping' : hasReaction ? (reactionSprite as CodexPetState) : baseState
+  );
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
