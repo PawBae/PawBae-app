@@ -352,7 +352,6 @@ class PetStore {
     await store.set('lifetime_input_count', snap.lifetimeInputCount);
     await store.set('last_input_milestone', snap.lastAwardedMilestone);
     await store.save();
-    this.inputCountDirty = false;
   }
 
   private startFlushTimer() {
@@ -361,6 +360,8 @@ class PetStore {
       if (this.inputCountDirty) this.persistRewards();
       // Self-heal: re-assert input tracking (idempotent no-op while already active) in
       // case another owner's lifecycle disabled it mid-session.
+      // TODO(settings phase): gate this on the input-capture setting once a user-facing
+      // privacy toggle exists — a blind re-assert must never override an explicit OFF.
       invoke('set_input_tracking', { active: true }).catch(() => {});
     }, PET_PERSIST_FLUSH_MS);
   }
