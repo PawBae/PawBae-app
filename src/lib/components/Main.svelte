@@ -61,6 +61,14 @@
       openSettings();
     });
 
+    // Reward model (P1-C): hydrate persisted coins/ledger, then listen for agent
+    // completions and user input. App-wide on purpose — agent stops happen in coding
+    // mode while the coin balance shows in pet mode.
+    petStore.init().then((dispose) => {
+      if (disposed) dispose();
+      else cleanups.push(dispose);
+    });
+
     return () => {
       disposed = true;
       for (const fn of cleanups) fn();

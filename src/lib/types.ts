@@ -127,6 +127,53 @@ export interface ClaudeSession {
 
 export type ClaudeStatsSource = 'cc' | 'codex' | 'cursor';
 
+// Wire payload of the Tauri "claude-task-complete" event
+// (src-tauri/src/commands/hook/event_process.rs — camelCase keys). Rust pre-filters:
+// it emits only on a genuine main-agent completion (Stop with no pending sub-agents,
+// not ESC-interrupted, not compacting) or a permission-wait (`waiting: true`).
+// Reward rule: a completion is `waiting === false`.
+export interface ClaudeTaskCompleteEvent {
+  sessionId: string;
+  waiting: boolean;
+  source: ClaudeStatsSource;
+}
+
+// ── P1-C reward model ──────────────────────────────────────────────
+
+// Where a coin delta came from. Negative deltas (feed) flow through the same pipeline.
+export type CoinSource =
+  | 'agent_stop'
+  | 'focus_minutes'
+  | 'input_milestone'
+  | 'pomodoro'
+  | 'daily_gift'
+  | 'feed';
+
+// One reward-ledger entry. `amount` is the EFFECTIVE delta after the clamp-at-zero
+// (positive = earned, negative = spent); zero-effect awards are never ledgered.
+export interface CoinAward {
+  source: CoinSource;
+  amount: number;
+  at: number;
+  reason?: string;
+  sessionId?: string;
+}
+
+// Lifetime per-source aggregate, kept even after old `recent` entries are trimmed.
+export interface CoinSourceTotals {
+  earned: number;
+  spent: number;
+  count: number;
+}
+
+// Persisted shape of the reward ledger: totals + capped recent entries + milestone progress.
+export interface RewardLedgerSnapshot {
+  totals: Record<CoinSource, CoinSourceTotals>;
+  recent: CoinAward[];
+  lifetimeInputCount: number;
+  lastAwardedMilestone: number;
+}
+
 export interface HealthResult {
   agents: AgentHealth[];
   gatewayAlive: boolean;
