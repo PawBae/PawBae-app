@@ -6,6 +6,7 @@ import {
   applyAward,
   applyUserInput,
   awardAgentStop,
+  clearFocusStreak,
   FOCUS_BLOCK_COINS,
   FOCUS_BLOCK_MS,
   FOCUS_GAP_RESET_MS,
@@ -409,6 +410,19 @@ describe('trackFocusInput', () => {
     const tooEarly = runFocus(s, 0, everyMinute(resume, resume + 9 * MINUTE));
     expect(tooEarly.awards).toEqual([]); // old 9 minutes must not count
     const paid = runFocus(s, 0, [resume + FOCUS_BLOCK_MS]);
+    expect(paid.awards).toHaveLength(1);
+  });
+
+  it('clearFocusStreak drops the streak so a no-input pomodoro cannot carry it over', () => {
+    const s = initialRewardState();
+    runFocus(s, 0, everyMinute(T0, T0 + 9 * MINUTE)); // 9-minute streak built
+    clearFocusStreak(s); // pomodoro starts; no input arrives while it runs
+    expect(s.focus).toEqual({ streakStartAt: null, lastInputAt: null });
+    // Input resumes 30s later — inside the old 90s gap window, but the streak is gone.
+    const resume = T0 + 9 * MINUTE + 30_000;
+    const tooEarly = runFocus(s, 0, everyMinute(resume, resume + 9 * MINUTE));
+    expect(tooEarly.awards).toEqual([]); // pre-pomodoro minutes must not count
+    const paid = runFocus(s, 0, [resume + FOCUS_BLOCK_MS]); // 10 fresh minutes
     expect(paid.awards).toHaveLength(1);
   });
 

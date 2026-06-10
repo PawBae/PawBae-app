@@ -202,6 +202,17 @@ export function trackInputCount(
 }
 
 /**
+ * Drop the current focus streak. Called eagerly when a pomodoro STARTS: pomodoro time
+ * must never count toward focus_minutes, and waiting for the next input event to clear
+ * the streak lazily would let a short/canceled pomodoro with no input during it carry
+ * the old streak across the gap window (double-count).
+ */
+export function clearFocusStreak(s: MutableRewardState): void {
+  s.focus.streakStartAt = null;
+  s.focus.lastInputAt = null;
+}
+
+/**
  * Focus streak: a run of input events with no gap over FOCUS_GAP_RESET_MS. Every full
  * FOCUS_BLOCK_MS of streak pays FOCUS_BLOCK_COINS and advances the baseline by exactly
  * one block (the remainder carries — no drift). While a pomodoro is active the streak is
@@ -219,8 +230,7 @@ export function trackFocusInput(
   }
   const focus = s.focus;
   if (ctx.pomodoroActive) {
-    focus.streakStartAt = null;
-    focus.lastInputAt = null;
+    clearFocusStreak(s);
     return { awards: [], coinsAfter: coinsBefore };
   }
   if (focus.lastInputAt !== null && ev.at < focus.lastInputAt) {

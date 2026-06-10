@@ -16,6 +16,7 @@ import {
   applyAward,
   applyUserInput,
   awardAgentStop,
+  clearFocusStreak,
   DAILY_GIFT_COINS,
   FEED_COST_COINS,
   initialRewardState,
@@ -157,6 +158,10 @@ class PetStore {
       startedAt: Date.now(),
     };
     this.petData = { ...this.petData, pomodoroCoins: 0 };
+    // Drop any in-flight focus streak NOW: a short/canceled pomodoro with no input
+    // during it would otherwise carry the old streak across the 90s gap window and
+    // double-count this span with pomodoro coins (PR #15 review).
+    clearFocusStreak(this.rewards);
     this.currentAction = 'work';
 
     this.pomodoroInterval = setInterval(() => {
@@ -325,10 +330,18 @@ class PetStore {
     // order and leave the file with the older snapshot.
     this.saveInFlight = this.saveInFlight
       .then(() => this.savePetState())
-      .catch((e) => console.warn('[pet] persist failed:', e));
+      .catch((e) => {
+        // Re-mark dirty so the 60s timer retries the counter after a failed write.
+        this.inputCountDirty = true;
+        console.warn('[pet] persist failed:', e);
+      });
   }
 
   private async savePetState() {
+    // Clear the dirty flag BEFORE snapshotting: input landing while this save is in
+    // flight re-marks it, so the 60s timer flushes the newer count instead of the flag
+    // being wiped by this save's completion (PR #15 review).
+    this.inputCountDirty = false;
     const store = await this.getStore();
     const snap = snapshotRewardState(this.rewards);
     await store.set('schema_version', PET_STATE_SCHEMA_VERSION);
