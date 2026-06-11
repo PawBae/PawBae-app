@@ -25,6 +25,7 @@ class SettingsStore {
   miniPetId = $state<string>('yoonie');
   petQueue = $state.raw<string[]>([]);
   skippedVersion = $state('');
+  inputTrackingEnabled = $state(true);
   ocConnections = $state.raw<OcConnection[]>([{ id: 'local', type: 'local' }]);
 
   private storeInstance: Awaited<ReturnType<typeof load>> | null = null;
@@ -62,6 +63,7 @@ class SettingsStore {
     this.miniPetId = ((await store.get('mini_pet_id')) as string) || 'yoonie';
     this.petQueue = ((await store.get('pet_queue')) as string[]) || [];
     this.skippedVersion = ((await store.get('skipped_version')) as string) || '';
+    this.inputTrackingEnabled = ((await store.get('input_tracking_enabled')) as boolean) ?? true;
     this.ocConnections = ((await store.get('oc_connections')) as OcConnection[]) || [
       { id: 'local', type: 'local' },
     ];
@@ -186,6 +188,11 @@ class SettingsStore {
   async setSkippedVersion(v: string) {
     this.skippedVersion = v;
     await this.saveSetting('skipped_version', v);
+  }
+
+  async setInputTrackingEnabled(v: boolean) {
+    this.inputTrackingEnabled = v;
+    await this.saveSetting('input_tracking_enabled', v);
   }
 
   async setOcConnections(v: OcConnection[]) {

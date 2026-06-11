@@ -7,6 +7,7 @@
   import DisplaySection from './DisplaySection.svelte';
   import IntegrationToggles from './IntegrationToggles.svelte';
   import PetSettingsSection from './PetSettingsSection.svelte';
+  import PrivacySection from './PrivacySection.svelte';
   import SoundSection from './SoundSection.svelte';
 
   let {
@@ -41,6 +42,11 @@
           <IntegrationToggles {isWindows} {open} />
           <DisplaySection {isWindows} />
           <SoundSection {isWindows} />
+        {/if}
+
+        {#if !isWindows}
+          <!-- Global input sensing is macOS-only (Phase 1); hide where it can't run. -->
+          <PrivacySection {open} />
         {/if}
 
         <AboutSection {open} />

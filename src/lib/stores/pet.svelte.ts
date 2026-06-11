@@ -25,6 +25,7 @@ import {
   sanitizeStoredCount,
   snapshotRewardState,
 } from '../utils/rewards';
+import { settingsStore } from './settings.svelte';
 
 export const HUNGER_MAX = 100;
 export const HUNGER_INIT = 100;
@@ -368,10 +369,11 @@ class PetStore {
     this.flushTimer = setInterval(() => {
       if (this.inputCountDirty) this.persistRewards();
       // Self-heal: re-assert input tracking (idempotent no-op while already active) in
-      // case another owner's lifecycle disabled it mid-session.
-      // TODO(settings phase): gate this on the input-capture setting once a user-facing
-      // privacy toggle exists — a blind re-assert must never override an explicit OFF.
-      tryInvoke('set_input_tracking', { active: true });
+      // case another owner's lifecycle disabled it mid-session. Gated on the privacy
+      // toggle — a re-assert must never override an explicit user OFF.
+      if (settingsStore.inputTrackingEnabled) {
+        tryInvoke('set_input_tracking', { active: true });
+      }
     }, PET_PERSIST_FLUSH_MS);
   }
 
