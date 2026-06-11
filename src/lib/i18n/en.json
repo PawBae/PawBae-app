@@ -157,6 +157,7 @@
     "recommended": "Recommended"
   },
   "pet": {
+    "feed": "Feed",
     "dailyGift": "Daily Gift",
     "claimed": "Claimed",
     "actions": "Actions",

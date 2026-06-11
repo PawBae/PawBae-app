@@ -202,6 +202,16 @@
     }
   }
 
+  function handleContextMenu(e: MouseEvent) {
+    e.preventDefault();
+    // Pet mode reserves left-click for headpats, so the stats/feed panel opens on
+    // right-click instead (the desktop-pet convention). Coding mode keeps
+    // right-click inert; its panel already toggles on left-click.
+    if (settingsStore.appMode === 'pet') {
+      windowStore.toggle();
+    }
+  }
+
 </script>
 
 <!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -210,7 +220,7 @@
   class="mascot-view"
   data-tauri-drag-region={windowStore.settingsOpen ? undefined : ''}
   onclick={handleClick}
-  oncontextmenu={(e) => e.preventDefault()}
+  oncontextmenu={handleContextMenu}
   style="width: {mascotSize}px; height: {mascotSize}px;"
 >
   {#if pet}
