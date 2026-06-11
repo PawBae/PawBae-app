@@ -3,6 +3,7 @@
   import { listen } from '@tauri-apps/api/event';
   import { _, locale } from 'svelte-i18n';
   import { settingsStore } from '../../stores/settings.svelte';
+  import { tryInvoke } from '../../utils/invoke';
 
   let { open }: { open: boolean } = $props();
 
@@ -120,7 +121,7 @@
   async function changeLanguage(lng: string) {
     locale.set(lng);
     await settingsStore.setLanguage(lng);
-    invoke('update_tray_language', { lang: lng }).catch(() => {});
+    tryInvoke('update_tray_language', { lang: lng });
   }
 </script>
 
@@ -202,7 +203,7 @@
 
 <!-- Exit -->
 <section class="section exit-section">
-  <button class="exit-btn" onclick={() => invoke('exit_app').catch(() => {})}>
+  <button class="exit-btn" onclick={() => tryInvoke('exit_app')}>
     {$_('settings.exitApp')}
   </button>
 </section>

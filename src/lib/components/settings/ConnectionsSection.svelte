@@ -4,6 +4,7 @@
   import { agentStore } from '../../stores/agents.svelte';
   import { settingsStore } from '../../stores/settings.svelte';
   import type { OcConnection } from '../../types';
+  import { tryInvoke } from '../../utils/invoke';
 
   let { open }: { open: boolean } = $props();
 
@@ -34,7 +35,7 @@
   function deleteConnection(idx: number) {
     const conn = connections[idx];
     if (conn.type === 'remote' && conn.host && conn.user) {
-      invoke('close_ssh', { sshHost: conn.host, sshUser: conn.user }).catch(() => {});
+      tryInvoke('close_ssh', { sshHost: conn.host, sshUser: conn.user });
     }
     connections = connections.filter((_, i) => i !== idx);
     syncConnections([...connections]);
@@ -52,7 +53,7 @@
     testResult = null;
     try {
       if (conn.type === 'remote') {
-        await invoke('reset_ssh', { sshHost: conn.host, sshUser: conn.user }).catch(() => {});
+        await tryInvoke('reset_ssh', { sshHost: conn.host, sshUser: conn.user });
         const raw: unknown = await invoke('get_agents', { mode: 'remote', sshHost: conn.host, sshUser: conn.user });
         const agents = Array.isArray(raw) ? raw : [];
         let keyInfo = '';
