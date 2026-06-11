@@ -69,7 +69,9 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - uses: tauri-apps/tauri-action@v1
+      # NOTE: the published major tag is v0 (currently v0.6.x) — there is no v1
+      # tag even though upstream README examples show one.
+      - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # macOS signing + notarization — uncomment once the Apple Developer
