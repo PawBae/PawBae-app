@@ -16,8 +16,8 @@ use crate::platform::windows::hide_window_cmd;
 ///     "version": "1.6.0",
 ///     "notes": "...",
 ///     "platforms": {
-///       "macos":   { "url": "https://github.com/.../pawbae-app_0.1.0_aarch64.dmg" },
-///       "windows": { "url": "https://github.com/.../pawbae-app_0.1.0_x64-setup.exe" }
+///       "macos":   { "url": "https://github.com/.../PawBae_0.1.0_aarch64.dmg" },
+///       "windows": { "url": "https://github.com/.../PawBae_0.1.0_x64-setup.exe" }
 ///     }
 ///   }
 ///
@@ -313,7 +313,7 @@ pub async fn run_update(app: tauri::AppHandle, dmg_url: String) -> Result<(), St
             r#"#!/bin/bash
 set -euo pipefail
 PID="{pid}"
-APP_BUNDLE="/Applications/pawbae-app.app"
+APP_BUNDLE="/Applications/PawBae.app"
 DMG_PATH="{dmg_path}"
 LOG_PATH="{log_path}"
 MOUNT_POINT=""
@@ -443,7 +443,7 @@ if ($installerPath.EndsWith('.msi')) {{
         'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*'
     )) {{
         $entry = Get-ItemProperty $regPath -ErrorAction SilentlyContinue |
-            Where-Object {{ $_.DisplayName -eq 'pawbae-app' }} | Select-Object -First 1
+            Where-Object {{ $_.DisplayName -eq 'PawBae' }} | Select-Object -First 1
         if ($entry -and $entry.InstallLocation) {{
             $installDir = $entry.InstallLocation.Trim('"')
             break
@@ -462,17 +462,17 @@ if ($installerPath.EndsWith('.msi')) {{
 
 Log "Launching updated app"
 # Find install location from registry (user may have chosen a custom path).
-# The executable is named pawbae-app.exe (productName config produces this binary name).
+# The executable is named PawBae.exe (productName config produces this binary name).
 $appPath = $null
 foreach ($regPath in @(
     'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*',
     'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*'
 )) {{
     $entry = Get-ItemProperty $regPath -ErrorAction SilentlyContinue |
-        Where-Object {{ $_.DisplayName -eq 'pawbae-app' }} | Select-Object -First 1
+        Where-Object {{ $_.DisplayName -eq 'PawBae' }} | Select-Object -First 1
     if ($entry -and $entry.InstallLocation) {{
         $loc = $entry.InstallLocation.Trim('"')
-        $candidate = Join-Path $loc 'pawbae-app.exe'
+        $candidate = Join-Path $loc 'PawBae.exe'
         if (Test-Path $candidate) {{
             $appPath = $candidate
             break
@@ -481,8 +481,8 @@ foreach ($regPath in @(
 }}
 if (-not $appPath) {{
     # Fallback: check common locations
-    foreach ($dir in @("$env:LOCALAPPDATA\pawbae-app", "$env:ProgramFiles\pawbae-app", "H:\pawbae-app")) {{
-        $candidate = Join-Path $dir 'pawbae-app.exe'
+    foreach ($dir in @("$env:LOCALAPPDATA\PawBae", "$env:ProgramFiles\PawBae", "H:\PawBae")) {{
+        $candidate = Join-Path $dir 'PawBae.exe'
         if (Test-Path $candidate) {{ $appPath = $candidate; break }}
     }}
 }}
@@ -490,7 +490,7 @@ if ($appPath) {{
     Log "Relaunching from $appPath"
     Start-Process $appPath
 }} else {{
-    Log "Warning: could not find pawbae-app.exe to relaunch"
+    Log "Warning: could not find PawBae.exe to relaunch"
 }}
 "#,
             pid = std::process::id(),

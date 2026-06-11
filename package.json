@@ -1,7 +1,7 @@
 {
   "name": "pawbae-app",
   "version": "0.1.0",
-  "description": "",
+  "description": "An AI-powered desktop pet that monitors your coding agents in real time.",
   "type": "module",
   "scripts": {
     "dev": "vite dev",

@@ -38,11 +38,11 @@ pub(crate) fn get_frontmost_app_name() -> String {
 }
 
 pub(crate) fn is_cursor_frontmost_app(name: &str) -> bool {
-    name == "Cursor" || name == "pawbae-app"
+    name == "Cursor" || name == "PawBae"
 }
 
 pub(crate) fn is_codex_frontmost_app(name: &str) -> bool {
-    if name == "pawbae-app" || name == "Code" || name == "Visual Studio Code" {
+    if name == "PawBae" || name == "Code" || name == "Visual Studio Code" {
         return true;
     }
     let lowered = name.to_ascii_lowercase();
@@ -57,9 +57,9 @@ pub(crate) fn is_codex_host_terminal(name: &str) -> bool {
 /// `host_terminal` comes from process-chain detection (e.g. "Terminal",
 /// "iTerm2", "Warp") while `frontmost` is the short app name from
 /// NSWorkspace (e.g. "Terminal", "iTerm2", "Warp").
-/// Also handles "pawbae-app" (our own panel can steal focus).
+/// Also handles "PawBae" (our own panel can steal focus).
 pub(crate) fn frontmost_matches_host_terminal(frontmost: &str, host_terminal: &str) -> bool {
-    if frontmost == "pawbae-app" {
+    if frontmost == "PawBae" {
         return true;
     }
     if frontmost.eq_ignore_ascii_case(host_terminal) {
