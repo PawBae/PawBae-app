@@ -8,6 +8,21 @@ use std::sync::{Arc, Mutex};
 use crate::input::aggregator::InputAggregator;
 use crate::input::ListenerStatus;
 
+/// Lock a `Mutex`, recovering from poisoning instead of panicking.
+///
+/// Poisoning only records that some thread panicked while holding the guard —
+/// the data itself is still there. Every mutex in this app protects plain
+/// state (session maps, counters, caches) that a panicked writer leaves
+/// structurally valid, so inheriting the value beats propagating the panic
+/// into every hook event and watcher thread that follows: one panic must not
+/// leave the pet permanently stuck in a stale state.
+pub(crate) fn lock_or_recover<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(|poisoned| {
+        log::warn!("recovering a poisoned mutex (a thread panicked while holding it)");
+        poisoned.into_inner()
+    })
+}
+
 pub(crate) struct SshBackoffState {
     pub(crate) fail_count: u32,
     pub(crate) fail_epoch: u64,

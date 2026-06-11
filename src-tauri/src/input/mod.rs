@@ -21,7 +21,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use serde::Serialize;
 use tauri::{Emitter, Manager};
 
-use crate::state::InputState;
+use crate::state::{lock_or_recover, InputState};
 
 /// Flush cadence: batch input bursts into one event per kind per tick. 80 ms
 /// sits inside the 50–100 ms window agreed with the frontend, so high-frequency
@@ -107,10 +107,7 @@ fn input_flush_loop(app: tauri::AppHandle, state: Arc<InputState>, generation: u
         // `active` under it. stop sets active=false then takes this same gate
         // before returning, so once stop has returned no `user-input` can fire —
         // a drained-but-unsent batch is dropped here instead.
-        let _gate = state
-            .emit_gate
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _gate = lock_or_recover(&state.emit_gate);
         if !active_for_generation(&state, generation) {
             break;
         }
@@ -160,10 +157,7 @@ pub(crate) fn stop_tracking(app: &tauri::AppHandle) -> ListenerStatus {
     // under the same gate, this makes "off" a hard boundary: once we return, no
     // further `user-input` can fire and no stale pre-stop counts survive a restart.
     {
-        let _gate = state
-            .emit_gate
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _gate = lock_or_recover(&state.emit_gate);
         if let Ok(mut agg) = state.aggregator.lock() {
             agg.clear();
         }

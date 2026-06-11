@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use tauri::Manager;
 
 use crate::commands::hook::process_claude_event;
-use crate::state::{ClaudeSession, ClaudeState, PendingPermissions};
+use crate::state::{lock_or_recover, ClaudeSession, ClaudeState, PendingPermissions};
 
 /// Spawn the Claude IPC socket server and (on non-Windows) the Cursor socket server.
 pub(crate) fn init(app: &tauri::App) {
@@ -30,7 +30,7 @@ pub async fn resolve_claude_permission(
     state: tauri::State<'_, ClaudeState>,
 ) -> Result<(), String> {
     let tool_name = {
-        let sessions = state.sessions.lock().map_err(|e| e.to_string())?;
+        let sessions = lock_or_recover(&state.sessions);
         sessions.get(&session_id).and_then(|s| s.tool.clone())
     };
 
@@ -97,10 +97,7 @@ pub async fn resolve_claude_permission(
     };
 
     let tx = {
-        let mut map = state
-            .pending_permissions
-            .lock()
-            .map_err(|e| e.to_string())?;
+        let mut map = lock_or_recover(&state.pending_permissions);
         map.remove(&session_id)
     };
 
@@ -236,7 +233,7 @@ pub(crate) fn start_claude_socket_server(
                                 if hook_event == "PermissionRequest" {
                                     let (tx, rx) = std::sync::mpsc::channel::<String>();
                                     {
-                                        let mut map = pending.lock().unwrap();
+                                        let mut map = lock_or_recover(&pending);
                                         map.insert(session_id.clone(), tx);
                                     }
                                     log::info!(
@@ -256,7 +253,7 @@ pub(crate) fn start_claude_socket_server(
                                             );
                                         }
                                     }
-                                    let mut map = pending.lock().unwrap();
+                                    let mut map = lock_or_recover(&pending);
                                     map.remove(&session_id);
                                 }
                             }
@@ -336,7 +333,7 @@ pub(crate) fn start_claude_socket_server(
                                 if hook_event == "PermissionRequest" {
                                     let (tx, rx) = std::sync::mpsc::channel::<String>();
                                     {
-                                        let mut map = pending.lock().unwrap();
+                                        let mut map = lock_or_recover(&pending);
                                         map.insert(session_id.clone(), tx);
                                     }
                                     s.set_read_timeout(None).ok();
@@ -352,7 +349,7 @@ pub(crate) fn start_claude_socket_server(
                                             );
                                         }
                                     }
-                                    let mut map = pending.lock().unwrap();
+                                    let mut map = lock_or_recover(&pending);
                                     map.remove(&session_id);
                                 }
                             }

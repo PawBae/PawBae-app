@@ -7,7 +7,7 @@ use std::sync::Arc;
 use tauri::Manager;
 
 use crate::ssh_core::{close_ssh_master, ssh_backoff_reset};
-use crate::state::SshState;
+use crate::state::{lock_or_recover, SshState};
 
 #[cfg(target_os = "windows")]
 use crate::platform::windows::win_ssh_mux;
@@ -20,7 +20,7 @@ pub fn get_ssh_key_info(
 ) -> Option<String> {
     let ssh = app.state::<Arc<SshState>>();
     let key = format!("{}@{}", ssh_user, ssh_host);
-    let guard = ssh.key_used.lock().unwrap();
+    let guard = lock_or_recover(&ssh.key_used);
     guard.get(&key).cloned()
 }
 
@@ -30,7 +30,7 @@ pub async fn reset_ssh(app: tauri::AppHandle, ssh_host: String, ssh_user: String
     let host_key = format!("{}@{}", ssh_user, ssh_host);
     ssh_backoff_reset(&ssh, &host_key);
     let _ = close_ssh_master(&ssh, &ssh_host, &ssh_user).await;
-    ssh.key_used.lock().unwrap().remove(&host_key);
+    lock_or_recover(&ssh.key_used).remove(&host_key);
     log::info!(
         "[reset_ssh] cleared backoff, killed master, and reset for {}",
         host_key
@@ -65,7 +65,7 @@ pub async fn close_ssh(
         {
             win_ssh_mux::kill_all().await;
         }
-        ssh.backoff.lock().unwrap().clear();
+        lock_or_recover(&ssh.backoff).clear();
         return Ok(());
     }
     close_ssh_master(&ssh, &sh, &su).await

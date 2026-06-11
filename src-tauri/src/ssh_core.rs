@@ -6,7 +6,7 @@ use std::time::SystemTime;
 
 use crate::agent_gateway::check_agent_active_from_lines;
 use crate::app_init::home_dir_string;
-use crate::state::{SshBackoffState, SshState};
+use crate::state::{lock_or_recover, SshBackoffState, SshState};
 
 #[cfg(target_os = "windows")]
 use crate::platform::windows::{hide_window_tokio_cmd, win_ssh_mux};
@@ -19,7 +19,7 @@ fn unix_now() -> u64 {
 }
 
 fn ssh_backoff_remaining(ssh: &SshState, host_key: &str) -> Option<u64> {
-    let map = ssh.backoff.lock().unwrap();
+    let map = lock_or_recover(&ssh.backoff);
     let state = map.get(host_key)?;
     if state.fail_count == 0 {
         return None;
@@ -34,7 +34,7 @@ fn ssh_backoff_remaining(ssh: &SshState, host_key: &str) -> Option<u64> {
 }
 
 fn ssh_backoff_record_failure(ssh: &SshState, host_key: &str) {
-    let mut map = ssh.backoff.lock().unwrap();
+    let mut map = lock_or_recover(&ssh.backoff);
     let state = map.entry(host_key.to_string()).or_insert(SshBackoffState {
         fail_count: 0,
         fail_epoch: 0,
@@ -44,7 +44,7 @@ fn ssh_backoff_record_failure(ssh: &SshState, host_key: &str) {
 }
 
 pub(crate) fn ssh_backoff_reset(ssh: &SshState, host_key: &str) {
-    let mut map = ssh.backoff.lock().unwrap();
+    let mut map = lock_or_recover(&ssh.backoff);
     map.remove(host_key);
 }
 /// Get the SSH control socket path for a given host.
@@ -90,10 +90,7 @@ async fn ensure_ssh_master(ssh: &SshState, ssh_host: &str, ssh_user: &str) -> Re
     static LOCKS: OnceLock<Mutex<HashMap<String, std::sync::Arc<TokioMutex<()>>>>> =
         OnceLock::new();
     let lock = {
-        let mut locks = LOCKS
-            .get_or_init(|| Mutex::new(HashMap::new()))
-            .lock()
-            .unwrap();
+        let mut locks = lock_or_recover(LOCKS.get_or_init(|| Mutex::new(HashMap::new())));
         locks
             .entry(host_key.clone())
             .or_insert_with(|| Arc::new(TokioMutex::new(())))
@@ -160,10 +157,7 @@ async fn ensure_ssh_master(ssh: &SshState, ssh_host: &str, ssh_user: &str) -> Re
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             ssh_backoff_record_failure(ssh, &host_key);
-            let count = ssh
-                .backoff
-                .lock()
-                .unwrap()
+            let count = lock_or_recover(&ssh.backoff)
                 .get(&host_key)
                 .map(|s| s.fail_count)
                 .unwrap_or(0);
@@ -200,10 +194,7 @@ async fn ensure_ssh_master(ssh: &SshState, ssh_host: &str, ssh_user: &str) -> Re
         // prevents hitting server-side MaxStartups limits.
         if let Err(e) = win_ssh_mux::ensure(ssh_user, ssh_host).await {
             ssh_backoff_record_failure(ssh, &host_key);
-            let count = ssh
-                .backoff
-                .lock()
-                .unwrap()
+            let count = lock_or_recover(&ssh.backoff)
                 .get(&host_key)
                 .map(|s| s.fail_count)
                 .unwrap_or(0);
@@ -233,10 +224,7 @@ async fn ensure_ssh_master(ssh: &SshState, ssh_host: &str, ssh_user: &str) -> Re
                 let expanded = path.replace("~", &home_dir_string());
                 if std::path::Path::new(&expanded).exists() {
                     log::info!("[ssh] {} will use key: {}", host_key, expanded);
-                    ssh.key_used
-                        .lock()
-                        .unwrap()
-                        .insert(host_key.clone(), expanded);
+                    lock_or_recover(&ssh.key_used).insert(host_key.clone(), expanded);
                     break;
                 }
             }

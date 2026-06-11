@@ -314,7 +314,7 @@ fn _get_system_now_playing_is_playing_unused() -> Option<bool> {
                         .map(|d| d.as_secs_f64())
                         .unwrap_or(0.0);
                     let cache = LAST_ELAPSED_SAMPLE.get_or_init(|| Mutex::new(None));
-                    let mut guard = cache.lock().unwrap();
+                    let mut guard = crate::state::lock_or_recover(cache);
                     let inferred = if let Some((prev_elapsed, prev_ts)) = *guard {
                         let dt = (now_sec - prev_ts).max(0.001);
                         let de = elapsed - prev_elapsed;

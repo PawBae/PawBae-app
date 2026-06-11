@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use notify::{RecursiveMode, Watcher};
 use tauri::Emitter;
 
-use crate::state::{ClaudeSession, SESSION_WATCHERS};
+use crate::state::{lock_or_recover, ClaudeSession, SESSION_WATCHERS};
 
 /// Check if a JSONL file indicates an interrupted session
 fn check_interrupted(path: &std::path::Path) -> bool {
@@ -128,10 +128,10 @@ pub(crate) fn start_session_file_watcher(
                     std::thread::sleep(std::time::Duration::from_millis(WATCHER_DEBOUNCE_MS));
 
                     let new_size = std::fs::metadata(&path2).map(|m| m.len()).unwrap_or(0);
-                    let mut prev = last_size2.lock().unwrap();
+                    let mut prev = lock_or_recover(&last_size2);
                     *prev = new_size;
 
-                    let mut sessions_guard = sessions2.lock().unwrap();
+                    let mut sessions_guard = lock_or_recover(&sessions2);
                     let session = match sessions_guard.get_mut(&sid2) {
                         Some(s) => s,
                         None => return,
@@ -178,7 +178,7 @@ pub(crate) fn start_session_file_watcher(
                 session_id,
                 jsonl_path
             );
-            SESSION_WATCHERS.lock().unwrap().insert(session_id, watcher);
+            lock_or_recover(&SESSION_WATCHERS).insert(session_id, watcher);
         }
         Err(e) => {
             log::error!("Failed to create file watcher: {}", e);
@@ -187,7 +187,7 @@ pub(crate) fn start_session_file_watcher(
 }
 
 pub(crate) fn stop_session_file_watcher(session_id: &str) {
-    if let Some(_watcher) = SESSION_WATCHERS.lock().unwrap().remove(session_id) {
+    if let Some(_watcher) = lock_or_recover(&SESSION_WATCHERS).remove(session_id) {
         log::info!("Stopped file watcher for session {}", session_id);
         // Watcher is dropped, which stops it
     }

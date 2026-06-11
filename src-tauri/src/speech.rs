@@ -46,8 +46,7 @@ pub fn start_recording() -> Result<(), String> {
         return Ok(());
     }
     let tx = SPEECH_TX.get().ok_or("Speech thread not initialized")?;
-    tx.lock()
-        .unwrap()
+    crate::state::lock_or_recover(tx)
         .send(SpeechCommand::Start)
         .map_err(|e| e.to_string())
 }
@@ -57,8 +56,7 @@ pub fn stop_recording() -> Result<(), String> {
         return Ok(());
     }
     let tx = SPEECH_TX.get().ok_or("Speech thread not initialized")?;
-    tx.lock()
-        .unwrap()
+    crate::state::lock_or_recover(tx)
         .send(SpeechCommand::Stop)
         .map_err(|e| e.to_string())
 }

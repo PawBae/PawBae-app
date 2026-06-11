@@ -10,7 +10,7 @@ use crate::agent_gateway::{remote_sessions_json_path, sessions_json_path};
 use crate::app_init::home_dir_string;
 use crate::lsof::lsof_open_jsonl_paths;
 use crate::ssh_core::{ssh_exec, ssh_read_file};
-use crate::state::{ActiveAgentPid, SshState};
+use crate::state::{lock_or_recover, ActiveAgentPid, SshState};
 
 use super::{AgentExtraInfo, DailyCount};
 
@@ -20,7 +20,7 @@ pub async fn interrupt_agent(
     state: tauri::State<'_, ActiveAgentPid>,
 ) -> Result<String, String> {
     // Strategy 1: Send interrupt signal to the tracked openclaw agent subprocess (pet-window turns)
-    let tracked_pid = *state.pid.lock().unwrap();
+    let tracked_pid = *lock_or_recover(&state.pid);
     if let Some(pid) = tracked_pid {
         #[cfg(unix)]
         let killed = unsafe { libc::kill(pid as i32, libc::SIGINT) == 0 };
