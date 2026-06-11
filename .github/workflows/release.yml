@@ -1,0 +1,92 @@
+name: release
+
+# Builds distributable bundles for macOS (Apple Silicon + Intel DMG) and
+# Windows (NSIS setup.exe).
+#
+# - Tag push (v*): builds and uploads everything to a DRAFT GitHub Release.
+#   Review the draft, then publish it manually (see docs/RELEASING.md).
+# - workflow_dispatch: builds only and uploads workflow artifacts — use this
+#   to verify the pipeline without cutting a release.
+#
+# The in-app updater does NOT read GitHub's latest.json (uploadUpdaterJson is
+# off); it reads https://pawbae.ai/update/latest.json, which is updated by
+# hand after the release is published. See docs/RELEASING.md.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_INCREMENTAL: 0
+  CARGO_NET_RETRY: 10
+  RUST_BACKTRACE: short
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest # Apple Silicon
+            args: '--target aarch64-apple-darwin'
+          - platform: macos-latest # Intel
+            args: '--target x86_64-apple-darwin'
+          - platform: windows-latest
+            args: ''
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use fast temp disk
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          mkdir -Force D:\cargo-target
+          echo "CARGO_TARGET_DIR=D:\cargo-target" >> $env:GITHUB_ENV
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          save-if: false # reuse the cache built by ci.yml on main; don't evict it
+
+      - run: pnpm install --frozen-lockfile
+
+      - uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # macOS signing + notarization — uncomment once the Apple Developer
+          # secrets exist (and add the keychain import step; docs/RELEASING.md):
+          # APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          # APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          # APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          # APPLE_ID: ${{ secrets.APPLE_ID }}
+          # APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          # APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        with:
+          # On tag pushes: create/update a draft release. On manual runs the
+          # empty tagName skips the release and we keep workflow artifacts.
+          tagName: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
+          releaseName: ${{ startsWith(github.ref, 'refs/tags/') && format('PawBae {0}', github.ref_name) || '' }}
+          releaseDraft: true
+          prerelease: false
+          uploadUpdaterJson: false # custom updater reads pawbae.ai, not GitHub latest.json
+          uploadWorkflowArtifacts: ${{ github.event_name == 'workflow_dispatch' }}
+          args: ${{ matrix.args }}
