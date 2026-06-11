@@ -60,7 +60,12 @@
   const mascotSize = $derived(Math.round(60 * settingsStore.mascotScale));
 
   $effect(() => {
-    if (!isWindows) {
+    // macOS: the efficiency hover poll drives hover/drag in BOTH modes, so it
+    // must stay active regardless of appMode. Windows: pet mode gets its poll
+    // thread from set_pet_mode_window; hover tracking may only run in coding
+    // mode because it forces the whole window interactive (no click-through).
+    const needsHoverTracking = !isWindows || settingsStore.appMode === 'coding';
+    if (needsHoverTracking) {
       tryInvoke('set_efficiency_hover_tracking', { active: true });
     }
     let disposed = false;
@@ -74,7 +79,7 @@
     return () => {
       disposed = true;
       unlisten?.();
-      if (!isWindows) {
+      if (needsHoverTracking) {
         tryInvoke('set_efficiency_hover_tracking', { active: false });
       }
     };
@@ -230,7 +235,7 @@
       size={mascotSize}
       enableHoverJump
       externalHover={windowStore.mascotHover}
-      useExternalHover={!isWindows}
+      useExternalHover
       suppressHover={windowStore.moveMode}
       {reactionSprite}
     />

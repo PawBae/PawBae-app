@@ -9,6 +9,7 @@ use crate::mascot::{
     large_collapsed_mascot_window_size, sanitized_mascot_scale, LARGE_MASCOT_SIZE_MULTIPLIER,
     MASCOT_TOP_INSET,
 };
+#[cfg(not(target_os = "windows"))]
 use crate::pet_core::efficiency_hover_poll;
 use crate::platform::common::AppWindowInfo;
 use crate::state::{PetState, WindowState};
@@ -245,11 +246,27 @@ pub async fn set_efficiency_hover_tracking(
     let ws = app.state::<Arc<WindowState>>();
     let ps = app.state::<Arc<PetState>>();
     ws.hover_active.store(active, Ordering::SeqCst);
+    // The NSEvent-driven hover poll is useless on Windows (its cursor/button
+    // reads are no-op stubs there); Windows hover runs in the unified poll
+    // thread below instead.
+    #[cfg(not(target_os = "windows"))]
     if active && !ws.hover_thread_alive.load(Ordering::SeqCst) {
         let app2 = app.clone();
         let ws2 = Arc::clone(&*ws);
         let ps2 = Arc::clone(&*ps);
         std::thread::spawn(move || efficiency_hover_poll(app2, ws2, ps2));
+    }
+    #[cfg(target_os = "windows")]
+    if active
+        && ps
+            .passthrough_thread_alive
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_ok()
+    {
+        let app2 = app.clone();
+        let ws2 = Arc::clone(&*ws);
+        let ps2 = Arc::clone(&*ps);
+        std::thread::spawn(move || pet_passthrough_poll_windows(app2, ws2, ps2));
     }
     Ok(())
 }
@@ -418,13 +435,24 @@ pub async fn set_pet_mode_window(
             });
         }
         #[cfg(target_os = "windows")]
-        if !ps.passthrough_thread_alive.load(Ordering::SeqCst) {
-            let app2 = app.clone();
-            let ws2 = Arc::clone(&*ws);
-            let ps2 = Arc::clone(&*ps);
-            std::thread::spawn(move || {
-                pet_passthrough_poll_windows(app2, ws2, ps2, mascot_scale, large_mascot_scale)
-            });
+        {
+            // Publish the real scales for the poll thread. It re-reads them
+            // every tick, so a thread started earlier (by coding-mode hover
+            // tracking, with the defaults) picks these up immediately.
+            ps.mascot_scale_bits
+                .store(mascot_scale.to_bits(), Ordering::SeqCst);
+            ps.large_mascot_scale_bits
+                .store(large_mascot_scale.to_bits(), Ordering::SeqCst);
+            if ps
+                .passthrough_thread_alive
+                .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+                .is_ok()
+            {
+                let app2 = app.clone();
+                let ws2 = Arc::clone(&*ws);
+                let ps2 = Arc::clone(&*ps);
+                std::thread::spawn(move || pet_passthrough_poll_windows(app2, ws2, ps2));
+            }
         }
     } else {
         // Stop the poll thread.

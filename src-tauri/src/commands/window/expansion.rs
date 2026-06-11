@@ -156,6 +156,10 @@ pub async fn set_mini_expanded(
 
     #[cfg(target_os = "windows")]
     {
+        // The unified poll thread suppresses mascot hover while the panel is
+        // expanded, so the flag must be tracked on Windows too.
+        ws.expanded
+            .store(expanded, std::sync::atomic::Ordering::SeqCst);
         // On Windows: DPI-aware positioning and sizing.
         // Use monitor.position() to offset into the correct monitor in the virtual desktop.
         if let Ok(Some(monitor)) = win.current_monitor() {
@@ -538,6 +542,10 @@ pub async fn set_mini_size(
 
     #[cfg(target_os = "windows")]
     {
+        // Settings/update mode is not the normal expanded panel; clear the
+        // expanded hover state (mirrors the macOS branches above).
+        ws.expanded
+            .store(false, std::sync::atomic::Ordering::SeqCst);
         if let Ok(Some(monitor)) = win.current_monitor() {
             let scale = monitor.scale_factor();
             let mp = monitor.position();

@@ -2,7 +2,7 @@
 
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 use crate::mascot::large_collapsed_mascot_window_size;
 #[allow(unused_imports)]
@@ -395,43 +395,65 @@ pub(crate) fn is_browser_win(id: &str) -> bool {
     ];
     BROWSERS.iter().any(|b| id.contains(b))
 }
-/// Windows equivalent of `pet_passthrough_poll`. Polls the global cursor
-/// position (via Win32 `GetCursorPos`) every 20 ms and toggles the mini
-/// webview's `set_ignore_cursor_events` so clicks outside the mascot
-/// hit-box pass through to whatever is behind, while clicks on the mascot
-/// itself reach the webview. When the pet context menu is open the entire
-/// window is interactive so menu buttons receive clicks.
+/// Unified poll thread for both Pet and Coding modes on Windows (the Windows
+/// counterpart of macOS's `pet_passthrough_poll` + `efficiency_hover_poll`
+/// pair). Polls the global cursor and left-button state every 20 ms.
+///
+/// **Pet mode** (`ps.passthrough_active`): click-through hit-testing against
+/// the mascot rect (bottom-right corner of the window), anchor-based window
+/// drag, walk-direction events, and drag-throw velocity for the physics loop.
+///
+/// **Coding mode** (`ws.hover_active`): hover detection against the mascot
+/// body (upper-centre fraction of the collapsed window, like macOS
+/// `efficiency_hover_poll`). The window stays fully interactive — it is
+/// barely larger than the mascot, so click-through buys nothing there.
+///
+/// `mini-mascot-hover` / `mini-mascot-drag-*` events match the macOS emitters
+/// in `pet_core.rs`; the frontend consumes hover exclusively from these
+/// events (`useExternalHover`). Throw velocities are per-tick cursor deltas
+/// in logical px (top-down y), the same units the macOS poll feeds
+/// `loop.beginThrow`.
+///
+/// The thread stays alive while EITHER mode flag is set and re-reads the
+/// mascot scales from `PetState` every tick, so it survives mode switches
+/// without going stale.
 pub(crate) fn pet_passthrough_poll_windows(
     app: tauri::AppHandle,
-    _ws: Arc<WindowState>,
+    ws: Arc<WindowState>,
     ps: Arc<PetState>,
-    mascot_scale: f64,
-    large_mascot_scale: f64,
 ) {
-    use std::time::Duration;
+    use std::collections::VecDeque;
+    use std::time::{Duration, Instant};
     use windows::Win32::Foundation::POINT;
+    use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON};
     use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
 
-    ps.passthrough_thread_alive.store(true, Ordering::SeqCst);
-    // mascot dimensions in logical pixels (matches CSS px on Windows WebView2).
-    let (mascot_w_logical, mascot_h_logical) =
-        large_collapsed_mascot_window_size(mascot_scale, large_mascot_scale);
-    let hit_w = mascot_w_logical * (1.8 / 3.0);
-    let hit_h = mascot_h_logical * (2.5 / 3.0);
-    let inset_x_logical = (mascot_w_logical - hit_w) / 2.0;
-    let inset_y_logical = (mascot_h_logical - hit_h) / 2.0;
     let edge_threshold_logical = 30.0_f64;
-
     let mut last_state: Option<bool> = None;
 
-    while ps.passthrough_active.load(Ordering::SeqCst) {
-        let menu_open = ps.context_menu_open.load(Ordering::SeqCst);
-        let pomodoro_active = ps.pomodoro_active.load(Ordering::SeqCst);
+    // Drag state machine (mirrors macOS pet_core.rs). Anchor and cursor are
+    // physical px so cross-monitor DPI changes cannot skew the window drag.
+    let mut drag_active = false;
+    let mut drag_anchor: Option<(f64, f64)> = None;
+    let mut last_cursor: (f64, f64) = (0.0, 0.0);
+    let mut last_walk_dir: i32 = 0;
+    let mut was_pressed = false;
+    let mut was_over_mascot = false;
 
-        let should_be_interactive = if menu_open || pomodoro_active {
-            true
-        } else {
-            // Read cursor position and window geometry in physical pixels.
+    // Drag-throw velocity sampling: (timestamp, dx, dy) per-tick deltas in
+    // logical px. Same buffer parameters as macOS.
+    let mut throw_samples: VecDeque<(Instant, f64, f64)> = VecDeque::with_capacity(32);
+    const THROW_SAMPLE_CAP: usize = 24;
+    const THROW_AVG_WINDOW_MS: u128 = 250;
+    const MAX_THROW_SPEED: f64 = 30.0;
+
+    loop {
+        while ps.passthrough_active.load(Ordering::SeqCst) || ws.hover_active.load(Ordering::SeqCst)
+        {
+            let pet_mode = ps.passthrough_active.load(Ordering::SeqCst);
+            let menu_open = ps.context_menu_open.load(Ordering::SeqCst);
+            let pomodoro_active = ps.pomodoro_active.load(Ordering::SeqCst);
+
             let cursor = unsafe {
                 let mut pt = POINT::default();
                 if GetCursorPos(&mut pt).is_ok() {
@@ -440,76 +462,264 @@ pub(crate) fn pet_passthrough_poll_windows(
                     None
                 }
             };
-            let win = app.get_webview_window("main");
-            match (win, cursor) {
-                (Some(win), Some((cx, cy))) => {
-                    let pos = win.outer_position().ok();
-                    let size = win.outer_size().ok();
-                    let scale = win.scale_factor().unwrap_or(1.0);
-                    let monitor = win.current_monitor().ok().flatten();
-                    if let (Some(pos), Some(size)) = (pos, size) {
-                        let fx = pos.x as f64;
-                        let fy = pos.y as f64;
-                        let fw = size.width as f64;
-                        let fh = size.height as f64;
+            let left_pressed =
+                unsafe { (GetAsyncKeyState(VK_LBUTTON.0 as i32) as u16 & 0x8000) != 0 };
 
-                        // Mascot is anchored at `left: petBaseWinW - mascotW` and `bottom: 0`,
-                        // i.e. the right-bottom corner of the no-menu window. When the menu
-                        // is closed, fw == petBaseWinW so the mascot's right edge in screen
-                        // physical px is fx + fw and its bottom is fy + fh.
+            // Window geometry in physical px.
+            let win = app.get_webview_window("main");
+            let geom = win.as_ref().and_then(|w| {
+                let pos = w.outer_position().ok()?;
+                let size = w.outer_size().ok()?;
+                let scale = w.scale_factor().unwrap_or(1.0);
+                Some((
+                    pos.x as f64,
+                    pos.y as f64,
+                    size.width as f64,
+                    size.height as f64,
+                    scale,
+                ))
+            });
+
+            // Scales are re-read every tick: the thread may have been started
+            // by coding-mode hover tracking with defaults, then upgraded by
+            // set_pet_mode_window.
+            let mascot_scale = f64::from_bits(ps.mascot_scale_bits.load(Ordering::SeqCst));
+            let large_mascot_scale =
+                f64::from_bits(ps.large_mascot_scale_bits.load(Ordering::SeqCst));
+            let (mascot_w_logical, mascot_h_logical) =
+                large_collapsed_mascot_window_size(mascot_scale, large_mascot_scale);
+            let hit_w = mascot_w_logical * (1.8 / 3.0);
+            let hit_h = mascot_h_logical * (2.5 / 3.0);
+            let inset_x_logical = (mascot_w_logical - hit_w) / 2.0;
+            let inset_y_logical = (mascot_h_logical - hit_h) / 2.0;
+
+            // Real mascot hit-test. Never forced by menu/pomodoro state —
+            // those only force interactivity below, otherwise a click on a
+            // context-menu button would start a window drag.
+            let over_mascot = match (geom, cursor) {
+                (Some((fx, fy, fw, fh, scale)), Some((cx, cy))) => {
+                    if pet_mode {
+                        // Mascot is anchored at the bottom-right corner of the
+                        // (possibly menu-expanded) window.
                         let mascot_w = mascot_w_logical * scale;
                         let mascot_h = mascot_h_logical * scale;
-                        let inset_x = inset_x_logical * scale;
-                        let inset_y = inset_y_logical * scale;
-                        let edge_threshold = edge_threshold_logical * scale;
-
                         let mascot_right = fx + fw;
                         let mascot_left = mascot_right - mascot_w;
                         let mascot_bottom = fy + fh;
                         let mascot_top = mascot_bottom - mascot_h;
 
-                        let near_edge = if let Some(monitor) = monitor {
-                            let mp = monitor.position();
-                            let ms = monitor.size();
-                            let monitor_left = mp.x as f64;
-                            let monitor_right = monitor_left + ms.width as f64;
-                            mascot_left < monitor_left + edge_threshold
-                                || mascot_right > monitor_right - edge_threshold
-                        } else {
-                            false
-                        };
-
-                        // Keep edge hitbox slightly relaxed on X only; do not use
-                        // full-rect hitboxes, which feel too large during peek.
-                        let ix = if near_edge { inset_x * 0.5 } else { inset_x };
-                        let iy = inset_y;
-                        let hit_left = mascot_left + ix;
-                        let hit_right = mascot_right - ix;
-                        let hit_top = mascot_top + iy;
-                        let hit_bottom = mascot_bottom - iy;
-
-                        cx >= hit_left && cx <= hit_right && cy >= hit_top && cy <= hit_bottom
+                        // Relax the X insets when the mascot extends near/past
+                        // a monitor edge so the visible sliver stays clickable
+                        // during peek; never full-rect (feels too grabby).
+                        let near_edge = win
+                            .as_ref()
+                            .and_then(|w| w.current_monitor().ok().flatten())
+                            .map(|monitor| {
+                                let monitor_left = monitor.position().x as f64;
+                                let monitor_right = monitor_left + monitor.size().width as f64;
+                                let edge_threshold = edge_threshold_logical * scale;
+                                mascot_left < monitor_left + edge_threshold
+                                    || mascot_right > monitor_right - edge_threshold
+                            })
+                            .unwrap_or(false);
+                        let ix = inset_x_logical * scale * if near_edge { 0.5 } else { 1.0 };
+                        let iy = inset_y_logical * scale;
+                        cx >= mascot_left + ix
+                            && cx <= mascot_right - ix
+                            && cy >= mascot_top + iy
+                            && cy <= mascot_bottom - iy
                     } else {
-                        false
+                        // Coding mode: the collapsed window is the mascot's
+                        // bounding box; hit only the visible body
+                        // (upper-centre fractions, mirroring macOS
+                        // `efficiency_hover_poll`), never the expanded panel.
+                        !ws.expanded.load(Ordering::SeqCst)
+                            && cx >= fx + fw * 0.32
+                            && cx <= fx + fw * 0.68
+                            && cy >= fy + fh * 0.10
+                            && cy <= fy + fh * 0.75
                     }
                 }
                 _ => false,
-            }
-        };
+            };
 
-        if last_state != Some(should_be_interactive) {
-            if let Some(win) = app.get_webview_window("main") {
-                let _ = win.set_ignore_cursor_events(!should_be_interactive);
+            // ── Drag state machine (pet mode only) ──
+            if pet_mode {
+                if drag_active {
+                    if left_pressed {
+                        if let (Some((cx, cy)), Some((ax, ay)), Some(w)) =
+                            (cursor, drag_anchor, win.as_ref())
+                        {
+                            let _ = w.set_position(tauri::PhysicalPosition::new(
+                                (cx - ax).round() as i32,
+                                (cy - ay).round() as i32,
+                            ));
+                        }
+                        if let Some((cx, cy)) = cursor {
+                            let scale = geom.map(|g| g.4).unwrap_or(1.0);
+                            let dx = (cx - last_cursor.0) / scale;
+                            // Windows screen y already grows downward, which
+                            // is the frontend physics convention (macOS has
+                            // to flip; we don't).
+                            let dy = (cy - last_cursor.1) / scale;
+                            last_cursor = (cx, cy);
+                            let walk_dir = if dx > 0.5 {
+                                1
+                            } else if dx < -0.5 {
+                                -1
+                            } else {
+                                last_walk_dir
+                            };
+                            if walk_dir != last_walk_dir {
+                                let _ = app.emit("mini-mascot-walk", walk_dir);
+                                last_walk_dir = walk_dir;
+                            }
+                            if ps.throw_tracking.load(Ordering::SeqCst) {
+                                throw_samples.push_back((Instant::now(), dx, dy));
+                                while throw_samples.len() > THROW_SAMPLE_CAP {
+                                    throw_samples.pop_front();
+                                }
+                            }
+                        }
+                    } else {
+                        // Drag finished.
+                        drag_active = false;
+                        drag_anchor = None;
+                        if last_walk_dir != 0 {
+                            let _ = app.emit("mini-mascot-walk", 0i32);
+                            last_walk_dir = 0;
+                        }
+                        // Average the recent non-stationary samples into a
+                        // release velocity (same algorithm as pet_core.rs:
+                        // users settle the cursor for a beat before letting
+                        // go, so zero samples are skipped, not averaged in).
+                        if ps.throw_tracking.load(Ordering::SeqCst) && !throw_samples.is_empty() {
+                            let cutoff = Instant::now();
+                            let mut sum_dx = 0.0;
+                            let mut sum_dy = 0.0;
+                            let mut count = 0u32;
+                            let mut total_seen = 0u32;
+                            for (t, dx, dy) in throw_samples.iter().rev() {
+                                if cutoff.duration_since(*t).as_millis() > THROW_AVG_WINDOW_MS {
+                                    break;
+                                }
+                                total_seen += 1;
+                                if dx.abs() < 0.5 && dy.abs() < 0.5 {
+                                    continue;
+                                }
+                                sum_dx += *dx;
+                                sum_dy += *dy;
+                                count += 1;
+                            }
+                            if count > 0 {
+                                let vx = (sum_dx / count as f64)
+                                    .clamp(-MAX_THROW_SPEED, MAX_THROW_SPEED);
+                                let vy = (sum_dy / count as f64)
+                                    .clamp(-MAX_THROW_SPEED, MAX_THROW_SPEED);
+                                log::info!(
+                                    "[drag-throw] samples={}/{} → vx={:.2} vy={:.2}",
+                                    count,
+                                    total_seen,
+                                    vx,
+                                    vy,
+                                );
+                                let _ = app.emit(
+                                    "mini-mascot-drag-throw",
+                                    serde_json::json!({ "vx": vx, "vy": vy }),
+                                );
+                            } else {
+                                log::info!(
+                                    "[drag-throw] all {} samples in {}ms window were near-zero",
+                                    total_seen,
+                                    THROW_AVG_WINDOW_MS,
+                                );
+                            }
+                        }
+                        throw_samples.clear();
+                        let _ = app.emit("mini-mascot-drag-end", ());
+                    }
+                } else if over_mascot
+                    && left_pressed
+                    && !was_pressed
+                    && !menu_open
+                    && !pomodoro_active
+                {
+                    // Drag start. Suppressed while the context menu or the
+                    // pomodoro UI is up — those clicks must never move the
+                    // window.
+                    if let (Some((cx, cy)), Some((fx, fy, ..))) = (cursor, geom) {
+                        drag_active = true;
+                        drag_anchor = Some((cx - fx, cy - fy));
+                        last_cursor = (cx, cy);
+                        throw_samples.clear();
+                        // Cancel hover so the sprite leaves `jumping`
+                        // immediately when the drag begins.
+                        if was_over_mascot {
+                            let _ = app.emit("mini-mascot-hover", false);
+                            was_over_mascot = false;
+                        }
+                        let _ = app.emit("mini-mascot-drag-start", ());
+                    }
+                }
+            } else if drag_active {
+                // Mode switched away mid-drag: drop the drag cleanly.
+                drag_active = false;
+                drag_anchor = None;
+                throw_samples.clear();
+                if last_walk_dir != 0 {
+                    let _ = app.emit("mini-mascot-walk", 0i32);
+                    last_walk_dir = 0;
+                }
             }
-            last_state = Some(should_be_interactive);
+            was_pressed = left_pressed;
+
+            // ── Hover signal (both modes) ──
+            // Suppressed while dragging so the sprite shows the pinch/run
+            // state instead of jumping. Edge-triggered, like macOS.
+            let hover_signal = over_mascot && !drag_active;
+            if hover_signal != was_over_mascot {
+                let _ = app.emit("mini-mascot-hover", hover_signal);
+                was_over_mascot = hover_signal;
+            }
+
+            // ── Click-through toggle ──
+            // Coding mode keeps the window permanently interactive. Pet mode
+            // is interactive over the mascot, during a drag, and whenever the
+            // context menu / pomodoro UI needs its buttons clickable.
+            let interactive = if pet_mode {
+                menu_open || pomodoro_active || over_mascot || drag_active
+            } else {
+                true
+            };
+            if last_state != Some(interactive) {
+                if let Some(w) = win.as_ref() {
+                    let _ = w.set_ignore_cursor_events(!interactive);
+                }
+                last_state = Some(interactive);
+            }
+
+            std::thread::sleep(Duration::from_millis(20));
         }
 
-        std::thread::sleep(Duration::from_millis(20));
+        ps.passthrough_thread_alive.store(false, Ordering::SeqCst);
+        // A mode flag may have flipped back on between the loop condition and
+        // the alive=false store above (the spawn sites skip when alive is
+        // still true). Re-claim and keep polling instead of leaving the new
+        // mode threadless; if a fresh thread already claimed the flag, exit.
+        if (ps.passthrough_active.load(Ordering::SeqCst) || ws.hover_active.load(Ordering::SeqCst))
+            && ps
+                .passthrough_thread_alive
+                .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+                .is_ok()
+        {
+            continue;
+        }
+        break;
     }
 
-    // Re-enable click events on exit so the window stays usable when leaving pet mode.
+    // Re-enable click events on exit so the window stays usable when leaving
+    // pet/coding mode.
     if let Some(win) = app.get_webview_window("main") {
         let _ = win.set_ignore_cursor_events(false);
     }
-    ps.passthrough_thread_alive.store(false, Ordering::SeqCst);
 }

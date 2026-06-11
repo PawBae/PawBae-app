@@ -168,8 +168,14 @@ pub(crate) struct ClaudeState {
 
 pub(crate) struct WindowState {
     pub(crate) hover_active: AtomicBool,
+    // Liveness flag for efficiency_hover_poll; on Windows that role is
+    // played by PetState::passthrough_thread_alive (unified poll thread).
+    #[cfg(not(target_os = "windows"))]
     pub(crate) hover_thread_alive: AtomicBool,
     pub(crate) expanded: AtomicBool,
+    // macOS-only consumers (efficiency_hover_poll / notch positioning);
+    // compiled out on Windows where that poll thread doesn't exist.
+    #[cfg(not(target_os = "windows"))]
     #[allow(clippy::type_complexity)]
     pub(crate) notch_screen_info: Mutex<Option<(f64, f64, f64, f64, f64)>>,
     pub(crate) mini_frame: Mutex<Option<(f64, f64, f64, f64)>>,
@@ -181,8 +187,10 @@ impl WindowState {
     pub(crate) fn new() -> Self {
         Self {
             hover_active: AtomicBool::new(false),
+            #[cfg(not(target_os = "windows"))]
             hover_thread_alive: AtomicBool::new(false),
             expanded: AtomicBool::new(false),
+            #[cfg(not(target_os = "windows"))]
             notch_screen_info: Mutex::new(None),
             mini_frame: Mutex::new(None),
             #[cfg(target_os = "windows")]
@@ -200,11 +208,21 @@ pub(crate) struct PetState {
     pub(crate) stroll_enabled: AtomicBool,
     pub(crate) throw_tracking: AtomicBool,
     pub(crate) sprite_pad: Mutex<SpritePadFracs>,
+    // Written by efficiency_hover_poll, consumed by the macOS drag applier.
+    // The Windows poll thread keeps its own local anchor instead.
+    #[cfg(not(target_os = "windows"))]
     pub(crate) drag_anchor: Mutex<Option<(f64, f64)>>,
     #[cfg(target_os = "macos")]
     pub(crate) drag_task_pending: AtomicBool,
     #[cfg(target_os = "macos")]
     pub(crate) alpha_gen: AtomicU64,
+    // Mascot scales as f64 bit patterns (to_bits/from_bits). The Windows poll
+    // thread outlives mode switches, so it re-reads these every tick instead
+    // of capturing scale values at spawn time.
+    #[cfg(target_os = "windows")]
+    pub(crate) mascot_scale_bits: AtomicU64,
+    #[cfg(target_os = "windows")]
+    pub(crate) large_mascot_scale_bits: AtomicU64,
 }
 
 impl PetState {
@@ -227,11 +245,18 @@ impl PetState {
                 bottom_px: None,
                 left_px: None,
             }),
+            #[cfg(not(target_os = "windows"))]
             drag_anchor: Mutex::new(None),
             #[cfg(target_os = "macos")]
             drag_task_pending: AtomicBool::new(false),
             #[cfg(target_os = "macos")]
             alpha_gen: AtomicU64::new(0),
+            #[cfg(target_os = "windows")]
+            mascot_scale_bits: AtomicU64::new(1.0f64.to_bits()),
+            #[cfg(target_os = "windows")]
+            large_mascot_scale_bits: AtomicU64::new(
+                crate::mascot::LARGE_MASCOT_SIZE_MULTIPLIER.to_bits(),
+            ),
         }
     }
 }
