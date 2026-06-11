@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import { agentStore } from '../stores/agents.svelte';
   import { petStore } from '../stores/pet.svelte';
@@ -8,6 +7,7 @@
   import type { UserInputEvent } from '../types';
   import type { CodexPet, CodexPetState } from '../utils/codex-pet';
   import { petStateToCodexState } from '../utils/codex-pet';
+  import { tryInvoke } from '../utils/invoke';
   import type { PhysicsState } from '../utils/pet-physics';
   import { createPhysicsLoop } from '../utils/pet-physics';
   import {
@@ -61,7 +61,7 @@
 
   $effect(() => {
     if (!isWindows) {
-      invoke('set_efficiency_hover_tracking', { active: true }).catch(() => {});
+      tryInvoke('set_efficiency_hover_tracking', { active: true });
     }
     let disposed = false;
     let unlisten: (() => void) | null = null;
@@ -75,7 +75,7 @@
       disposed = true;
       unlisten?.();
       if (!isWindows) {
-        invoke('set_efficiency_hover_tracking', { active: false }).catch(() => {});
+        tryInvoke('set_efficiency_hover_tracking', { active: false });
       }
     };
   });
@@ -86,8 +86,8 @@
     if (!currentPet?.physics?.enabled) return;
     if (windowStore.settingsOpen) return;
 
-    invoke('set_stroll_mode', { enabled: true }).catch(() => {});
-    invoke('set_throw_tracking', { enabled: true }).catch(() => {});
+    tryInvoke('set_stroll_mode', { enabled: true });
+    tryInvoke('set_throw_tracking', { enabled: true });
 
     const loop = createPhysicsLoop({
       pet: currentPet,
@@ -132,8 +132,8 @@
       physicsSprite = null;
       physicsState = null;
       for (const fn of listenerCleanups) fn();
-      invoke('set_stroll_mode', { enabled: false }).catch(() => {});
-      invoke('set_throw_tracking', { enabled: false }).catch(() => {});
+      tryInvoke('set_stroll_mode', { enabled: false });
+      tryInvoke('set_throw_tracking', { enabled: false });
     };
   });
 
@@ -163,7 +163,7 @@
   $effect(() => {
     // TODO(settings phase): surface the returned ListenerStatus (e.g. keyboard off when
     // macOS Accessibility is denied) in the settings UI instead of discarding it.
-    invoke('set_input_tracking', { active: true }).catch(() => {});
+    tryInvoke('set_input_tracking', { active: true });
     let disposed = false;
     let unlisten: (() => void) | null = null;
     listen<UserInputEvent>('user-input', (e) => handleUserInput(e.payload)).then((u) => {
@@ -173,7 +173,7 @@
     return () => {
       disposed = true;
       unlisten?.();
-      invoke('set_input_tracking', { active: false }).catch(() => {});
+      tryInvoke('set_input_tracking', { active: false });
       if (reactionTimer) {
         clearTimeout(reactionTimer);
         reactionTimer = null;

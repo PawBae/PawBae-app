@@ -48,7 +48,7 @@ pub(crate) mod win_ssh_mux {
     }
 
     fn session_lock(host_key: &str) -> Arc<TokioMutex<Option<MuxChild>>> {
-        let mut map = mux_map().lock().unwrap();
+        let mut map = crate::state::lock_or_recover(mux_map());
         map.entry(host_key.to_string())
             .or_insert_with(|| Arc::new(TokioMutex::new(None)))
             .clone()
@@ -231,7 +231,12 @@ pub(crate) mod win_ssh_mux {
 
     /// Kill all persistent subprocesses.
     pub async fn kill_all() {
-        let keys: Vec<String> = { mux_map().lock().unwrap().keys().cloned().collect() };
+        let keys: Vec<String> = {
+            crate::state::lock_or_recover(mux_map())
+                .keys()
+                .cloned()
+                .collect()
+        };
         for key in keys {
             let lock = session_lock(&key);
             let mut guard = lock.lock().await;

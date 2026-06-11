@@ -2,7 +2,7 @@
 
 use crate::agent_gateway::sessions_json_path;
 use crate::lsof::lsof_active_agents;
-use crate::state::{ActiveAgentPid, SessionInfo};
+use crate::state::{lock_or_recover, ActiveAgentPid, SessionInfo};
 
 #[cfg(target_os = "windows")]
 use crate::platform::windows::hide_window_tokio_cmd;
@@ -184,7 +184,7 @@ pub async fn send_chat(
 
     // Store PID for interrupt_agent
     if let Some(pid) = child.id() {
-        *state.pid.lock().unwrap() = Some(pid);
+        *lock_or_recover(&state.pid) = Some(pid);
     }
 
     let output = child
@@ -193,7 +193,7 @@ pub async fn send_chat(
         .map_err(|e| format!("openclaw agent wait: {}", e))?;
 
     // Clear PID once done
-    *state.pid.lock().unwrap() = None;
+    *lock_or_recover(&state.pid) = None;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
 

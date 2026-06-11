@@ -8,6 +8,7 @@ import {
   resetRuntimeSpritePadCSS,
   setRuntimeSpritePadCSS,
 } from '../edge/detect';
+import { tryInvoke } from '../invoke';
 import { MAX_THROW_SPEED, TICK_MS } from './constants';
 import { detachFromWindow, initialState, spriteNameFor, step } from './state-machine';
 import type { PhysicsHandle, PhysicsOptions, PhysicsState } from './types';
@@ -80,7 +81,7 @@ export function createPhysicsLoop(
     if (anchors.rightPx !== null) payload.rightPx = anchors.rightPx;
     if (anchors.bottomPx !== null) payload.bottomPx = anchors.bottomPx;
     if (anchors.leftPx !== null) payload.leftPx = anchors.leftPx;
-    invoke('set_sprite_pad_fractions', payload).catch(() => {});
+    tryInvoke('set_sprite_pad_fractions', payload);
     return true;
   }
 
@@ -169,7 +170,7 @@ export function createPhysicsLoop(
     invalidateFloorCache();
     invalidateActiveWindowCache();
     resetRuntimeSpritePadCSS();
-    invoke('set_sprite_pad_fractions', { resetPx: true }).catch(() => {});
+    tryInvoke('set_sprite_pad_fractions', { resetPx: true });
     if (currentOpts.pet) {
       scheduleAnchorMeasure();
       scheduleAnchorMeasure(120);

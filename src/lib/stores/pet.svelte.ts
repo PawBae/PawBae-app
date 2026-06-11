@@ -1,4 +1,3 @@
-import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { load } from '@tauri-apps/plugin-store';
 import type {
@@ -11,6 +10,7 @@ import type {
   RewardLedgerSnapshot,
   UserInputEvent,
 } from '../types';
+import { tryInvoke } from '../utils/invoke';
 import {
   type AwardResult,
   applyAward,
@@ -282,7 +282,7 @@ class PetStore {
     // Global input capture is OFF by default in the backend (privacy) — opt in AFTER the
     // listener exists so the first flushed batch cannot fall into a gap. Idempotent in
     // Rust, so MascotView's own tracking lifecycle composes safely with this.
-    invoke('set_input_tracking', { active: true }).catch(() => {});
+    tryInvoke('set_input_tracking', { active: true });
     this.startFlushTimer();
     return () => {
       for (const unsub of unsubs) unsub();
@@ -362,7 +362,7 @@ class PetStore {
       // case another owner's lifecycle disabled it mid-session.
       // TODO(settings phase): gate this on the input-capture setting once a user-facing
       // privacy toggle exists — a blind re-assert must never override an explicit OFF.
-      invoke('set_input_tracking', { active: true }).catch(() => {});
+      tryInvoke('set_input_tracking', { active: true });
     }, PET_PERSIST_FLUSH_MS);
   }
 

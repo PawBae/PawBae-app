@@ -15,7 +15,7 @@ use crate::platform::macos::{
 use crate::session_watcher::{
     start_session_file_watcher, stop_event_was_interrupted, stop_session_file_watcher,
 };
-use crate::state::ClaudeSession;
+use crate::state::{lock_or_recover, ClaudeSession};
 #[cfg(target_os = "macos")]
 use crate::terminal::is_codex_host_terminal;
 use crate::terminal::{
@@ -95,9 +95,7 @@ pub(crate) fn process_claude_event(
         // generation). These should not appear in the session list or trigger
         // completion notifications.
         if is_codex_internal_utility_event(&event) {
-            if let Ok(mut sessions) = state.lock() {
-                sessions.remove(&session_id);
-            }
+            lock_or_recover(state).remove(&session_id);
             stop_session_file_watcher(&session_id);
             log::info!(
                 "[claude_event] ignore internal codex utility session={} event={}",
@@ -211,7 +209,7 @@ pub(crate) fn process_claude_event(
         let stop_was_interrupted;
 
         {
-            let mut sessions = state.lock().unwrap();
+            let mut sessions = lock_or_recover(state);
             let prev_status = sessions
                 .get(&session_id)
                 .map(|s| s.status.clone())
