@@ -219,7 +219,9 @@ pub async fn run_update(app: tauri::AppHandle, dmg_url: String) -> Result<(), St
         .user_agent("pawbae-updater")
         .build()
         .map_err(|e| format!("client build error: {e}"))?;
-    emit_update_progress(&app, "preparing", Some(0), 0, None, "准备下载更新");
+    // `message` is an untranslated fallback — the frontend localizes known
+    // stages via `updateModal.progress.*` and only shows this for unknown ones.
+    emit_update_progress(&app, "preparing", Some(0), 0, None, "Preparing update...");
     let mut resp = client
         .get(&dmg_url)
         .send()
@@ -274,12 +276,15 @@ pub async fn run_update(app: tauri::AppHandle, dmg_url: String) -> Result<(), St
         if progress != last_progress {
             let message = if let Some(total) = total_bytes {
                 format!(
-                    "正在下载更新 {} / {}",
+                    "Downloading update {} / {}",
                     format_update_bytes(downloaded_bytes),
                     format_update_bytes(total)
                 )
             } else {
-                format!("正在下载更新 {}", format_update_bytes(downloaded_bytes))
+                format!(
+                    "Downloading update {}",
+                    format_update_bytes(downloaded_bytes)
+                )
             };
             emit_update_progress(
                 &app,
@@ -302,7 +307,7 @@ pub async fn run_update(app: tauri::AppHandle, dmg_url: String) -> Result<(), St
         Some(100),
         downloaded_bytes,
         total_bytes,
-        "下载完成，准备安装更新",
+        "Download complete, preparing install...",
     );
 
     // Platform-specific: spawn a detached installer helper
@@ -526,7 +531,7 @@ if ($appPath) {{
         Some(100),
         downloaded_bytes,
         total_bytes,
-        "下载完成，即将退出应用并安装更新",
+        "Update ready — restart to install",
     );
     Ok(())
 }

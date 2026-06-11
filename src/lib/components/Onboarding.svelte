@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { _ } from 'svelte-i18n';
   import type { AppMode } from '../types';
   import type { CodexPet } from '../utils/codex-pet';
   import { loadDefaultCodexPet } from '../utils/codex-pet';
@@ -26,8 +27,8 @@
 {#if open}
   <div class="overlay">
     <div class="modal">
-      <h2>Choose Your Mode</h2>
-      <p class="subtitle">You can always change this later in settings</p>
+      <h2>{$_('onboarding.chooseModeTitle')}</h2>
+      <p class="subtitle">{$_('onboarding.chooseModeSubtitle')}</p>
 
       <div class="cards">
         <!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -38,9 +39,9 @@
               <SpritePet pet={previewPet} state="running" size={64} />
             {/if}
           </div>
-          <div class="badge">Recommended</div>
-          <h3>Coding Mode</h3>
-          <p>Monitor Claude Code, Codex, and Cursor agents in real time</p>
+          <div class="badge">{$_('onboarding.recommended')}</div>
+          <h3>{$_('settings.codingMode')}</h3>
+          <p>{$_('onboarding.codingModeLongDesc')}</p>
         </div>
 
         <!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -51,8 +52,8 @@
               <SpritePet pet={previewPet} state="idle" size={64} />
             {/if}
           </div>
-          <h3>Pet Mode</h3>
-          <p>Care for your desktop companion with feeding, pomodoro, and more</p>
+          <h3>{$_('settings.petMode')}</h3>
+          <p>{$_('onboarding.petModeLongDesc')}</p>
         </div>
       </div>
     </div>

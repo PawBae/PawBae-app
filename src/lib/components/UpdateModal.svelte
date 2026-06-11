@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { _ } from 'svelte-i18n';
   import type { UpdateModalInfo } from '../types';
 
   interface UpdateModalProps {
@@ -7,6 +8,7 @@
     info?: UpdateModalInfo | null;
     progress?: number | null;
     progressStage?: string;
+    errorMsg?: string;
     onLater: () => void;
     onSkipVersion: () => void;
     onUpdateNow: () => void;
@@ -19,6 +21,7 @@
     info = null as UpdateModalInfo | null,
     progress = null as number | null,
     progressStage = '',
+    errorMsg = '',
     onLater,
     onSkipVersion,
     onUpdateNow,
@@ -36,7 +39,7 @@
       <div class="header">
         <div class="logo">🐾</div>
         <div>
-          <h3>PawBae Update</h3>
+          <h3>{$_('updateModal.title')}</h3>
           {#if info}
             <span class="version">{info.current} → {info.latest}</span>
           {/if}
@@ -44,30 +47,34 @@
       </div>
 
       {#if phase === 'available'}
-        <p class="subtitle">A new version is available!</p>
+        <p class="subtitle">{$_('updateModal.availableSubtitle')}</p>
         {#if noteLines.length > 0}
           <div class="notes">
+            <div class="notes-title">{$_('updateModal.whatsNew')}</div>
             {#each noteLines as line}
               <div class="note-line">{line}</div>
             {/each}
           </div>
         {/if}
+        {#if errorMsg}
+          <p class="error">{$_('settings.updateFailed')}{errorMsg}</p>
+        {/if}
         <div class="actions">
-          <button class="btn secondary" onclick={onLater}>Later</button>
-          <button class="btn secondary" onclick={onSkipVersion}>Skip</button>
-          <button class="btn primary" onclick={onUpdateNow}>Update Now</button>
+          <button class="btn secondary" onclick={onLater}>{$_('updateModal.later')}</button>
+          <button class="btn secondary" onclick={onSkipVersion}>{$_('updateModal.skipVersion')}</button>
+          <button class="btn primary" onclick={onUpdateNow}>{$_('updateModal.updateNow')}</button>
         </div>
       {:else if phase === 'downloading'}
         <div class="progress-wrap">
           <div class="progress-bar" style="width: {progress ?? 0}%"></div>
         </div>
-        <p class="stage">{progressStage || 'Downloading...'} {progress != null ? `${Math.round(progress)}%` : ''}</p>
-        <p class="warn">Please don't close the app</p>
+        <p class="stage">{progressStage || $_('updateModal.progress.downloading')} {progress != null ? `${Math.round(progress)}%` : ''}</p>
+        <p class="warn">{$_('updateModal.pleaseDontClose')}</p>
       {:else if phase === 'ready_to_restart'}
         <div class="done-icon">✓</div>
-        <p class="subtitle">Update downloaded! Restart to apply.</p>
+        <p class="subtitle">{$_('updateModal.completeDesc')}</p>
         <div class="actions">
-          <button class="btn primary" onclick={onRestartNow}>Restart Now</button>
+          <button class="btn primary" onclick={onRestartNow}>{$_('updateModal.restartNow')}</button>
         </div>
       {/if}
     </div>
@@ -128,10 +135,23 @@
     overflow-y: auto;
   }
 
+  .notes-title {
+    color: rgba(255, 255, 255, 0.45);
+    font-size: 11px;
+    margin-bottom: 4px;
+  }
+
   .note-line {
     color: rgba(255, 255, 255, 0.7);
     font-size: 12px;
     line-height: 1.6;
+  }
+
+  .error {
+    color: #f87171;
+    font-size: 12px;
+    margin: 0 0 12px;
+    word-break: break-all;
   }
 
   .actions {

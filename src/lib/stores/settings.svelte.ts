@@ -24,6 +24,7 @@ class SettingsStore {
   petIdleIntervalMin = $state(2);
   miniPetId = $state<string>('yoonie');
   petQueue = $state.raw<string[]>([]);
+  skippedVersion = $state('');
   ocConnections = $state.raw<OcConnection[]>([{ id: 'local', type: 'local' }]);
 
   private storeInstance: Awaited<ReturnType<typeof load>> | null = null;
@@ -60,6 +61,7 @@ class SettingsStore {
     this.petIdleIntervalMin = ((await store.get('pet_idle_interval_min')) as number) ?? 2;
     this.miniPetId = ((await store.get('mini_pet_id')) as string) || 'yoonie';
     this.petQueue = ((await store.get('pet_queue')) as string[]) || [];
+    this.skippedVersion = ((await store.get('skipped_version')) as string) || '';
     this.ocConnections = ((await store.get('oc_connections')) as OcConnection[]) || [
       { id: 'local', type: 'local' },
     ];
@@ -179,6 +181,11 @@ class SettingsStore {
   async setPetQueue(v: string[]) {
     this.petQueue = v;
     await this.saveSetting('pet_queue', v);
+  }
+
+  async setSkippedVersion(v: string) {
+    this.skippedVersion = v;
+    await this.saveSetting('skipped_version', v);
   }
 
   async setOcConnections(v: OcConnection[]) {
