@@ -1,9 +1,11 @@
 <script lang="ts">
+  import { _ } from 'svelte-i18n';
   import { agentStore } from '../stores/agents.svelte';
   import { petStore } from '../stores/pet.svelte';
   import { sessionStore } from '../stores/sessions.svelte';
   import { settingsStore } from '../stores/settings.svelte';
   import { windowStore } from '../stores/window.svelte';
+  import { FEED_COST_COINS } from '../utils/rewards';
 
   let {
     class: className = '',
@@ -68,6 +70,13 @@
             🍗 {Math.round(petStore.petData.hunger)} &nbsp;
             🪙 {petStore.petData.coins}
           </p>
+          <button
+            class="feed-btn"
+            disabled={!petStore.canFeed}
+            onclick={() => petStore.applyFeed()}
+          >
+            🍖 {$_('pet.feed')} (-{FEED_COST_COINS} 🪙)
+          </button>
         </div>
       {/if}
     </div>
@@ -180,5 +189,26 @@
     color: rgba(255, 255, 255, 0.7);
     font-size: 13px;
     margin: 0;
+  }
+
+  .feed-btn {
+    margin-top: 10px;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    padding: 6px 14px;
+    color: rgba(255, 255, 255, 0.85);
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .feed-btn:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.12);
+  }
+
+  .feed-btn:disabled {
+    opacity: 0.4;
+    cursor: default;
   }
 </style>

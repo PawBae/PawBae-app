@@ -100,7 +100,16 @@ class PetStore {
     };
   }
 
-  applyFeed(amount: number = 20) {
+  /** Whether the feed button should be live: the cost is covered and hunger isn't full. */
+  get canFeed(): boolean {
+    return this.petData.coins >= FEED_COST_COINS && this.petData.hunger < HUNGER_MAX;
+  }
+
+  applyFeed(amount: number = 20): boolean {
+    // UI gate: feeding while broke would be free (the reducer clamps the spend at
+    // zero) and feeding at full hunger would burn coins for nothing. The reducer's
+    // clamp stays as a defensive backstop behind this.
+    if (!this.canFeed) return false;
     const wasHungry = this.petData.hunger < 30;
     const newHunger = Math.min(HUNGER_MAX, this.petData.hunger + amount);
     const affectionBonus = wasHungry ? AFFECTION_FEED_HUNGRY : 0;
@@ -110,12 +119,12 @@ class PetStore {
       affection: Math.min(AFFECTION_MAX, this.petData.affection + affectionBonus),
       lastTickAt: Date.now(),
     };
-    // Clamp-at-zero lives in the reward gate now — same Math.max(0, coins - 5) net effect.
     this.awardCoins('feed', -FEED_COST_COINS);
     this.currentAction = 'eat';
     setTimeout(() => {
       if (this.currentAction === 'eat') this.currentAction = 'idle';
     }, 3000);
+    return true;
   }
 
   applyHeadpat() {
