@@ -1,11 +1,16 @@
 //! Pet-mode helpers: efficiency_hover_poll, mini-window floating reassert, codex utility-session detection.
 
+#[cfg(not(target_os = "windows"))]
 use std::sync::atomic::Ordering;
+#[cfg(not(target_os = "windows"))]
 use std::sync::Arc;
 
+#[cfg(not(target_os = "windows"))]
 use tauri::Emitter;
 
-use crate::state::{ClaudeSession, PetState, WindowState};
+use crate::state::ClaudeSession;
+#[cfg(not(target_os = "windows"))]
+use crate::state::{PetState, WindowState};
 
 #[cfg(target_os = "macos")]
 use crate::platform::macos::{
@@ -18,6 +23,11 @@ use crate::platform::macos::{
 ///    50 px tall at the top of the screen) — much wider than the actual
 ///    window so the user can approach from either side.
 ///  - **Expanded**: the panel area (500 × 400 px, top-center).
+///
+/// Not compiled on Windows: hover/drag there live in the unified
+/// `pet_passthrough_poll_windows` thread, and this loop's NSEvent readers
+/// are no-op stubs anyway.
+#[cfg(not(target_os = "windows"))]
 pub(crate) fn efficiency_hover_poll(
     app: tauri::AppHandle,
     ws: Arc<WindowState>,
@@ -299,20 +309,20 @@ pub(crate) fn efficiency_hover_poll(
     }
     ws.hover_thread_alive.store(false, Ordering::SeqCst);
 }
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 fn macos_cursor_position() -> (f64, f64) {
     (0.0, 0.0)
 }
-// Non-macOS stubs: the efficiency hover / notch drag tracker is a macOS-only
-// feature (driven by NSEvent), but the polling loop itself is not gated, so
-// we provide no-op implementations on other platforms to keep the build
-// happy. The poll loop never engages drag here because `NOTCH_SCREEN_INFO`
-// stays unset on Windows/Linux.
-#[cfg(not(target_os = "macos"))]
+// Linux stubs: the efficiency hover / notch drag tracker is a macOS-only
+// feature (driven by NSEvent), but the polling loop itself also runs on
+// Linux, so we provide no-op implementations there to keep the build happy.
+// The poll loop never engages drag here because `NOTCH_SCREEN_INFO` stays
+// unset. (On Windows the loop itself is compiled out, so no stubs needed.)
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 fn macos_pressed_mouse_buttons() -> usize {
     0
 }
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 fn request_drag_apply(
     _app: &tauri::AppHandle,
     _ws: &std::sync::Arc<crate::state::WindowState>,
