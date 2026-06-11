@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "pawbae-app",
+  "productName": "PawBae",
   "version": "0.1.0",
   "identifier": "ai.pawbae.app",
   "build": {

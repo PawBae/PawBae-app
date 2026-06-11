@@ -2,7 +2,7 @@
 name = "pawbae-app"
 version = "0.1.0"
 description = "PawBae Desktop Pet"
-authors = ["you"]
+authors = ["PawBae"]
 license = "MIT"
 edition = "2021"
 rust-version = "1.77.2"
