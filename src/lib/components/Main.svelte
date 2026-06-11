@@ -1,6 +1,7 @@
 <script lang="ts">
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
+  import { _ } from 'svelte-i18n';
   import { agentStore } from '../stores/agents.svelte';
   import { petStore } from '../stores/pet.svelte';
   import { sessionStore } from '../stores/sessions.svelte';
@@ -9,6 +10,7 @@
   import type { AppMode, UpdateModalInfo } from '../types';
   import type { CodexPet } from '../utils/codex-pet';
   import { loadCodexPets, loadDefaultCodexPet } from '../utils/codex-pet';
+  import { tryInvoke } from '../utils/invoke';
   import MascotView from './MascotView.svelte';
   import Onboarding from './Onboarding.svelte';
   import Panel from './Panel.svelte';
@@ -27,6 +29,72 @@
   let updateInfo = $state<UpdateModalInfo | null>(null);
   let updateProgress = $state<number | null>(null);
   let updateProgressStage = $state('');
+  let updateError = $state('');
+
+  // Startup update prompt: check once shortly after launch, after the user has a
+  // mode (never on top of onboarding). The manual flow in Settings → About stays
+  // independent and is the fallback when this check fails quietly.
+  const UPDATE_PROMPT_DELAY_MS = 8000;
+  let updateCheckStarted = false;
+
+  type UpdateProgressPayload = {
+    stage: string;
+    progress?: number | null;
+    downloadedBytes?: number;
+    totalBytes?: number | null;
+    message?: string;
+  };
+
+  function resolveProgressText(stage?: string, fallbackMessage?: string): string {
+    if (stage) {
+      const key = `updateModal.progress.${stage}`;
+      const localized = $_(key);
+      if (localized !== key) return localized;
+    }
+    return fallbackMessage || '';
+  }
+
+  async function checkUpdateOnStartup() {
+    try {
+      const info = (await invoke('check_for_update', { lang: settingsStore.language })) as {
+        current: string;
+        latest: string;
+        hasUpdate: boolean;
+        url: string;
+        notes: string;
+      };
+      if (!info.hasUpdate || !info.url) return;
+      if (info.latest === settingsStore.skippedVersion) return;
+      updateInfo = info;
+      updatePhase = 'available';
+      updateOpen = true;
+    } catch (e) {
+      // Offline or manifest missing — stay quiet; Settings → About has manual check.
+      console.warn('[update] startup check failed:', e);
+    }
+  }
+
+  async function startUpdate() {
+    if (!updateInfo?.url) return;
+    updateError = '';
+    updatePhase = 'downloading';
+    updateProgress = 0;
+    updateProgressStage = resolveProgressText('preparing', '');
+    try {
+      await invoke('run_update', { dmgUrl: updateInfo.url });
+      // The installer helper is spawned and waiting — don't rely solely on the
+      // ready_to_restart progress event racing the invoke resolution.
+      updatePhase = 'ready_to_restart';
+    } catch (e) {
+      updatePhase = 'available';
+      updateError = String(e);
+    }
+  }
+
+  function skipThisVersion() {
+    if (updateInfo) settingsStore.setSkippedVersion(updateInfo.latest);
+    updateOpen = false;
+  }
 
   $effect(() => {
     init();
@@ -59,6 +127,13 @@
 
     addListener('tray-open-settings', () => {
       openSettings();
+    });
+
+    addListener<UpdateProgressPayload>('update-progress', (e) => {
+      const p = e.payload;
+      updateProgress = typeof p.progress === 'number' ? p.progress : null;
+      updateProgressStage = resolveProgressText(p.stage, p.message);
+      if (p.stage === 'ready_to_restart') updatePhase = 'ready_to_restart';
     });
 
     // Reward model (P1-C): hydrate persisted coins/ledger, then listen for agent
@@ -117,6 +192,13 @@
     if (settingsStore.appMode) startModePolling();
   });
 
+  $effect(() => {
+    if (!settingsStore.appMode || showOnboarding || updateCheckStarted) return;
+    updateCheckStarted = true;
+    const timer = setTimeout(checkUpdateOnStartup, UPDATE_PROMPT_DELAY_MS);
+    return () => clearTimeout(timer);
+  });
+
   async function openSettings() {
     if (windowStore.settingsOpen) return;
     windowStore.setSettingsOpen(true);
@@ -152,10 +234,11 @@
     info={updateInfo}
     progress={updateProgress}
     progressStage={updateProgressStage}
+    errorMsg={updateError}
     onLater={() => { updateOpen = false; }}
-    onSkipVersion={() => { updateOpen = false; }}
-    onUpdateNow={() => { updatePhase = 'downloading'; }}
-    onRestartNow={() => {}}
+    onSkipVersion={skipThisVersion}
+    onUpdateNow={startUpdate}
+    onRestartNow={() => { tryInvoke('exit_app'); }}
   />
 </div>
 
