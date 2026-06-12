@@ -4,12 +4,19 @@ import type {
   ClaudeTaskCompleteEvent,
   CoinAward,
   CoinSource,
+  GrowthCelebration,
   PetAction,
   PetData,
   PomodoroState,
   RewardLedgerSnapshot,
   UserInputEvent,
 } from '../types';
+import {
+  type AchievementContext,
+  evaluateAchievements,
+  sanitizeUnlockMap,
+} from '../utils/achievements';
+import { type EvolutionInfo, evolutionInfo } from '../utils/evolution';
 import { tryInvoke } from '../utils/invoke';
 import {
   type AwardResult,
@@ -17,10 +24,12 @@ import {
   applyUserInput,
   awardAgentStop,
   clearFocusStreak,
-  DAILY_GIFT_COINS,
+  currentGiftStreak,
+  dailyGiftAmount,
   FEED_COST_COINS,
   initialRewardState,
   type MutableRewardState,
+  nextGiftStreak,
   restoreRewardState,
   sanitizeStoredCount,
   snapshotRewardState,
@@ -62,6 +71,8 @@ function defaultPetData(): PetData {
     headpatToday: 0,
     headpatDate: todayStr(),
     pomodoroCoins: 0,
+    giftStreak: 0,
+    firstMeetAt: Date.now(),
   };
 }
 
@@ -73,6 +84,11 @@ class PetStore {
   // utils/rewards.ts mutates this slice in place; petData.coins stays the single source
   // of truth for the displayed balance and is only ever set via commitCoins().
   rewards = $state<MutableRewardState>(initialRewardState());
+  // Phase 6 growth: unlock map (id -> epoch ms), the highest evolution stage already
+  // celebrated, and the FIFO of pending celebration moments MascotView plays back.
+  achievements = $state<Record<string, number>>({});
+  evolutionStageSeen = $state(0);
+  celebrations = $state<GrowthCelebration[]>([]);
   private pomodoroInterval: ReturnType<typeof setInterval> | null = null;
   private storeInstance: Awaited<ReturnType<typeof load>> | null = null;
   private initPromise: Promise<() => void> | null = null;
@@ -145,13 +161,41 @@ class PetStore {
     }, 2000);
   }
 
+  /** Whether today's gift is still unclaimed. */
+  get canClaimDailyGift(): boolean {
+    return this.petData.lastDailyGift !== todayStr();
+  }
+
+  /** Live streak for display: stored value while alive (claimed today/yesterday), else 0. */
+  get giftStreakLive(): number {
+    return currentGiftStreak(this.petData.lastDailyGift, todayStr(), this.petData.giftStreak);
+  }
+
+  /** What the next claim pays, including the streak bonus it would reach. */
+  get nextGiftAmount(): number {
+    return dailyGiftAmount(
+      nextGiftStreak(this.petData.lastDailyGift, todayStr(), this.petData.giftStreak),
+    );
+  }
+
+  /** Whole days since the pet was adopted (firstMeetAt). */
+  get daysTogether(): number {
+    return Math.max(0, Math.floor((Date.now() - this.petData.firstMeetAt) / 86_400_000));
+  }
+
+  /** Evolution snapshot derived from lifetime earnings. Cheap pure compute on access. */
+  get evolution(): EvolutionInfo {
+    return evolutionInfo(this.rewards.totals);
+  }
+
   claimDailyGift() {
     const today = todayStr();
     if (this.petData.lastDailyGift === today) return false;
+    const streak = nextGiftStreak(this.petData.lastDailyGift, today, this.petData.giftStreak);
     // Both mutations complete synchronously before awardCoins' async persist runs, so
-    // the saved snapshot always carries the claimed date AND the +50 together.
-    this.petData = { ...this.petData, lastDailyGift: today };
-    this.awardCoins('daily_gift', DAILY_GIFT_COINS, { reason: today });
+    // the saved snapshot always carries the claimed date, the streak AND the coins together.
+    this.petData = { ...this.petData, lastDailyGift: today, giftStreak: streak };
+    this.awardCoins('daily_gift', dailyGiftAmount(streak), { reason: today });
     return true;
   }
 
@@ -239,8 +283,57 @@ class PetStore {
     if (result.coinsAfter !== this.petData.coins) {
       this.petData = { ...this.petData, coins: result.coinsAfter };
     }
-    if (result.awards.length > 0) this.persistRewards();
+    if (result.awards.length > 0) {
+      // Growth runs BEFORE the persist so one save carries the balance, any new unlock
+      // timestamps and the celebrated-stage marker together.
+      this.checkGrowth(result.awards[result.awards.length - 1].at);
+      this.persistRewards();
+    }
     return result.awards;
+  }
+
+  /**
+   * Re-derive evolution stage + achievements from current state and queue celebrations
+   * for anything newly reached. Idempotent: everything is a predicate over persisted
+   * counters, so re-running can never double-celebrate (stage marker / unlock map gate).
+   */
+  private checkGrowth(at: number): boolean {
+    let dirty = false;
+    const info = this.evolution;
+    if (info.stageIndex > this.evolutionStageSeen) {
+      // Jumping several stages at once (e.g. a restored ledger meeting this feature for
+      // the first time) celebrates only the stage actually reached, not each rung.
+      this.evolutionStageSeen = info.stageIndex;
+      this.celebrations = [
+        ...this.celebrations,
+        { kind: 'evolution', stageIndex: info.stageIndex },
+      ];
+      dirty = true;
+    }
+    const ctx: AchievementContext = {
+      totals: this.rewards.totals,
+      lifetimeInputCount: this.rewards.lifetimeInputCount,
+      giftStreak: this.giftStreakLive,
+      daysTogether: this.daysTogether,
+      stageIndex: info.stageIndex,
+    };
+    const fresh = evaluateAchievements(ctx, this.achievements);
+    if (fresh.length > 0) {
+      const next: Record<string, number> = { ...this.achievements };
+      for (const def of fresh) next[def.id] = at;
+      this.achievements = next;
+      this.celebrations = [
+        ...this.celebrations,
+        ...fresh.map((d): GrowthCelebration => ({ kind: 'achievement', id: d.id })),
+      ];
+      dirty = true;
+    }
+    return dirty;
+  }
+
+  /** Pop the celebration currently shown; MascotView calls this after its display beat. */
+  shiftCelebration() {
+    if (this.celebrations.length > 0) this.celebrations = this.celebrations.slice(1);
   }
 
   private handleTaskComplete(payload: ClaudeTaskCompleteEvent) {
@@ -322,15 +415,29 @@ class PetStore {
     const recent = ((await store.get('reward_ledger')) as CoinAward[]) ?? [];
     const lifetimeInputCount = sanitizeStoredCount(await store.get('lifetime_input_count'));
     const lastAwardedMilestone = sanitizeStoredCount(await store.get('last_input_milestone'));
+    const giftStreak = sanitizeStoredCount(await store.get('gift_streak'));
+    // firstMeetAt is written exactly once: a missing/corrupt value means this install
+    // predates the growth system (or is fresh) — adopt now and persist it on first save.
+    const rawFirstMeet = await store.get('first_meet_at');
+    const firstMeetAt =
+      typeof rawFirstMeet === 'number' && Number.isFinite(rawFirstMeet) && rawFirstMeet > 0
+        ? rawFirstMeet
+        : Date.now();
+    this.achievements = sanitizeUnlockMap(await store.get('achievements'));
+    this.evolutionStageSeen = sanitizeStoredCount(await store.get('evolution_stage_seen'));
     // Hunger/affection/headpat stay session-ephemeral (no pet-behavior change in P1-C);
     // only the coin slice persists. restoreRewardState() backfills anything missing.
-    this.loadPetData({ ...defaultPetData(), coins, lastDailyGift });
+    this.loadPetData({ ...defaultPetData(), coins, lastDailyGift, giftStreak, firstMeetAt });
     this.rewards = restoreRewardState({
       totals,
       recent,
       lifetimeInputCount,
       lastAwardedMilestone,
     });
+    // Time/stage-driven growth (days-together, a ledger that out-leveled the celebrated
+    // stage while this feature shipped) must be caught at startup, not only on the next
+    // coin event. Persist immediately so a crash can't replay the celebration.
+    if (this.checkGrowth(Date.now())) this.persistRewards();
   }
 
   private saveInFlight: Promise<void> = Promise.resolve();
@@ -361,6 +468,10 @@ class PetStore {
     await store.set('reward_ledger', snap.recent);
     await store.set('lifetime_input_count', snap.lifetimeInputCount);
     await store.set('last_input_milestone', snap.lastAwardedMilestone);
+    await store.set('gift_streak', this.petData.giftStreak);
+    await store.set('first_meet_at', this.petData.firstMeetAt);
+    await store.set('achievements', { ...this.achievements });
+    await store.set('evolution_stage_seen', this.evolutionStageSeen);
     await store.save();
   }
 

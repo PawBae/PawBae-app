@@ -5,6 +5,7 @@
   import { sessionStore } from '../stores/sessions.svelte';
   import { settingsStore } from '../stores/settings.svelte';
   import { windowStore } from '../stores/window.svelte';
+  import { ACHIEVEMENTS } from '../utils/achievements';
   import { FEED_COST_COINS } from '../utils/rewards';
 
   let {
@@ -14,6 +15,16 @@
   } = $props();
 
   const maxHeight = $derived(settingsStore.panelMaxHeight);
+
+  const evo = $derived(petStore.evolution);
+  const unlockedCount = $derived(
+    ACHIEVEMENTS.filter((d) => petStore.achievements[d.id] !== undefined).length,
+  );
+
+  function achievementTitle(id: string, locked: boolean, secret: boolean | undefined): string {
+    if (locked && secret) return '???';
+    return `${$_(`growth.ach.${id}`)} — ${$_(`growth.achDesc.${id}`)}`;
+  }
 </script>
 
 {#if windowStore.expanded}
@@ -65,18 +76,81 @@
         </div>
       {:else}
         <div class="pet-panel">
+          <div class="growth-header">
+            <span class="stage-emoji">{evo.stage.emoji}</span>
+            <div class="growth-text">
+              <div class="stage-line">
+                <span class="stage-name">{$_(`growth.stage.${evo.stage.id}`)}</span>
+                {#if evo.style}
+                  <span class="style-tag style-{evo.style}">{$_(`growth.style.${evo.style}`)}</span>
+                {/if}
+              </div>
+              <div class="days-line">
+                {$_('growth.daysTogether', { values: { days: petStore.daysTogether + 1 } })}
+              </div>
+            </div>
+          </div>
+
+          {#if evo.next}
+            <div class="xp-bar">
+              <div class="xp-fill" style="width: {Math.round(evo.progress * 100)}%"></div>
+            </div>
+            <div class="xp-label">{evo.xp} / {evo.next.minXp} XP → {evo.next.emoji}</div>
+          {:else}
+            <div class="xp-label">👑 {$_('growth.maxStage')} · {evo.xp} XP</div>
+          {/if}
+
           <p class="pet-status">
             ❤️ {Math.round(petStore.petData.affection)} &nbsp;
             🍗 {Math.round(petStore.petData.hunger)} &nbsp;
             🪙 {petStore.petData.coins}
           </p>
-          <button
-            class="feed-btn"
-            disabled={!petStore.canFeed}
-            onclick={() => petStore.applyFeed()}
-          >
-            🍖 {$_('pet.feed')} (-{FEED_COST_COINS} 🪙)
-          </button>
+
+          <div class="btn-row">
+            <button
+              class="action-btn"
+              disabled={!petStore.canFeed}
+              onclick={() => petStore.applyFeed()}
+            >
+              🍖 {$_('pet.feed')} (-{FEED_COST_COINS})
+            </button>
+            <button
+              class="action-btn gift"
+              disabled={!petStore.canClaimDailyGift}
+              onclick={() => petStore.claimDailyGift()}
+            >
+              {#if petStore.canClaimDailyGift}
+                🎁 {$_('pet.dailyGift')} +{petStore.nextGiftAmount}
+              {:else}
+                ✓ {$_('pet.claimed')}
+              {/if}
+            </button>
+          </div>
+
+          {#if petStore.giftStreakLive >= 2}
+            <div class="streak">
+              🔥 {$_('growth.streak', { values: { days: petStore.giftStreakLive } })}
+            </div>
+          {/if}
+
+          <div class="ach-section">
+            <div class="ach-title">
+              🏆 {$_('growth.achievements')}
+              <span class="ach-count">{unlockedCount}/{ACHIEVEMENTS.length}</span>
+            </div>
+            <div class="ach-grid">
+              {#each ACHIEVEMENTS as def (def.id)}
+                {@const locked = petStore.achievements[def.id] === undefined}
+                <div
+                  class="ach-tile"
+                  class:locked
+                  title={achievementTitle(def.id, locked, def.secret)}
+                >
+                  {locked && def.secret ? '❓' : def.emoji}
+                </div>
+              {/each}
+            </div>
+          </div>
         </div>
       {/if}
     </div>
@@ -188,27 +262,171 @@
   .pet-status {
     color: rgba(255, 255, 255, 0.7);
     font-size: 13px;
-    margin: 0;
+    margin: 10px 0 0;
   }
 
-  .feed-btn {
+  .growth-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    text-align: left;
+  }
+
+  .stage-emoji {
+    font-size: 22px;
+    line-height: 1;
+  }
+
+  .growth-text {
+    min-width: 0;
+  }
+
+  .stage-line {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .stage-name {
+    color: rgba(255, 255, 255, 0.9);
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  .style-tag {
+    font-size: 9px;
+    font-weight: 600;
+    border-radius: 6px;
+    padding: 1px 6px;
+    color: #1a1a20;
+    background: rgba(255, 200, 120, 0.85);
+  }
+
+  .style-tag.style-commander {
+    background: rgba(120, 160, 240, 0.9);
+  }
+
+  .style-tag.style-zen {
+    background: rgba(100, 210, 150, 0.9);
+  }
+
+  .style-tag.style-companion {
+    background: rgba(255, 150, 185, 0.9);
+  }
+
+  .days-line {
+    color: rgba(255, 255, 255, 0.4);
+    font-size: 10px;
+    margin-top: 1px;
+  }
+
+  .xp-bar {
+    margin-top: 8px;
+    height: 6px;
+    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.08);
+    overflow: hidden;
+  }
+
+  .xp-fill {
+    height: 100%;
+    border-radius: 3px;
+    background: linear-gradient(90deg, #f5a623, #f7ce4d);
+    transition: width 0.4s ease;
+  }
+
+  .xp-label {
+    margin-top: 3px;
+    color: rgba(255, 255, 255, 0.35);
+    font-size: 10px;
+    text-align: right;
+  }
+
+  .btn-row {
     margin-top: 10px;
+    display: flex;
+    gap: 6px;
+    justify-content: center;
+  }
+
+  .action-btn {
+    flex: 1;
     background: rgba(255, 255, 255, 0.06);
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 8px;
-    padding: 6px 14px;
+    padding: 6px 8px;
     color: rgba(255, 255, 255, 0.85);
-    font-size: 12px;
+    font-size: 11px;
     cursor: pointer;
     transition: all 0.15s;
+    white-space: nowrap;
   }
 
-  .feed-btn:hover:not(:disabled) {
+  .action-btn:hover:not(:disabled) {
     background: rgba(255, 255, 255, 0.12);
   }
 
-  .feed-btn:disabled {
+  .action-btn:disabled {
     opacity: 0.4;
     cursor: default;
+  }
+
+  .action-btn.gift:not(:disabled) {
+    border-color: rgba(245, 166, 35, 0.45);
+    color: #f7ce4d;
+  }
+
+  .streak {
+    margin-top: 8px;
+    color: rgba(255, 180, 90, 0.9);
+    font-size: 11px;
+    font-weight: 600;
+  }
+
+  .ach-section {
+    margin-top: 12px;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    padding-top: 10px;
+    text-align: left;
+  }
+
+  .ach-title {
+    color: rgba(255, 255, 255, 0.75);
+    font-size: 11px;
+    font-weight: 600;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .ach-count {
+    color: rgba(255, 255, 255, 0.35);
+    font-weight: 500;
+  }
+
+  .ach-grid {
+    margin-top: 8px;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(26px, 1fr));
+    gap: 4px;
+  }
+
+  .ach-tile {
+    aspect-ratio: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    border-radius: 6px;
+    background: rgba(245, 166, 35, 0.14);
+    border: 1px solid rgba(245, 166, 35, 0.3);
+    cursor: help;
+  }
+
+  .ach-tile.locked {
+    background: rgba(255, 255, 255, 0.03);
+    border-color: rgba(255, 255, 255, 0.06);
+    filter: grayscale(1);
+    opacity: 0.45;
   }
 </style>

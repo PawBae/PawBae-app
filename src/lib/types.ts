@@ -106,7 +106,17 @@ export interface PetData {
   headpatToday: number;
   headpatDate: string;
   pomodoroCoins: number;
+  // Phase 6 growth: consecutive daily-gift days (persisted) and the adoption moment
+  // (persisted once, drives "days together" memories + achievements).
+  giftStreak: number;
+  firstMeetAt: number;
 }
+
+// A queued growth moment the mascot celebrates (evolution flash / achievement toast).
+// Newest-last; MascotView displays the head and shifts it after the show beat.
+export type GrowthCelebration =
+  | { kind: 'evolution'; stageIndex: number }
+  | { kind: 'achievement'; id: string };
 
 export interface PomodoroState {
   active: boolean;
