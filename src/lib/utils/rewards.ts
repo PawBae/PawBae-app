@@ -24,6 +24,8 @@ export const INPUT_MILESTONE_STEP = 500;
 export const INPUT_MILESTONE_COINS = 2;
 export const LEDGER_RECENT_CAP = 100;
 export const DAILY_GIFT_COINS = 50;
+export const DAILY_GIFT_STREAK_BONUS = 5; // extra coins per consecutive day beyond the first
+export const DAILY_GIFT_STREAK_CAP = 7; // bonus stops growing here (50 → 80 coins)
 export const FEED_COST_COINS = 5;
 
 const COIN_SOURCES: readonly CoinSource[] = [
@@ -256,6 +258,46 @@ export function trackFocusInput(
     awards.push(...r.awards);
   }
   return { awards, coinsAfter: coins };
+}
+
+// ── Daily-gift streak ──────────────────────────────────────────────
+// Dates are the store's UTC YYYY-MM-DD strings (todayStr() in pet.svelte.ts), so
+// "yesterday" is computed in the same calendar and DST can't split a streak.
+
+function yesterdayOf(today: string): string {
+  const parsed = Date.parse(`${today}T00:00:00Z`);
+  if (!Number.isFinite(parsed)) return '';
+  return new Date(parsed - 86_400_000).toISOString().slice(0, 10);
+}
+
+/**
+ * The streak value for a gift claimed `today`: consecutive with the previous claim
+ * (yesterday) extends it, anything else — including a corrupt stored streak — restarts
+ * at 1. Same-day double claims never reach this (claimDailyGift gates on the date).
+ */
+export function nextGiftStreak(prevGiftDate: string, today: string, prevStreak: number): number {
+  const prev = sanitizeStoredCount(prevStreak);
+  if (prev >= 1 && prevGiftDate !== '' && prevGiftDate === yesterdayOf(today)) return prev + 1;
+  return 1;
+}
+
+/** Display streak: the stored value while it's still alive (claimed today or yesterday), else 0. */
+export function currentGiftStreak(
+  lastGiftDate: string,
+  today: string,
+  storedStreak: number,
+): number {
+  const streak = sanitizeStoredCount(storedStreak);
+  if (lastGiftDate === today || (lastGiftDate !== '' && lastGiftDate === yesterdayOf(today))) {
+    return streak;
+  }
+  return 0;
+}
+
+/** Gift payout for a given streak: base + bonus per extra consecutive day, capped. */
+export function dailyGiftAmount(streak: number): number {
+  const s = Math.max(1, Math.min(DAILY_GIFT_STREAK_CAP, sanitizeStoredCount(streak)));
+  return DAILY_GIFT_COINS + DAILY_GIFT_STREAK_BONUS * (s - 1);
 }
 
 /** One batched user-input event drives both input-derived sources, chaining the balance. */

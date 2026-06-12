@@ -7,6 +7,7 @@
   import type { UserInputEvent } from '../types';
   import type { CodexPet, CodexPetState } from '../utils/codex-pet';
   import { petStateToCodexState } from '../utils/codex-pet';
+  import { STYLE_FROM_STAGE } from '../utils/evolution';
   import { tryInvoke } from '../utils/invoke';
   import { keyboardMoveDelta } from '../utils/keyboard-control';
   import type { PhysicsState } from '../utils/pet-physics';
@@ -17,6 +18,7 @@
     reactionSpriteFor,
     requestReaction,
   } from '../utils/reaction-machine';
+  import CelebrationBubble from './CelebrationBubble.svelte';
   import MiniPetMascot from './MiniPetMascot.svelte';
   import VoiceBubble from './VoiceBubble.svelte';
 
@@ -61,6 +63,24 @@
   let keyboardMoveTimer: ReturnType<typeof setTimeout> | null = null;
 
   const mascotSize = $derived(Math.round(60 * settingsStore.mascotScale));
+
+  // Growth celebrations (Phase 6): play the queue head for a beat, then shift. The
+  // effect re-arms per head change, so back-to-back unlocks show sequentially.
+  const CELEBRATION_MS = 3200;
+  const celebration = $derived(petStore.celebrations[0] ?? null);
+  $effect(() => {
+    if (!celebration) return;
+    const timer = setTimeout(() => petStore.shiftCelebration(), CELEBRATION_MS);
+    return () => clearTimeout(timer);
+  });
+
+  // Evolution aura: a subtle glow from the branching stage up, tinted by work style.
+  // Class-only here; the drop-shadow lives in CSS so the sprite itself stays untouched.
+  const auraClass = $derived.by(() => {
+    const evo = petStore.evolution;
+    if (evo.stageIndex < STYLE_FROM_STAGE) return '';
+    return `aura stage-${evo.stageIndex} style-${evo.style ?? 'companion'}`;
+  });
 
   $effect(() => {
     // macOS: the efficiency hover poll drives hover/drag in BOTH modes, so it
@@ -274,17 +294,24 @@
   style="width: {mascotSize}px; height: {mascotSize}px;"
 >
   {#if pet}
-    <MiniPetMascot
-      {pet}
-      baseState={spriteState}
-      size={mascotSize}
-      enableHoverJump
-      externalHover={windowStore.mascotHover}
-      useExternalHover
-      suppressHover={windowStore.moveMode}
-      {reactionSprite}
-    />
+    <div class={auraClass}>
+      <MiniPetMascot
+        {pet}
+        baseState={spriteState}
+        size={mascotSize}
+        enableHoverJump
+        externalHover={windowStore.mascotHover}
+        useExternalHover
+        suppressHover={windowStore.moveMode}
+        {reactionSprite}
+      />
+    </div>
   {/if}
+
+  <CelebrationBubble
+    {celebration}
+    placement={settingsStore.appMode === 'pet' ? 'above' : 'below'}
+  />
 
   <VoiceBubble
     visible={voiceRecording || !!voiceText}
@@ -304,5 +331,45 @@
     display: flex;
     align-items: center;
     justify-content: center;
+  }
+
+  /* Evolution auras: stage drives intensity, work style drives the tint. Filters sit on
+     the wrapper so the sprite's own background-position animation is unaffected. */
+  .aura {
+    --aura-color: rgba(255, 200, 120, 0.55);
+  }
+
+  .aura.style-commander {
+    --aura-color: rgba(100, 149, 237, 0.6);
+  }
+
+  .aura.style-zen {
+    --aura-color: rgba(80, 200, 140, 0.6);
+  }
+
+  .aura.style-companion {
+    --aura-color: rgba(255, 143, 179, 0.6);
+  }
+
+  .aura.stage-2 {
+    filter: drop-shadow(0 0 3px var(--aura-color));
+  }
+
+  .aura.stage-3 {
+    filter: drop-shadow(0 0 5px var(--aura-color)) drop-shadow(0 0 10px var(--aura-color));
+  }
+
+  .aura.stage-4 {
+    animation: legendPulse 3s ease-in-out infinite;
+  }
+
+  @keyframes legendPulse {
+    0%,
+    100% {
+      filter: drop-shadow(0 0 4px var(--aura-color)) drop-shadow(0 0 9px rgba(255, 215, 80, 0.5));
+    }
+    50% {
+      filter: drop-shadow(0 0 7px var(--aura-color)) drop-shadow(0 0 14px rgba(255, 215, 80, 0.75));
+    }
   }
 </style>
