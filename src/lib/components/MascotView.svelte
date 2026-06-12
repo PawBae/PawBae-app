@@ -48,6 +48,9 @@
 
   let physicsSprite = $state<string | null>(null);
   let physicsState = $state<PhysicsState | null>(null); // null while physics disabled
+  // $state so the pause effect below re-fires when a NEW loop is created (pet switch /
+  // settings close) while the panel is already expanded.
+  let physicsLoop = $state<ReturnType<typeof createPhysicsLoop> | null>(null);
 
   const spriteState = $derived<CodexPetState>(
     physicsSprite ?? petStateToCodexState(pet, sourceState)
@@ -108,7 +111,7 @@
     };
   });
 
-  // Physics loop — paused when settings panel is open
+  // Physics loop — torn down while the settings panel is open
   $effect(() => {
     const currentPet = pet;
     if (!currentPet?.physics?.enabled) return;
@@ -121,6 +124,7 @@
       pet: currentPet,
       enabled: true,
     });
+    physicsLoop = loop;
     loop.start();
     // Sample the LIVE physics state up front so the reaction busy-guard isn't stale for the
     // first interval tick: the loop's snapshot initialises to 'on_floor' but the real start
@@ -156,6 +160,7 @@
     return () => {
       disposed = true;
       loop.stop();
+      physicsLoop = null;
       clearInterval(spriteInterval);
       physicsSprite = null;
       physicsState = null;
@@ -163,6 +168,16 @@
       tryInvoke('set_stroll_mode', { enabled: false });
       tryInvoke('set_throw_tracking', { enabled: false });
     };
+  });
+
+  // While the panel is expanded the pet must stand still: the stroll/physics loop moves
+  // the WHOLE mini window, so a strolling pet drags the open panel around the screen.
+  // Pause (not teardown) keeps position and physics state, so collapsing the panel
+  // resumes in place instead of re-dropping the pet; teardown stays reserved for the
+  // settings flow, which resizes the window. Pinch/throw still update state while
+  // paused — tick() simply stops moving the window.
+  $effect(() => {
+    physicsLoop?.setPaused(windowStore.expanded);
   });
 
   function handleUserInput(ev: UserInputEvent) {
