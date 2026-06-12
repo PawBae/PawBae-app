@@ -8,6 +8,7 @@
   import type { CodexPet, CodexPetState } from '../utils/codex-pet';
   import { petStateToCodexState } from '../utils/codex-pet';
   import { tryInvoke } from '../utils/invoke';
+  import { keyboardMoveDelta } from '../utils/keyboard-control';
   import type { PhysicsState } from '../utils/pet-physics';
   import { createPhysicsLoop } from '../utils/pet-physics';
   import {
@@ -53,9 +54,11 @@
   // One-shot input-reaction overlay (P1-B). The pure machine lives in reaction-machine.ts;
   // this component owns the listener, the busy-guard, and the revert timer.
   const REACTION_MS = 350; // beat duration ≈ one play of the reaction row (tune in acceptance)
+  const KEYBOARD_MOVE_MODE_MS = 140;
   let reactionSprite = $state<CodexPetState | null>(null);
   const reaction = initialReactionState();
   let reactionTimer: ReturnType<typeof setTimeout> | null = null;
+  let keyboardMoveTimer: ReturnType<typeof setTimeout> | null = null;
 
   const mascotSize = $derived(Math.round(60 * settingsStore.mascotScale));
 
@@ -160,6 +163,44 @@
       reactionTimer = null;
     }, REACTION_MS);
   }
+
+  function isEditableTarget(target: EventTarget | null) {
+    if (!(target instanceof HTMLElement)) return false;
+    const tag = target.tagName.toLowerCase();
+    return target.isContentEditable || tag === 'input' || tag === 'textarea' || tag === 'select';
+  }
+
+  function handleKeyboardMove(e: KeyboardEvent) {
+    if (windowStore.expanded || windowStore.settingsOpen) return;
+    if (physicsState !== null && physicsState !== 'on_floor') return;
+    if (isEditableTarget(e.target)) return;
+
+    const delta = keyboardMoveDelta(e);
+    if (!delta) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+    windowStore.setMoveMode(true);
+    void windowStore.moveBy(delta.dx, delta.dy);
+
+    if (keyboardMoveTimer) clearTimeout(keyboardMoveTimer);
+    keyboardMoveTimer = setTimeout(() => {
+      windowStore.setMoveMode(false);
+      keyboardMoveTimer = null;
+    }, KEYBOARD_MOVE_MODE_MS);
+  }
+
+  $effect(() => {
+    window.addEventListener('keydown', handleKeyboardMove);
+    return () => {
+      window.removeEventListener('keydown', handleKeyboardMove);
+      if (keyboardMoveTimer) {
+        clearTimeout(keyboardMoveTimer);
+        keyboardMoveTimer = null;
+      }
+      windowStore.setMoveMode(false);
+    };
+  });
 
   // One-shot pet reaction to batched global input (Tauri "user-input" from P1-A; macOS-only).
   // Capture is OFF by default in the backend (privacy) — opt in for this component's
