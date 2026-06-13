@@ -160,6 +160,11 @@
     "petModeLongDesc": "养成你的桌面宠物！喂食、互动，并通过丰富动画提升好感。",
     "recommended": "推荐"
   },
+  "agentBubble": {
+    "waiting": "需要你看一眼",
+    "compacting": "整理上下文中",
+    "working": "处理中…"
+  },
   "growth": {
     "evolvedTo": "进化为",
     "maxStage": "满级",

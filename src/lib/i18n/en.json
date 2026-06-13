@@ -160,6 +160,11 @@
     "petModeLongDesc": "Raise your desktop pet! Feed, play, and build affection with rich animations.",
     "recommended": "Recommended"
   },
+  "agentBubble": {
+    "waiting": "Needs your eyes",
+    "compacting": "Tidying context",
+    "working": "On it…"
+  },
   "growth": {
     "evolvedTo": "Evolved into",
     "maxStage": "Max stage",
