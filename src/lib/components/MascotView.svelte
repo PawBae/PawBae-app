@@ -7,6 +7,7 @@
   import { windowStore } from '../stores/window.svelte';
   import type { UserInputEvent } from '../types';
   import { aggregateSessions, isOverloaded, mascotStateFor } from '../utils/agent-activity';
+  import { dayPartFor } from '../utils/circadian';
   import type { CodexPet, CodexPetState } from '../utils/codex-pet';
   import { petStateToCodexState } from '../utils/codex-pet';
   import { STYLE_FROM_STAGE } from '../utils/evolution';
@@ -14,7 +15,7 @@
     availableIdleActions,
     IDLE_ACTION_MS,
     nextIdleDelayMs,
-    pickIdleAction,
+    pickIdleActionFor,
   } from '../utils/idle-actions';
   import { tryInvoke } from '../utils/invoke';
   import { keyboardMoveDelta } from '../utils/keyboard-control';
@@ -162,7 +163,10 @@
       timer = setTimeout(() => {
         if (cancelled) return;
         if (idleAllowedNow()) {
-          const action = pickIdleAction(actions, Math.random());
+          // Time-of-day bias: calm rows at night, lively rows midday. Hour is read at
+          // fire time so a long-running app drifts with the clock.
+          const part = dayPartFor(new Date().getHours());
+          const action = pickIdleActionFor(actions, part, Math.random());
           if (action) {
             idleSprite = action as CodexPetState;
             revert = setTimeout(() => {
