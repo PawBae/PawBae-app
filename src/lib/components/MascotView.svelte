@@ -2,12 +2,20 @@
   import { listen } from '@tauri-apps/api/event';
   import { agentStore } from '../stores/agents.svelte';
   import { petStore } from '../stores/pet.svelte';
+  import { sessionStore } from '../stores/sessions.svelte';
   import { settingsStore } from '../stores/settings.svelte';
   import { windowStore } from '../stores/window.svelte';
   import type { UserInputEvent } from '../types';
+  import { aggregateSessions, isOverloaded, mascotStateFor } from '../utils/agent-activity';
   import type { CodexPet, CodexPetState } from '../utils/codex-pet';
   import { petStateToCodexState } from '../utils/codex-pet';
   import { STYLE_FROM_STAGE } from '../utils/evolution';
+  import {
+    availableIdleActions,
+    IDLE_ACTION_MS,
+    nextIdleDelayMs,
+    pickIdleAction,
+  } from '../utils/idle-actions';
   import { tryInvoke } from '../utils/invoke';
   import { keyboardMoveDelta } from '../utils/keyboard-control';
   import type { PhysicsState } from '../utils/pet-physics';
@@ -18,6 +26,7 @@
     reactionSpriteFor,
     requestReaction,
   } from '../utils/reaction-machine';
+  import AgentBubble from './AgentBubble.svelte';
   import CelebrationBubble from './CelebrationBubble.svelte';
   import MiniPetMascot from './MiniPetMascot.svelte';
   import VoiceBubble from './VoiceBubble.svelte';
@@ -38,11 +47,26 @@
 
   const isWindows = typeof navigator !== 'undefined' && navigator.userAgent.includes('Windows');
 
+  // Live agent workload (Phase 2): collapse the 2s-polled session statuses into the one
+  // emotion the mascot, the activity bubble and the overload aura share. Pet mode has no
+  // sessions, so it always reads idle.
+  const activity = $derived(
+    settingsStore.appMode === 'coding'
+      ? aggregateSessions(sessionStore.claudeSessions)
+      : { waiting: 0, compacting: 0, working: 0 }
+  );
+
+  // The mascot now mirrors waiting/compacting too, not just a binary working/idle —
+  // pets map these via stateMap (yoonie hides when waiting; default pets play the
+  // waiting row). anySessionActive keeps OpenClaw agents (no hook status) reading busy.
   const sourceState = $derived<'idle' | 'working' | 'compacting' | 'waiting'>(
-    settingsStore.appMode === 'coding' && agentStore.anySessionActive
-      ? 'working'
+    settingsStore.appMode === 'coding'
+      ? mascotStateFor(activity, agentStore.anySessionActive)
       : 'idle'
   );
+
+  // 3+ busy sessions in parallel: the pet shows nervous "overload" energy (roadmap 2.1).
+  const overloaded = $derived(settingsStore.appMode === 'coding' && isOverloaded(activity));
 
   const physicsEnabled = $derived(!!pet?.physics?.enabled);
 
@@ -56,6 +80,13 @@
     physicsSprite ?? petStateToCodexState(pet, sourceState)
   );
 
+  // Idle micro-actions (Phase 5): wire up the long-dormant "Random Action Interval"
+  // setting. While truly idle the pet occasionally plays a short personality row from
+  // its OWN sheet (yoonie blinks/pounces; standard pets wave). Reaction always outranks
+  // it, so typing never gets stepped on.
+  let idleSprite = $state<CodexPetState | null>(null);
+  const idleActions = $derived(availableIdleActions(pet?.animations));
+
   // One-shot input-reaction overlay (P1-B). The pure machine lives in reaction-machine.ts;
   // this component owns the listener, the busy-guard, and the revert timer.
   const REACTION_MS = 350; // beat duration ≈ one play of the reaction row (tune in acceptance)
@@ -64,6 +95,10 @@
   const reaction = initialReactionState();
   let reactionTimer: ReturnType<typeof setTimeout> | null = null;
   let keyboardMoveTimer: ReturnType<typeof setTimeout> | null = null;
+
+  // Overlay slot fed to MiniPetMascot: a live input reaction always wins over an idle
+  // micro-action, which in turn sits above the base/physics sprite.
+  const overlaySprite = $derived<CodexPetState | null>(reactionSprite ?? idleSprite);
 
   const mascotSize = $derived(Math.round(60 * settingsStore.mascotScale));
 
@@ -77,12 +112,75 @@
     return () => clearTimeout(timer);
   });
 
+  // The activity bubble yields to anything that owns the same space below the pet: a
+  // growth celebration, voice transcript/recording, or the expanded panel.
+  const agentBubbleSuppressed = $derived(
+    celebration !== null || voiceRecording || !!voiceText || windowStore.expanded
+  );
+
   // Evolution aura: a subtle glow from the branching stage up, tinted by work style.
   // Class-only here; the drop-shadow lives in CSS so the sprite itself stays untouched.
   const auraClass = $derived.by(() => {
     const evo = petStore.evolution;
     if (evo.stageIndex < STYLE_FROM_STAGE) return '';
     return `aura stage-${evo.stageIndex} style-${evo.style ?? 'companion'}`;
+  });
+
+  // Idle action gating, read live at fire time (not reactively): the pet must be calm —
+  // idle agent state, no panel/settings/hover/move, no reaction or celebration or voice
+  // in flight, and physics either off or standing on the floor.
+  function idleAllowedNow(): boolean {
+    return (
+      sourceState === 'idle' &&
+      !windowStore.expanded &&
+      !windowStore.settingsOpen &&
+      !windowStore.mascotHover &&
+      !windowStore.moveMode &&
+      reactionSprite === null &&
+      celebration === null &&
+      !voiceRecording &&
+      !voiceText &&
+      (physicsState === null || physicsState === 'on_floor')
+    );
+  }
+
+  // Self-rescheduling idle loop. Re-armed only when the stable inputs change (pet's
+  // available rows, the configured interval); the per-fire gate handles the volatile
+  // conditions. nextIdleDelayMs returns null for a non-positive interval → feature off.
+  $effect(() => {
+    const actions = idleActions;
+    const intervalMin = settingsStore.petIdleIntervalMin;
+    if (actions.length === 0) return;
+
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let revert: ReturnType<typeof setTimeout> | null = null;
+
+    function scheduleNext() {
+      const delay = nextIdleDelayMs(intervalMin, Math.random());
+      if (delay === null) return; // interval disabled — stop the loop
+      timer = setTimeout(() => {
+        if (cancelled) return;
+        if (idleAllowedNow()) {
+          const action = pickIdleAction(actions, Math.random());
+          if (action) {
+            idleSprite = action as CodexPetState;
+            revert = setTimeout(() => {
+              idleSprite = null;
+            }, IDLE_ACTION_MS);
+          }
+        }
+        scheduleNext();
+      }, delay);
+    }
+    scheduleNext();
+
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+      if (revert) clearTimeout(revert);
+      idleSprite = null;
+    };
   });
 
   $effect(() => {
@@ -309,7 +407,7 @@
   style="width: {mascotSize}px; height: {mascotSize}px;"
 >
   {#if pet}
-    <div class={auraClass}>
+    <div class="aura-wrap {auraClass}" class:overload={overloaded}>
       <MiniPetMascot
         {pet}
         baseState={spriteState}
@@ -318,7 +416,7 @@
         externalHover={windowStore.mascotHover}
         useExternalHover
         suppressHover={windowStore.moveMode}
-        {reactionSprite}
+        reactionSprite={overlaySprite}
       />
     </div>
   {/if}
@@ -327,6 +425,10 @@
     {celebration}
     placement={settingsStore.appMode === 'pet' ? 'above' : 'below'}
   />
+
+  {#if settingsStore.appMode === 'coding'}
+    <AgentBubble {activity} suppressed={agentBubbleSuppressed} />
+  {/if}
 
   <VoiceBubble
     visible={voiceRecording || !!voiceText}
@@ -385,6 +487,35 @@
     }
     50% {
       filter: drop-shadow(0 0 7px var(--aura-color)) drop-shadow(0 0 14px rgba(255, 215, 80, 0.75));
+    }
+  }
+
+  /* Overload: 3+ agents busy in parallel. A small nervous tremble reads as "stressed,
+     juggling a lot" — transform-based so it composes with any evolution-aura filter
+     instead of fighting it in the cascade. */
+  .aura-wrap.overload {
+    animation: overloadShake 0.45s ease-in-out infinite;
+  }
+
+  @keyframes overloadShake {
+    0%,
+    100% {
+      transform: translate(0, 0) rotate(0deg);
+    }
+    25% {
+      transform: translate(-0.7px, 0.4px) rotate(-1.1deg);
+    }
+    50% {
+      transform: translate(0.7px, -0.3px) rotate(0.9deg);
+    }
+    75% {
+      transform: translate(-0.4px, 0.5px) rotate(-0.6deg);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .aura-wrap.overload {
+      animation: none;
     }
   }
 </style>
