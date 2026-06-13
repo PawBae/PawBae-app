@@ -5,6 +5,7 @@ import {
   IDLE_JITTER_FRACTION,
   nextIdleDelayMs,
   pickIdleAction,
+  pickIdleActionFor,
 } from './idle-actions';
 
 const row = (r: number): AnimationRow => ({ row: r, frames: 4 });
@@ -44,6 +45,33 @@ describe('pickIdleAction', () => {
     expect(pickIdleAction(actions, 1)).toBe('b'); // clamped below 1
     expect(pickIdleAction(actions, Number.NaN)).toBe('a');
     expect(pickIdleAction([], 0.5)).toBeNull();
+  });
+});
+
+describe('pickIdleActionFor (circadian-weighted)', () => {
+  // blink=calm, pounce=lively. Night weights → [3, 1] over total 4.
+  const actions = ['blink', 'pounce'];
+
+  it('maps the random fraction across weighted segments at night', () => {
+    // r*4: [0,3) → blink, [3,4) → pounce.
+    expect(pickIdleActionFor(actions, 'night', 0)).toBe('blink');
+    expect(pickIdleActionFor(actions, 'night', 0.74)).toBe('blink'); // 2.96 < 3
+    expect(pickIdleActionFor(actions, 'night', 0.76)).toBe('pounce'); // 3.04 ≥ 3
+  });
+
+  it('inverts the bias midday', () => {
+    // day weights [1, 3]: [0,1) → blink, [1,4) → pounce.
+    expect(pickIdleActionFor(actions, 'day', 0)).toBe('blink');
+    expect(pickIdleActionFor(actions, 'day', 0.3)).toBe('pounce'); // 1.2 ≥ 1
+  });
+
+  it('returns null for an empty action list', () => {
+    expect(pickIdleActionFor([], 'night', 0.5)).toBeNull();
+  });
+
+  it('can still reach every row even when its tone is disfavored', () => {
+    // Lively row at night has weight 1 — reachable at the top of the range.
+    expect(pickIdleActionFor(actions, 'night', 0.999)).toBe('pounce');
   });
 });
 
