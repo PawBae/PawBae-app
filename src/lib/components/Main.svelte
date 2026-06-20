@@ -11,6 +11,7 @@
   import type { CodexPet } from '../utils/codex-pet';
   import { loadCodexPets, loadDefaultCodexPet } from '../utils/codex-pet';
   import { tryInvoke } from '../utils/invoke';
+  import { classifyIntent } from '../utils/voice-intent';
   import MascotView from './MascotView.svelte';
   import Onboarding from './Onboarding.svelte';
   import Panel from './Panel.svelte';
@@ -23,6 +24,13 @@
   let voiceRecording = $state(false);
   let voiceText = $state('');
   let voiceError = $state('');
+  // Pet's reaction to a recognized final transcript (voice Phase C). `voiceNonce`
+  // bumps on every final so MascotView re-plays the emotion even on a repeated intent.
+  let voiceReply = $state('');
+  let voiceEmotion = $state<string | null>(null);
+  let voiceNonce = $state(0);
+  let voiceReplyTimer: ReturnType<typeof setTimeout> | null = null;
+  const VOICE_REPLY_MS = 2600;
 
   let updateOpen = $state(false);
   let updatePhase = $state<'available' | 'downloading' | 'ready_to_restart'>('available');
@@ -118,7 +126,23 @@
     });
 
     addListener<{ text: string; is_final: boolean }>('voice-transcript', (e) => {
-      voiceText = e.payload.text;
+      // Live partial results keep echoing in the orange "heard" bubble; on the final
+      // result we classify it, hand off to the pet's reply, and react.
+      if (!e.payload.is_final) {
+        voiceText = e.payload.text;
+        return;
+      }
+      const r = classifyIntent(e.payload.text, { petName: pet?.displayName ?? '' });
+      petStore.applyVoiceAffection(r.affectionDelta);
+      voiceText = ''; // swap the echo bubble out for the pet's reply
+      voiceEmotion = r.emotion;
+      voiceReply = $_(r.replyKey);
+      voiceNonce += 1;
+      if (voiceReplyTimer) clearTimeout(voiceReplyTimer);
+      voiceReplyTimer = setTimeout(() => {
+        voiceReply = '';
+        voiceReplyTimer = null;
+      }, VOICE_REPLY_MS);
     });
 
     addListener<boolean>('stroll-mode-changed', (e) => {
@@ -221,7 +245,15 @@
 </script>
 
 <div class="root" data-tauri-drag-region={windowStore.settingsOpen ? undefined : ''}>
-  <MascotView {pet} {voiceRecording} {voiceText} {voiceError} />
+  <MascotView
+    {pet}
+    {voiceRecording}
+    {voiceText}
+    {voiceError}
+    {voiceReply}
+    {voiceEmotion}
+    {voiceNonce}
+  />
   <Panel />
 
   <Onboarding open={showOnboarding} onSelect={handleModeSelect} />
