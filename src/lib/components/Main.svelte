@@ -216,11 +216,11 @@
     if (settingsStore.appMode) startModePolling();
   });
 
-  // Keep speech recognition in the language the user actually speaks, re-applied whenever
-  // the app language changes (no-op off macOS).
+  // Bilingual auto-recognition: the backend runs zh-CN + en-US recognizers together and
+  // picks the higher-confidence result, so the user can speak either language without
+  // switching anything (no-op off macOS).
   $effect(() => {
-    const locale = settingsStore.language.startsWith('zh') ? 'zh-CN' : 'en-US';
-    tryInvoke('voice_set_locale', { locale });
+    tryInvoke('voice_set_locale', { locale: 'auto' });
   });
 
   $effect(() => {
