@@ -69,10 +69,14 @@
     padding: 6px 14px;
     font-size: 12px;
     font-weight: 600;
-    white-space: nowrap;
-    max-width: 200px;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    /* Grow horizontally first (max-content = widest single line), wrapping only past
+       max-width. fit-content collapses CJK to a vertical column here. */
+    width: max-content;
+    max-width: 180px;
+    white-space: normal;
+    overflow-wrap: break-word;
+    text-align: center;
+    line-height: 1.3;
   }
 
   .voice-bubble.error {

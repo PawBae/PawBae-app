@@ -57,10 +57,16 @@
     padding: 5px 12px;
     font-size: 12px;
     font-weight: 600;
-    white-space: nowrap;
-    max-width: 220px;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    /* Grow horizontally first (max-content = widest single line), only wrapping to a
+       second line once the text would exceed max-width. fit-content collapses CJK to a
+       per-character vertical column here, so use max-content. Capped below the 200px
+       mini-window width so the bubble never overflows the window edge. */
+    width: max-content;
+    max-width: 180px;
+    white-space: normal;
+    overflow-wrap: break-word;
+    text-align: center;
+    line-height: 1.3;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
     animation: replyPop 0.32s ease-out;
   }
