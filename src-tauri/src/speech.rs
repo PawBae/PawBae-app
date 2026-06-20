@@ -15,8 +15,10 @@ unsafe extern "C" {}
 
 static VOICE_ACTIVE: AtomicBool = AtomicBool::new(false);
 /// User-facing master switch (Settings → Privacy). When off, the shortcut starts no
-/// recording at all, so the mic is never opened. Default on; the frontend syncs it.
-static VOICE_ENABLED: AtomicBool = AtomicBool::new(true);
+/// recording at all, so the mic is never opened. Defaults OFF (fail-closed): the frontend
+/// syncs the persisted setting right after launch, so a user who disabled voice can't have
+/// the mic opened in the brief window before that sync lands.
+static VOICE_ENABLED: AtomicBool = AtomicBool::new(false);
 static SPEECH_TX: OnceLock<Mutex<mpsc::Sender<SpeechCommand>>> = OnceLock::new();
 
 const MAX_RECORDING_SECS: u64 = 30;
@@ -552,6 +554,12 @@ fn do_start_recording(app: &tauri::AppHandle) -> Result<RecordingState, String> 
             for &request in &requests {
                 let _: () = msg_send![&*request, endAudio];
             }
+            // The engine never started, so no audio flowed and no async final is pending —
+            // cancel the just-created tasks and free the engine we own (+1 from alloc/init).
+            for &task in &tasks {
+                let _: () = msg_send![&*task, cancel];
+            }
+            let _: () = msg_send![&*engine, release];
             let err_msg = if !err_obj.is_null() {
                 let desc: *mut AnyObject = msg_send![&*err_obj, localizedDescription];
                 nsstring_to_string(desc)
@@ -588,6 +596,12 @@ fn do_stop_recording(state: RecordingState) {
         for &task in &state.tasks {
             let _: () = msg_send![&*task, finish];
         }
+        // Free the AVAudioEngine (+1 from alloc/init, the largest per-recording object): the
+        // tap is removed and the engine is stopped, so nothing references it asynchronously.
+        // NOTE: the recognizers/requests/handler blocks are still referenced by the tasks'
+        // async final callbacks here; releasing them on a timer would risk a use-after-free,
+        // so a fully ARC-correct release of those needs on-device leak/UAF verification.
+        let _: () = msg_send![&*state.engine, release];
         log::info!("[voice] recording stopped, finishing recognition");
     }
 
