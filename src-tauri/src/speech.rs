@@ -61,7 +61,32 @@ pub fn stop_recording() -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+/// Ask macOS for Speech Recognition permission once at startup. The previous code only
+/// *read* `authorizationStatus`, so an unprompted (notDetermined) status never advanced and
+/// the recognizer silently returned "No speech detected". This triggers the system prompt
+/// (requires `NSSpeechRecognitionUsageDescription` in the bundle Info.plist) and logs the
+/// outcome. Calling it when already authorized/denied is a cheap no-op.
+pub fn request_authorization() {
+    unsafe {
+        let Some(speech_cls) = AnyClass::get(c"SFSpeechRecognizer") else {
+            log::warn!("[voice] SFSpeechRecognizer unavailable; cannot request authorization");
+            return;
+        };
+        let current: i64 = msg_send![speech_cls, authorizationStatus];
+        log::info!("[voice] requesting speech authorization (current status={current})");
+        let handler = RcBlock::new(move |new_status: i64| {
+            log::info!(
+                "[voice] speech authorization result: status={new_status} (0=notDetermined, 1=denied, 2=restricted, 3=authorized)"
+            );
+        });
+        let _: () = msg_send![speech_cls, requestAuthorization: &*handler];
+        std::mem::forget(handler);
+    }
+}
+
 pub fn init_speech_thread(app: tauri::AppHandle) {
+    request_authorization();
+
     let (tx, rx) = mpsc::channel::<SpeechCommand>();
     let _ = SPEECH_TX.set(Mutex::new(tx));
 
