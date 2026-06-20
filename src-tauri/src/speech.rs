@@ -251,9 +251,21 @@ struct RecordingState {
     tasks: Vec<*mut AnyObject>,
     selection: std::sync::Arc<Mutex<Selection>>,
     start_time: Instant,
+    generation: u64,
 }
 
 unsafe impl Send for RecordingState {}
+
+/// Monotonic id of the current recording. Bumped on every start so a late async final or
+/// the 900ms fallback from a previous session can't emit a stale transcript into a newer
+/// recording (push-to-talk released and re-pressed quickly).
+static RECORDING_GEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+fn emit_transcript_if_current(app: &tauri::AppHandle, generation: u64, text: String, is_final: bool) {
+    if RECORDING_GEN.load(Ordering::SeqCst) == generation {
+        let _ = app.emit("voice-transcript", VoiceTranscriptPayload { text, is_final });
+    }
+}
 
 fn speech_thread_main(app: tauri::AppHandle, rx: mpsc::Receiver<SpeechCommand>) {
     let mut recording: Option<RecordingState> = None;
@@ -440,6 +452,9 @@ fn do_start_recording(app: &tauri::AppHandle) -> Result<RecordingState, String> 
         RECORDING_START_MS.store(start_ms, Ordering::SeqCst);
         LAST_RESULT_TICK.store(0, Ordering::SeqCst);
 
+        // Unique id for this recording; handlers and the fallback only emit while it's current.
+        let generation = RECORDING_GEN.fetch_add(1, Ordering::SeqCst) + 1;
+
         let selection = std::sync::Arc::new(Mutex::new(Selection {
             pending_finals: recognizers.len(),
             best_text: String::new(),
@@ -497,18 +512,8 @@ fn do_start_recording(app: &tauri::AppHandle) -> Result<RecordingState, String> 
                     }
                 }
                 match to_emit {
-                    Emit::Partial(t) => {
-                        let _ = app_handle.emit(
-                            "voice-transcript",
-                            VoiceTranscriptPayload { text: t, is_final: false },
-                        );
-                    }
-                    Emit::Final(t) => {
-                        let _ = app_handle.emit(
-                            "voice-transcript",
-                            VoiceTranscriptPayload { text: t, is_final: true },
-                        );
-                    }
+                    Emit::Partial(t) => emit_transcript_if_current(&app_handle, generation, t, false),
+                    Emit::Final(t) => emit_transcript_if_current(&app_handle, generation, t, true),
                     Emit::None => {}
                 }
             });
@@ -579,6 +584,7 @@ fn do_start_recording(app: &tauri::AppHandle) -> Result<RecordingState, String> 
             tasks,
             selection,
             start_time: Instant::now(),
+            generation,
         })
     }
 }
@@ -610,6 +616,7 @@ fn do_stop_recording(state: RecordingState) {
     // reacts (no-op if a winner was already emitted).
     let sel = state.selection.clone();
     let app = state.app.clone();
+    let generation = state.generation;
     std::thread::spawn(move || {
         std::thread::sleep(Duration::from_millis(900));
         let emit = match sel.lock() {
@@ -617,7 +624,7 @@ fn do_stop_recording(state: RecordingState) {
             Err(_) => Emit::None,
         };
         if let Emit::Final(t) = emit {
-            let _ = app.emit("voice-transcript", VoiceTranscriptPayload { text: t, is_final: true });
+            emit_transcript_if_current(&app, generation, t, true);
         }
     });
 }

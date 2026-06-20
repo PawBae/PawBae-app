@@ -194,6 +194,7 @@
       celebration === null &&
       !voiceRecording &&
       !voiceText &&
+      !voiceReply &&
       (physicsState === null || physicsState === 'on_floor')
     );
   }
