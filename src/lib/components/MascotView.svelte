@@ -489,10 +489,9 @@
     petMode={settingsStore.appMode === 'pet'}
   />
 
-  <PetReplyBubble
-    text={voiceReply}
-    placement={settingsStore.appMode === 'pet' ? 'above' : 'below'}
-  />
+  <!-- Below the pet in both modes: the mini window is only 200px tall with the mascot near
+       its top, so an 'above' bubble overflows the window's top edge and gets clipped. -->
+  <PetReplyBubble text={voiceReply} placement="below" />
 </div>
 
 <style>

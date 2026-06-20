@@ -53,11 +53,11 @@
 
   .voice-bubble-wrap {
     position: absolute;
-    top: 0;
+    bottom: 0;
     left: 50%;
-    transform: translate(-50%, -100%);
+    transform: translate(-50%, 100%);
     display: flex;
-    flex-direction: column;
+    flex-direction: column-reverse;
     align-items: center;
     z-index: 100;
   }
@@ -85,7 +85,7 @@
     height: 0;
     border-left: 6px solid transparent;
     border-right: 6px solid transparent;
-    border-top: 6px solid #F5A623;
+    border-bottom: 6px solid #F5A623;
   }
 
   .blink-cursor {
