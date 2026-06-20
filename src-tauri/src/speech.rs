@@ -22,6 +22,19 @@ static SPEECH_TX: OnceLock<Mutex<mpsc::Sender<SpeechCommand>>> = OnceLock::new()
 const MAX_RECORDING_SECS: u64 = 30;
 const SILENCE_TIMEOUT_SECS: u64 = 8;
 
+/// Whether recording should auto-stop. All times in milliseconds: `elapsed_ms` since the
+/// recording started, `last_result_ms` the elapsed value at the most recent transcript
+/// (0 = nothing recognized yet, so silence is the whole elapsed time). Computing in ms (not
+/// truncated seconds) avoids stopping up to ~1s early.
+fn should_autostop(elapsed_ms: u64, last_result_ms: u64, max_secs: u64, silence_secs: u64) -> bool {
+    let silence_ms = if last_result_ms == 0 {
+        elapsed_ms
+    } else {
+        elapsed_ms.saturating_sub(last_result_ms)
+    };
+    elapsed_ms >= max_secs * 1000 || silence_ms >= silence_secs * 1000
+}
+
 enum SpeechCommand {
     Start,
     Stop,
@@ -180,6 +193,7 @@ struct Selection {
     last_partial_len: usize,
 }
 
+#[derive(Debug, PartialEq, Eq)]
 enum Emit {
     None,
     Partial(String),
@@ -294,22 +308,20 @@ fn speech_thread_main(app: tauri::AppHandle, rx: mpsc::Receiver<SpeechCommand>) 
 
         // Auto-stop checks
         if let Some(ref state) = recording {
-            let elapsed = state.start_time.elapsed().as_secs();
+            let elapsed_ms = state.start_time.elapsed().as_millis() as u64;
             let last_result_ms = LAST_RESULT_TICK.load(Ordering::SeqCst);
-            let silence_elapsed = if last_result_ms == 0 {
-                elapsed
-            } else {
-                elapsed.saturating_sub(last_result_ms / 1000)
-            };
-
-            let should_stop =
-                elapsed >= MAX_RECORDING_SECS || silence_elapsed >= SILENCE_TIMEOUT_SECS;
+            let should_stop = should_autostop(
+                elapsed_ms,
+                last_result_ms,
+                MAX_RECORDING_SECS,
+                SILENCE_TIMEOUT_SECS,
+            );
 
             if should_stop {
                 log::info!(
-                    "[voice] auto-stop: elapsed={}s silence={}s",
-                    elapsed,
-                    silence_elapsed
+                    "[voice] auto-stop: elapsed={}s last_result={}ms",
+                    elapsed_ms / 1000,
+                    last_result_ms
                 );
                 if let Some(state) = recording.take() {
                     do_stop_recording(state);
@@ -594,4 +606,92 @@ fn do_stop_recording(state: RecordingState) {
             let _ = app.emit("voice-transcript", VoiceTranscriptPayload { text: t, is_final: true });
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{should_autostop, Emit, Selection};
+
+    fn fresh(pending: usize) -> Selection {
+        Selection {
+            pending_finals: pending,
+            best_text: String::new(),
+            best_conf: 0.0,
+            have_best: false,
+            emitted: false,
+            last_partial_len: 0,
+        }
+    }
+
+    #[test]
+    fn picks_highest_confidence_final_when_all_done() {
+        let mut s = fresh(2);
+        // First language finalizes; nothing emitted yet (the other is still pending).
+        assert_eq!(s.on_done(Some(("摸摸头".into(), 0.9))), Emit::None);
+        // Second (wrong-language) finalizes lower; best wins and emits once.
+        assert_eq!(s.on_done(Some(("garbage".into(), 0.3))), Emit::Final("摸摸头".into()));
+    }
+
+    #[test]
+    fn error_counts_as_done_so_match_emits_immediately() {
+        let mut s = fresh(2);
+        assert_eq!(s.on_done(Some(("hello".into(), 0.8))), Emit::None);
+        // The other language heard nothing (error) — emit the match right away, no waiting.
+        assert_eq!(s.on_done(None), Emit::Final("hello".into()));
+    }
+
+    #[test]
+    fn empty_final_never_becomes_the_winner() {
+        let mut s = fresh(2);
+        assert_eq!(s.on_done(Some(("   ".into(), 0.9))), Emit::None);
+        assert_eq!(s.on_done(Some(("hi".into(), 0.4))), Emit::Final("hi".into()));
+    }
+
+    #[test]
+    fn emits_final_only_once() {
+        let mut s = fresh(1);
+        assert_eq!(s.on_done(Some(("hi".into(), 0.5))), Emit::Final("hi".into()));
+        // No second emission from a stray late terminal or the fallback.
+        assert_eq!(s.on_done(None), Emit::None);
+        assert_eq!(s.force_emit(), Emit::None);
+    }
+
+    #[test]
+    fn force_emit_is_the_fallback_for_a_stuck_recognizer() {
+        let mut s = fresh(2);
+        s.on_done(Some(("hi".into(), 0.5))); // one done, one stuck → not emitted yet
+        assert_eq!(s.force_emit(), Emit::Final("hi".into()));
+        assert_eq!(s.force_emit(), Emit::None); // already emitted
+    }
+
+    #[test]
+    fn partials_echo_the_longest_so_far() {
+        let mut s = fresh(2);
+        assert_eq!(s.on_partial("ab".into()), Emit::Partial("ab".into()));
+        assert_eq!(s.on_partial("a".into()), Emit::None); // shorter → no flicker back
+        assert_eq!(s.on_partial("abcd".into()), Emit::Partial("abcd".into()));
+        s.emitted = true;
+        assert_eq!(s.on_partial("abcdef".into()), Emit::None); // nothing after the final
+    }
+
+    #[test]
+    fn autostop_on_max_duration() {
+        assert!(should_autostop(30_000, 5_000, 30, 8));
+        assert!(!should_autostop(29_000, 28_000, 30, 8));
+    }
+
+    #[test]
+    fn autostop_on_silence() {
+        assert!(should_autostop(8_000, 0, 30, 8)); // nothing heard for 8s
+        assert!(!should_autostop(7_000, 0, 30, 8));
+        assert!(should_autostop(20_000, 12_000, 30, 8)); // 8s since last result
+        assert!(!should_autostop(19_000, 12_000, 30, 8)); // 7s since last result
+    }
+
+    #[test]
+    fn autostop_uses_ms_precision_no_off_by_one() {
+        // 7.5s of real silence must NOT trip the 8s timeout (the seconds-truncating
+        // version wrongly stopped here).
+        assert!(!should_autostop(8_000, 500, 30, 8));
+    }
 }
