@@ -223,6 +223,12 @@
     tryInvoke('voice_set_locale', { locale: 'auto' });
   });
 
+  // Master voice on/off (Settings → Privacy): keep the backend gate in sync so a disabled
+  // setting means the shortcut opens no microphone.
+  $effect(() => {
+    tryInvoke('voice_set_enabled', { enabled: settingsStore.voiceEnabled });
+  });
+
   $effect(() => {
     if (!settingsStore.appMode || showOnboarding || updateCheckStarted) return;
     updateCheckStarted = true;

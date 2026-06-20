@@ -14,6 +14,9 @@ unsafe extern "C" {}
 unsafe extern "C" {}
 
 static VOICE_ACTIVE: AtomicBool = AtomicBool::new(false);
+/// User-facing master switch (Settings → Privacy). When off, the shortcut starts no
+/// recording at all, so the mic is never opened. Default on; the frontend syncs it.
+static VOICE_ENABLED: AtomicBool = AtomicBool::new(true);
 static SPEECH_TX: OnceLock<Mutex<mpsc::Sender<SpeechCommand>>> = OnceLock::new();
 
 const MAX_RECORDING_SECS: u64 = 30;
@@ -41,7 +44,15 @@ pub fn is_recording() -> bool {
     VOICE_ACTIVE.load(Ordering::SeqCst)
 }
 
+pub fn set_voice_enabled(enabled: bool) {
+    VOICE_ENABLED.store(enabled, Ordering::SeqCst);
+}
+
 pub fn start_recording() -> Result<(), String> {
+    if !VOICE_ENABLED.load(Ordering::SeqCst) {
+        log::info!("[voice] start ignored — voice interaction disabled in settings");
+        return Ok(());
+    }
     if VOICE_ACTIVE.load(Ordering::SeqCst) {
         return Ok(());
     }
