@@ -314,5 +314,18 @@
     "dailyMessages": "每日消息",
     "token": "Token",
     "messagesLabel": "消息"
+  },
+  "voice": {
+    "reply": {
+      "greet": "你好呀～",
+      "praise": "嘿嘿，谢谢夸奖！",
+      "headpat": "好舒服～再摸摸嘛",
+      "feed": "好吃好吃！",
+      "sleep": "好困……晚安",
+      "play": "好耶，一起玩！",
+      "scold": "呜……人家知道错了",
+      "callName": "在的在的，我在听！",
+      "unknown": "嗯？没太听懂～"
+    }
   }
 }
