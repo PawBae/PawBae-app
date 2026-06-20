@@ -180,3 +180,17 @@ pub fn voice_is_recording() -> bool {
         false
     }
 }
+
+/// Set the speech-recognition locale (e.g. "zh-CN", "en-US") so transcription matches the
+/// language the user actually speaks. Called by the frontend from the app language.
+#[tauri::command]
+pub fn voice_set_locale(locale: String) {
+    #[cfg(target_os = "macos")]
+    {
+        crate::speech::set_voice_locale(locale);
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = locale;
+    }
+}

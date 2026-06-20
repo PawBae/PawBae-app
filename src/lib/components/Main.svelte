@@ -216,6 +216,13 @@
     if (settingsStore.appMode) startModePolling();
   });
 
+  // Keep speech recognition in the language the user actually speaks, re-applied whenever
+  // the app language changes (no-op off macOS).
+  $effect(() => {
+    const locale = settingsStore.language.startsWith('zh') ? 'zh-CN' : 'en-US';
+    tryInvoke('voice_set_locale', { locale });
+  });
+
   $effect(() => {
     if (!settingsStore.appMode || showOnboarding || updateCheckStarted) return;
     updateCheckStarted = true;

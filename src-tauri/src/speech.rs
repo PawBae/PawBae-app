@@ -73,6 +73,13 @@ pub fn request_authorization() {
             return;
         };
         let current: i64 = msg_send![speech_cls, authorizationStatus];
+        // Only prompt when the user hasn't decided yet. Once authorized/denied, re-calling
+        // is a no-op for the user but pointless — skip it. (A permission reset across builds
+        // is a code-signing artifact, not this call firing repeatedly.)
+        if current != 0 {
+            log::info!("[voice] speech authorization already resolved (status={current}), not re-requesting");
+            return;
+        }
         log::info!("[voice] requesting speech authorization (current status={current})");
         let handler = RcBlock::new(move |new_status: i64| {
             log::info!(
@@ -110,6 +117,37 @@ unsafe fn nsstring_to_string(ns: *mut AnyObject) -> String {
         std::ffi::CStr::from_ptr(c_str as *const _)
             .to_string_lossy()
             .into_owned()
+    }
+}
+
+unsafe fn make_nsstring(s: &str) -> *mut AnyObject {
+    let Some(cls) = AnyClass::get(c"NSString") else {
+        return std::ptr::null_mut();
+    };
+    let Ok(c) = std::ffi::CString::new(s) else {
+        return std::ptr::null_mut();
+    };
+    unsafe { msg_send![cls, stringWithUTF8String: c.as_ptr()] }
+}
+
+// Locale (e.g. "zh-CN" / "en-US") the recognizer is built with. The frontend sets this
+// from the app language via the `voice_set_locale` command, so a Chinese user's speech is
+// recognized as Chinese instead of falling back to the system locale. Empty → system default.
+static VOICE_LOCALE: OnceLock<Mutex<String>> = OnceLock::new();
+
+pub fn set_voice_locale(locale: String) {
+    let cell = VOICE_LOCALE.get_or_init(|| Mutex::new(String::new()));
+    if let Ok(mut g) = cell.lock() {
+        *g = locale;
+    }
+}
+
+fn current_locale() -> Option<String> {
+    let g = VOICE_LOCALE.get()?.lock().ok()?;
+    if g.trim().is_empty() {
+        None
+    } else {
+        Some(g.clone())
     }
 }
 
@@ -235,8 +273,21 @@ fn do_start_recording(app: &tauri::AppHandle) -> Result<RecordingState, String> 
         // recognition and will auto-prompt in signed production builds.
 
         log::info!("[voice] creating recognizer");
-        let recognizer: *mut AnyObject = msg_send![speech_cls, alloc];
-        let recognizer: *mut AnyObject = msg_send![recognizer, init];
+        let recognizer: *mut AnyObject = match current_locale() {
+            Some(loc) => {
+                log::info!("[voice] creating recognizer with locale {loc}");
+                let ns_loc = make_nsstring(&loc);
+                let locale_cls = AnyClass::get(c"NSLocale").ok_or("NSLocale not available")?;
+                let locale_obj: *mut AnyObject =
+                    msg_send![locale_cls, localeWithLocaleIdentifier: ns_loc];
+                let r: *mut AnyObject = msg_send![speech_cls, alloc];
+                msg_send![r, initWithLocale: locale_obj]
+            }
+            None => {
+                let r: *mut AnyObject = msg_send![speech_cls, alloc];
+                msg_send![r, init]
+            }
+        };
         if recognizer.is_null() {
             return Err("Failed to create speech recognizer.".into());
         }
@@ -376,7 +427,9 @@ fn do_stop_recording(state: RecordingState) {
         let _: () = msg_send![&*input_node, removeTapOnBus: 0u64];
         let _: () = msg_send![&*state.engine, stop];
         let _: () = msg_send![&*state.request, endAudio];
-        let _: () = msg_send![&*state.task, cancel];
-        log::info!("[voice] recording stopped and cleaned up");
+        // `finish` (not `cancel`) so the recognizer delivers its final result — cancel
+        // discards the in-flight transcription, leaving is_final text empty.
+        let _: () = msg_send![&*state.task, finish];
+        log::info!("[voice] recording stopped, finishing recognition");
     }
 }
