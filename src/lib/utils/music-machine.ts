@@ -20,9 +20,13 @@ export interface MusicMachineConfig {
   exitThreshold: number;
 }
 
-/** ~2.5s poll × 2 ≈ a 5s commit window each way — long enough to ride out track gaps. */
+// Enter on the FIRST "music" sample so the pet reacts promptly (~one poll). The menu-bar
+// play/pause label the detector reads is stable — there's no transient blip to debounce on
+// the way in — so a 1-sample entry doesn't cause false starts. Exit still needs 2
+// consecutive non-"music" samples so the brief "none" between tracks doesn't drop the pet
+// out of the listening state.
 export const DEFAULT_MUSIC_CONFIG: MusicMachineConfig = {
-  enterThreshold: 2,
+  enterThreshold: 1,
   exitThreshold: 2,
 };
 

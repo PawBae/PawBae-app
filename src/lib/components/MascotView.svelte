@@ -202,7 +202,7 @@
   // and pops a rotating line. Detection is the system-level `get_now_playing` Rust command
   // (already distinguishes music vs video vs the pet's own SFX); the hysteresis machine in
   // music-machine.ts debounces the between-track "none" gaps so the bubble doesn't flicker.
-  const MUSIC_POLL_MS = 2500; // listening is a long state — cheap polling is plenty
+  const MUSIC_POLL_MS = 1500; // snappy enough to feel responsive without hammering AppleScript
   const MUSIC_ROTATE_MS = 22000; // swap in a fresh line every ~22s while still listening
   let musicListening = $state(false);
   let musicPhrase = $state('');

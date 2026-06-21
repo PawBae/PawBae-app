@@ -24,21 +24,14 @@ describe('initialMusicState', () => {
 });
 
 describe('stepMusic — entering', () => {
-  it('does NOT enter on a single music sample (debounce)', () => {
+  it('enters immediately on the first music sample (default enterThreshold = 1)', () => {
     const { state, last } = run(['music']);
-    expect(state.listening).toBe(false);
-    expect(last.justEntered).toBe(false);
-  });
-
-  it('enters after enterThreshold consecutive music samples', () => {
-    const { state, last } = run(['music', 'music']);
     expect(state.listening).toBe(true);
     expect(last.justEntered).toBe(true);
   });
 
   it('justEntered is true only on the transition tick, not while sustained', () => {
     const s = initialMusicState();
-    stepMusic(s, 'music');
     const enter = stepMusic(s, 'music');
     const sustain = stepMusic(s, 'music');
     expect(enter.justEntered).toBe(true);
@@ -95,15 +88,9 @@ describe('stepMusic — video is not music', () => {
   });
 });
 
-describe('stepMusic — flicker resistance (hysteresis)', () => {
-  it('alternating music/none never enters (no 2-in-a-row)', () => {
-    const { state } = run(['music', 'none', 'music', 'none', 'music', 'none']);
-    expect(state.listening).toBe(false);
-  });
-
-  it('once listening, alternating none/music stays listening', () => {
+describe('stepMusic — flicker resistance (exit hysteresis)', () => {
+  it('once listening, alternating none/music stays listening (rides out track gaps)', () => {
     const s = initialMusicState();
-    stepMusic(s, 'music');
     stepMusic(s, 'music'); // listening
     for (const x of ['none', 'music', 'none', 'music', 'none'] as NowPlaying[]) stepMusic(s, x);
     expect(s.listening).toBe(true);
