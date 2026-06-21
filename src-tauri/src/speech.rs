@@ -295,9 +295,17 @@ unsafe impl Send for RecordingState {}
 /// recording (push-to-talk released and re-pressed quickly).
 static RECORDING_GEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
-fn emit_transcript_if_current(app: &tauri::AppHandle, generation: u64, text: String, is_final: bool) {
+fn emit_transcript_if_current(
+    app: &tauri::AppHandle,
+    generation: u64,
+    text: String,
+    is_final: bool,
+) {
     if RECORDING_GEN.load(Ordering::SeqCst) == generation {
-        let _ = app.emit("voice-transcript", VoiceTranscriptPayload { text, is_final });
+        let _ = app.emit(
+            "voice-transcript",
+            VoiceTranscriptPayload { text, is_final },
+        );
     }
 }
 
@@ -573,7 +581,10 @@ fn do_start_recording(app: &tauri::AppHandle) -> Result<RecordingState, String> 
                 }
                 if !error.is_null() {
                     let desc: *mut AnyObject = msg_send![&*error, localizedDescription];
-                    log::warn!("[voice] [{loc_label}] recognition error: {}", nsstring_to_string(desc));
+                    log::warn!(
+                        "[voice] [{loc_label}] recognition error: {}",
+                        nsstring_to_string(desc)
+                    );
                     // Treat an error as "this language is done with nothing" so the matching
                     // language can emit immediately instead of waiting on the grace timer.
                     if !done.swap(true, Ordering::SeqCst) {
@@ -583,7 +594,9 @@ fn do_start_recording(app: &tauri::AppHandle) -> Result<RecordingState, String> 
                     }
                 }
                 match to_emit {
-                    Emit::Partial(t) => emit_transcript_if_current(&app_handle, generation, t, false),
+                    Emit::Partial(t) => {
+                        emit_transcript_if_current(&app_handle, generation, t, false)
+                    }
                     Emit::Final(t) => emit_transcript_if_current(&app_handle, generation, t, true),
                     Emit::None => {}
                 }
@@ -725,7 +738,10 @@ mod tests {
         // First recognizer finalizes; nothing emitted yet (the other is still pending).
         assert_eq!(s.on_done(Some(("摸摸头".into(), 0.9))), Emit::None);
         // Second recognizer finalizes lower-confidence; the best one wins and emits once.
-        assert_eq!(s.on_done(Some(("garbage".into(), 0.3))), Emit::Final("摸摸头".into()));
+        assert_eq!(
+            s.on_done(Some(("garbage".into(), 0.3))),
+            Emit::Final("摸摸头".into())
+        );
     }
 
     #[test]
@@ -740,7 +756,10 @@ mod tests {
     fn single_recognizer_emits_its_own_final() {
         // The real runtime case today: one recognizer.
         let mut s = fresh(1);
-        assert_eq!(s.on_done(Some(("你好".into(), 0.95))), Emit::Final("你好".into()));
+        assert_eq!(
+            s.on_done(Some(("你好".into(), 0.95))),
+            Emit::Final("你好".into())
+        );
     }
 
     #[test]
@@ -763,13 +782,19 @@ mod tests {
     fn empty_final_never_becomes_the_winner() {
         let mut s = fresh(2);
         assert_eq!(s.on_done(Some(("   ".into(), 0.9))), Emit::None);
-        assert_eq!(s.on_done(Some(("hi".into(), 0.4))), Emit::Final("hi".into()));
+        assert_eq!(
+            s.on_done(Some(("hi".into(), 0.4))),
+            Emit::Final("hi".into())
+        );
     }
 
     #[test]
     fn emits_final_only_once() {
         let mut s = fresh(1);
-        assert_eq!(s.on_done(Some(("hi".into(), 0.5))), Emit::Final("hi".into()));
+        assert_eq!(
+            s.on_done(Some(("hi".into(), 0.5))),
+            Emit::Final("hi".into())
+        );
         // No second emission from a stray late terminal or the fallback.
         assert_eq!(s.on_done(None), Emit::None);
         assert_eq!(s.force_emit(), Emit::None);
