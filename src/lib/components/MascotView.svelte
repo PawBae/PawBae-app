@@ -156,6 +156,39 @@
 
   const mascotSize = $derived(Math.round(60 * settingsStore.mascotScale));
 
+  // Smart bubble placement: above the pet's head normally, but flip below (and drop the
+  // head-room) when the pet window sits at the screen's top edge — bubbles are clipped to
+  // the window, so an 'above' bubble needs window/screen room above the pet. Polled cheaply
+  // (~1s, pet mode only) since the pet's screen position changes via drag/physics/WASD.
+  const TOP_EDGE_PX = 50;
+  let bubbleAbove = $state(false);
+  $effect(() => {
+    if (settingsStore.appMode !== 'pet') {
+      bubbleAbove = false;
+      return;
+    }
+    let alive = true;
+    let timer: ReturnType<typeof setTimeout>;
+    const tick = async () => {
+      if (!alive) return;
+      const origin = await windowStore.getOrigin();
+      const monitor = await windowStore.getMonitorRect();
+      if (alive && origin && monitor) {
+        // Cocoa bottom-left coords: origin.y is the window's bottom; its top is
+        // origin.y + window height. Room above = visible-frame top − window top.
+        const roomAbove = monitor.y + monitor.h - (origin.y + window.innerHeight);
+        bubbleAbove = roomAbove >= TOP_EDGE_PX;
+      }
+      if (alive) timer = setTimeout(tick, 1000);
+    };
+    timer = setTimeout(tick, 200);
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+    };
+  });
+  const bubblePlacement = $derived<'above' | 'below'>(bubbleAbove ? 'above' : 'below');
+
   // Growth celebrations (Phase 6): play the queue head for a beat, then shift. The
   // effect re-arms per head change, so back-to-back unlocks show sequentially.
   const CELEBRATION_MS = 3200;
@@ -453,6 +486,7 @@
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
   class="mascot-view"
+  class:headroom={bubbleAbove}
   data-tauri-drag-region={windowStore.settingsOpen ? undefined : ''}
   onclick={handleClick}
   oncontextmenu={handleContextMenu}
@@ -488,11 +522,10 @@
     recording={voiceRecording}
     error={voiceError}
     petMode={settingsStore.appMode === 'pet'}
+    placement={bubblePlacement}
   />
 
-  <!-- Below the pet in both modes: the mini window is only 200px tall with the mascot near
-       its top, so an 'above' bubble overflows the window's top edge and gets clipped. -->
-  <PetReplyBubble text={voiceReply} placement="below" />
+  <PetReplyBubble text={voiceReply} placement={bubblePlacement} />
 </div>
 
 <style>
@@ -504,6 +537,13 @@
     display: flex;
     align-items: center;
     justify-content: center;
+  }
+
+  /* Only when the bubble sits above: drop the mascot below the window's top edge so the
+     bubble has room above its head. At the screen's top edge the bubble flips below and
+     this is removed, letting the pet go flush. */
+  .mascot-view.headroom {
+    margin-top: 48px;
   }
 
   /* Evolution auras: stage drives intensity, work style drives the tint. Filters sit on

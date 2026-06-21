@@ -10,6 +10,7 @@
     recording?: boolean;
     error?: string;
     petMode?: boolean;
+    placement?: 'above' | 'below';
   }
 
   let {
@@ -18,6 +19,7 @@
     recording = false,
     error = '',
     petMode = false,
+    placement = 'above',
   }: VoiceBubbleProps = $props();
 
   const show = $derived(visible && (recording || text || error));
@@ -28,7 +30,7 @@
 {/if}
 
 {#if petMode && show}
-  <SpeechBubble placement="below" variant={error ? 'voice-error' : 'voice'}>
+  <SpeechBubble {placement} variant={error ? 'voice-error' : 'voice'}>
     {#if error}
       {error}
     {:else}

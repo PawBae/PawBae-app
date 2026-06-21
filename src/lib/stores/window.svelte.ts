@@ -35,7 +35,9 @@ class WindowStore {
 
   async getOrigin(): Promise<{ x: number; y: number } | null> {
     try {
-      return (await invoke('get_mini_origin')) as { x: number; y: number };
+      // get_mini_origin returns a Rust tuple → JSON array [x, y].
+      const [x, y] = (await invoke('get_mini_origin')) as [number, number];
+      return { x, y };
     } catch {
       return null;
     }
@@ -43,12 +45,14 @@ class WindowStore {
 
   async getMonitorRect(): Promise<{ x: number; y: number; w: number; h: number } | null> {
     try {
-      return (await invoke('get_mini_monitor_rect')) as {
-        x: number;
-        y: number;
-        w: number;
-        h: number;
-      };
+      // get_mini_monitor_rect returns a Rust tuple → JSON array [x, y, w, h].
+      const [x, y, w, h] = (await invoke('get_mini_monitor_rect')) as [
+        number,
+        number,
+        number,
+        number,
+      ];
+      return { x, y, w, h };
     } catch {
       return null;
     }
