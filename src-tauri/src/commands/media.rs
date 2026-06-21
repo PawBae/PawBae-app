@@ -2,8 +2,8 @@
 
 #[cfg(target_os = "macos")]
 use crate::platform::macos::{
-    get_frontmost_bundle_id, is_any_music_app_playing, is_browser, is_music_app, is_video_app,
-    nowplaying_cli_status,
+    get_frontmost_bundle_id, is_browser, is_music_app, is_video_app, music_app_playing,
+    nowplaying_cli_status, running_music_app_bundle_ids,
 };
 
 #[cfg(target_os = "windows")]
@@ -44,11 +44,22 @@ pub async fn get_system_idle_time(app: tauri::AppHandle) -> Result<f64, String> 
 pub async fn get_now_playing(app: tauri::AppHandle) -> Result<String, String> {
     #[cfg(target_os = "macos")]
     {
-        let (tx, rx) = std::sync::mpsc::channel::<String>();
+        // Step 1 — main thread: only the NSWorkspace lookups that REQUIRE it (frontmost app,
+        // running-app enumeration for music-category discovery). These are fast, in-process.
+        let (tx, rx) = std::sync::mpsc::channel::<(String, Vec<String>)>();
         app.run_on_main_thread(move || {
             let bid = get_frontmost_bundle_id().to_lowercase();
-            let cli_status = nowplaying_cli_status();
+            let music_ids = running_music_app_bundle_ids();
+            let _ = tx.send((bid, music_ids));
+        })
+        .map_err(|e| e.to_string())?;
+        let (bid, music_ids) = rx.recv().map_err(|e| e.to_string())?;
 
+        // Step 2 — OFF the main thread: the subprocess work (nowplaying-cli + the osascript
+        // menu scan, ~0.3s). Running this on the main thread would block the UI/animation
+        // thread on every poll; spawn_blocking keeps the pet smooth.
+        tokio::task::spawn_blocking(move || {
+            let cli_status = nowplaying_cli_status();
             let result = if let Some((playing, ref source)) = cli_status {
                 if !playing
                     || source.contains("openclaw")
@@ -60,7 +71,7 @@ pub async fn get_now_playing(app: tauri::AppHandle) -> Result<String, String> {
                     // not the host app's bundle ID, so we must also filter that.
                     // Fall back to AppleScript to check if a real music app is still playing,
                     // because nowplaying-cli only reports one source at a time.
-                    if is_any_music_app_playing() {
+                    if music_app_playing(&music_ids) {
                         "music"
                     } else {
                         "none"
@@ -74,7 +85,7 @@ pub async fn get_now_playing(app: tauri::AppHandle) -> Result<String, String> {
                 }
             } else {
                 // nowplaying-cli not available, fall back to AppleScript
-                if is_any_music_app_playing() {
+                if music_app_playing(&music_ids) {
                     "music"
                 } else {
                     "none"
@@ -86,10 +97,10 @@ pub async fn get_now_playing(app: tauri::AppHandle) -> Result<String, String> {
                 cli_status,
                 result
             );
-            let _ = tx.send(result.into());
+            Ok(result.into())
         })
-        .map_err(|e| e.to_string())?;
-        rx.recv().map_err(|e| e.to_string())
+        .await
+        .map_err(|e| e.to_string())?
     }
     #[cfg(target_os = "windows")]
     {

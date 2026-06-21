@@ -553,7 +553,9 @@ unsafe fn objc_read_nsstring(p: *mut objc2::runtime::AnyObject) -> String {
     if utf8.is_null() {
         return String::new();
     }
-    std::ffi::CStr::from_ptr(utf8).to_string_lossy().into_owned()
+    std::ffi::CStr::from_ptr(utf8)
+        .to_string_lossy()
+        .into_owned()
 }
 
 /// Bundle identifiers of currently-running apps that declare themselves Music apps
@@ -561,7 +563,7 @@ unsafe fn objc_read_nsstring(p: *mut objc2::runtime::AnyObject) -> String {
 /// the menu-bar fallback work for ANY music player WITHOUT hardcoding each one: NetEase, QQ
 /// Music, 酷狗, 酷我, 汽水… all set this category, so they are discovered at runtime. A short
 /// fallback set is unioned in for the rare player that ships a wrong/absent category.
-fn running_music_app_bundle_ids() -> Vec<String> {
+pub(crate) fn running_music_app_bundle_ids() -> Vec<String> {
     use objc2::msg_send;
     use objc2::runtime::{AnyClass, AnyObject};
 
@@ -573,6 +575,7 @@ fn running_music_app_bundle_ids() -> Vec<String> {
     ];
 
     let mut ids: Vec<String> = Vec::new();
+    let mut running: Vec<String> = Vec::new();
     unsafe {
         if let Some(cls) = AnyClass::get(c"NSWorkspace") {
             let ws: *mut AnyObject = msg_send![cls, sharedWorkspace];
@@ -592,6 +595,7 @@ fn running_music_app_bundle_ids() -> Vec<String> {
                         if bid.is_empty() {
                             continue;
                         }
+                        running.push(bid.clone());
                         let (Some(bcls), false) = (bundle_cls, cat_key.is_null()) else {
                             continue;
                         };
@@ -615,16 +619,22 @@ fn running_music_app_bundle_ids() -> Vec<String> {
             }
         }
     }
+    // Union the fallback ids, but ONLY for apps that are actually running — otherwise the
+    // returned list (and the log line built from it) would imply 汽水 et al. are present when
+    // they aren't, and we'd waste a menu scan on dead bundle ids every poll.
     for f in FALLBACK_BIDS {
-        if !ids.iter().any(|b| b == f) {
+        if running.iter().any(|b| b == f) && !ids.iter().any(|b| b == f) {
             ids.push((*f).to_string());
         }
     }
     ids
 }
 
-pub(crate) fn is_any_music_app_playing() -> bool {
-    let music_ids = running_music_app_bundle_ids();
+/// Whether any of the given running music apps is currently playing, by scanning each one's
+/// menus for a "暂停"/"Pause" toggle item (present only while playing). Pure subprocess work
+/// (osascript) — takes the already-discovered bundle ids so the caller can run NSWorkspace
+/// discovery on the main thread and this scan OFF it, keeping the UI thread unblocked.
+pub(crate) fn music_app_playing(music_ids: &[String]) -> bool {
     // Bundle ids are ASCII (letters/digits/.-_); filter defensively so nothing we inject
     // into the AppleScript string literal can break out of the quotes.
     let list_lit = music_ids
@@ -704,7 +714,7 @@ pub(crate) fn is_any_music_app_playing() -> bool {
         Ok(output) => {
             let result = String::from_utf8_lossy(&output.stdout).trim() == "1";
             log::info!(
-                "[now_playing/script] is_any_music_app_playing={} music_apps={:?}",
+                "[now_playing/script] music_app_playing={} music_apps={:?}",
                 result,
                 music_ids
             );
