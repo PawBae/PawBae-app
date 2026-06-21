@@ -543,12 +543,19 @@ pub(crate) fn is_any_music_app_playing() -> bool {
             end tell
         end if
 
-        if (not isPlaying) and application "Spotify" is running then
-            tell application "Spotify"
-                try
-                    if player state is playing then set isPlaying to true
-                end try
-            end tell
+        -- Spotify's player-state terminology must be loaded via `run script` at RUNTIME,
+        -- not a static `tell application "Spotify"` block. A static tell forces the
+        -- compiler to load Spotify's scripting definition up front; on a Mac without
+        -- Spotify installed that fails to compile and takes the WHOLE script down with it
+        -- (error -2741), so the NetEase/QQ menu-bar fallback below never even runs. The
+        -- `try` swallows the not-installed case; `run script` only compiles when reached.
+        if not isPlaying then
+            try
+                if application "Spotify" is running then
+                    set spState to (run script "tell application \"Spotify\" to return (player state is playing)")
+                    if spState then set isPlaying to true
+                end if
+            end try
         end if
 
         -- For apps without AppleScript player-state (NeteaseMusic, QQ Music, etc.),
