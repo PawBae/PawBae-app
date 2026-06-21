@@ -168,8 +168,10 @@ pub fn set_voice_locale(locale: String) {
     }
 }
 
-/// Locales the recognizer set runs. Empty or "auto" → bilingual (zh-CN + en-US) so the user
-/// can speak either language without switching anything; a specific identifier pins to one.
+/// Locale the recognizer runs. Chinese-only for now: macOS won't run two SFSpeechRecognizers
+/// at once (the second is reliably starved — "No speech detected" — whether on-device or via
+/// the server), so bilingual auto-detect isn't possible with a single live engine. A specific
+/// identifier via voice_set_locale still pins to that language.
 fn recognizer_locales() -> Vec<String> {
     let pinned = VOICE_LOCALE
         .get()
@@ -177,7 +179,7 @@ fn recognizer_locales() -> Vec<String> {
         .map(|g| g.trim().to_string())
         .unwrap_or_default();
     if pinned.is_empty() || pinned.eq_ignore_ascii_case("auto") {
-        vec!["zh-CN".to_string(), "en-US".to_string()]
+        vec!["zh-CN".to_string()]
     } else {
         vec![pinned]
     }
