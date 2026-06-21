@@ -327,6 +327,25 @@ fn speech_thread_main(app: tauri::AppHandle, rx: mpsc::Receiver<SpeechCommand>) 
                 }
                 match do_start_recording(&app) {
                     Ok(state) => {
+                        // Final privacy gate: voice may have been disabled WHILE the engine /
+                        // recognizer were initializing. At that moment VOICE_ACTIVE was still
+                        // false, so set_voice_enabled(false) sent no Stop — close the mic here
+                        // before ever exposing it as recording, instead of opening it.
+                        if !VOICE_ENABLED.load(Ordering::SeqCst) {
+                            log::info!(
+                                "[voice] recording initialized but voice was disabled; stopping immediately"
+                            );
+                            do_stop_recording(state);
+                            VOICE_ACTIVE.store(false, Ordering::SeqCst);
+                            let _ = app.emit(
+                                "voice-status",
+                                VoiceStatusPayload {
+                                    recording: false,
+                                    error: None,
+                                },
+                            );
+                            continue;
+                        }
                         log::info!("[voice] recording started");
                         VOICE_ACTIVE.store(true, Ordering::SeqCst);
                         let _ = app.emit(
