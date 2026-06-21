@@ -66,12 +66,24 @@ fn should_stop_on_disable(enabled: bool, active: bool) -> bool {
     !enabled && active
 }
 
+/// Whether a queued Start should actually open the mic when the speech thread reaches it:
+/// only if voice is still enabled and nothing is already recording. Re-checked on the thread
+/// to close the race where voice is disabled after a Start was queued but before VOICE_ACTIVE
+/// flipped true (so set_voice_enabled(false) saw active=false and sent no Stop).
+fn should_accept_start(enabled: bool, active: bool) -> bool {
+    enabled && !active
+}
+
 pub fn set_voice_enabled(enabled: bool) {
     VOICE_ENABLED.store(enabled, Ordering::SeqCst);
-    // Privacy: turning voice off mid-recording must close the mic immediately, not wait for
-    // the manual/auto stop. stop_recording() sends Stop; the speech thread tears the engine
-    // down and emits voice-status { recording: false } so the UI red dot clears.
-    if should_stop_on_disable(enabled, VOICE_ACTIVE.load(Ordering::SeqCst)) {
+    if enabled {
+        // Explicit opt-in: request authorization now (no-op if already resolved) so the
+        // system prompt is tied to the user enabling voice, not to app launch.
+        request_authorization();
+    } else if should_stop_on_disable(enabled, VOICE_ACTIVE.load(Ordering::SeqCst)) {
+        // Privacy: turning voice off mid-recording must close the mic immediately, not wait
+        // for the manual/auto stop. stop_recording() sends Stop; the speech thread tears the
+        // engine down and emits voice-status { recording: false } so the UI red dot clears.
         log::info!("[voice] disabled mid-recording — stopping to release the mic");
         let _ = stop_recording();
     }
@@ -85,6 +97,9 @@ pub fn start_recording() -> Result<(), String> {
     if VOICE_ACTIVE.load(Ordering::SeqCst) {
         return Ok(());
     }
+    // First real recording (gate passed): make sure authorization is requested even if the
+    // setting was enabled in a prior build where the prompt never fired. No-op once resolved.
+    request_authorization();
     let tx = SPEECH_TX.get().ok_or("Speech thread not initialized")?;
     crate::state::lock_or_recover(tx)
         .send(SpeechCommand::Start)
@@ -101,11 +116,12 @@ pub fn stop_recording() -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
-/// Ask macOS for Speech Recognition permission once at startup. The previous code only
-/// *read* `authorizationStatus`, so an unprompted (notDetermined) status never advanced and
-/// the recognizer silently returned "No speech detected". This triggers the system prompt
-/// (requires `NSSpeechRecognitionUsageDescription` in the bundle Info.plist) and logs the
-/// outcome. Calling it when already authorized/denied is a cheap no-op.
+/// Ask macOS for Speech Recognition permission. Called when the user opts in (enables voice)
+/// or on their first recording — NOT at app launch, so a fresh opted-out user sees no prompt.
+/// An earlier version only *read* `authorizationStatus`, so a notDetermined status never
+/// advanced and the recognizer silently returned "No speech detected"; this triggers the
+/// system prompt (requires `NSSpeechRecognitionUsageDescription` in the bundle Info.plist).
+/// Calling it when already authorized/denied is a cheap no-op (no repeat prompt).
 pub fn request_authorization() {
     unsafe {
         let Some(speech_cls) = AnyClass::get(c"SFSpeechRecognizer") else {
@@ -132,8 +148,10 @@ pub fn request_authorization() {
 }
 
 pub fn init_speech_thread(app: tauri::AppHandle) {
-    request_authorization();
-
+    // NOTE: do NOT request Speech Recognition authorization here. Voice is opt-in (default
+    // off), so a fresh user must not see the system prompt at launch. Authorization is
+    // requested only when the user explicitly enables voice (set_voice_enabled(true)) or on
+    // the first real recording (start_recording, after the enabled gate).
     let (tx, rx) = mpsc::channel::<SpeechCommand>();
     let _ = SPEECH_TX.set(Mutex::new(tx));
 
@@ -198,10 +216,10 @@ fn recognizer_locales() -> Vec<String> {
     }
 }
 
-/// Final/partial/fallback state machine for the recognizer result handler(s). It can pick the
-/// highest-confidence final across several recognizers, but the app currently runs a SINGLE
-/// recognizer (see `recognizer_locales`) — there is no concurrent multi-language recognition.
-/// Partials echo live; the final is emitted exactly once.
+/// Final/partial/fallback state machine for the recognizer result handler. The app runs a
+/// SINGLE recognizer (see `recognizer_locales`); the multi-`pending_finals` support is a
+/// historical/defensive remnant and does NOT mean concurrent multi-language recognition is
+/// enabled. Partials echo live; the final is emitted exactly once.
 struct Selection {
     pending_finals: usize,
     best_text: String,
@@ -290,7 +308,21 @@ fn speech_thread_main(app: tauri::AppHandle, rx: mpsc::Receiver<SpeechCommand>) 
         match rx.recv_timeout(Duration::from_millis(100)) {
             Ok(SpeechCommand::Start) => {
                 log::info!("[voice] received Start command");
-                if recording.is_some() {
+                let enabled = VOICE_ENABLED.load(Ordering::SeqCst);
+                // Re-check enabled here (not just at enqueue) so a disable that landed after
+                // this Start was queued still keeps the mic shut.
+                if !should_accept_start(enabled, recording.is_some()) {
+                    if !enabled {
+                        log::info!("[voice] Start dropped — voice disabled before it ran");
+                        // Keep the UI's recording state consistent; not an error.
+                        let _ = app.emit(
+                            "voice-status",
+                            VoiceStatusPayload {
+                                recording: false,
+                                error: None,
+                            },
+                        );
+                    }
                     continue;
                 }
                 match do_start_recording(&app) {
@@ -381,7 +413,8 @@ fn epoch_ms() -> u64 {
 }
 
 /// Average per-segment confidence of a transcription (0..1). Final results carry real
-/// confidences; the wrong-language recognizer scores low, which is how we pick the winner.
+/// confidences. The Selection uses it to break ties when it has multiple candidates; with a
+/// single recognizer running today it is simply that recognizer's own confidence.
 fn average_confidence(transcription: *mut AnyObject) -> f64 {
     if transcription.is_null() {
         return 0.0;
@@ -424,9 +457,11 @@ fn do_start_recording(app: &tauri::AppHandle) -> Result<RecordingState, String> 
         let req_cls = AnyClass::get(c"SFSpeechAudioBufferRecognitionRequest")
             .ok_or("SFSpeechAudioBufferRecognitionRequest not available")?;
 
-        // One recognizer + request per locale. recognizer_locales currently returns a single
-        // locale (zh-CN); the loop still supports more but they are NOT run concurrently. A
-        // locale unavailable on this device is skipped; if none come up, bail.
+        // One recognizer + request per locale. recognizer_locales() returns a single locale
+        // (zh-CN) today, so exactly one recognizer runs. The loop is written generically, but
+        // returning more than one WOULD create concurrent recognizers here — which macOS can't
+        // run reliably (the second is starved) — so we deliberately keep it to one. A locale
+        // unavailable on this device is skipped; if none come up, bail.
         let mut recognizers: Vec<(String, *mut AnyObject)> = Vec::new();
         let mut requests: Vec<*mut AnyObject> = Vec::new();
         for loc in &locales {
@@ -481,8 +516,8 @@ fn do_start_recording(app: &tauri::AppHandle) -> Result<RecordingState, String> 
             last_partial_len: 0,
         }));
 
-        // One recognition task per language; each handler is tagged with its locale and
-        // funnels results through the shared Selection.
+        // One recognition task per recognizer (just one today); each handler is tagged with
+        // its locale and funnels results through the shared Selection.
         let mut tasks: Vec<*mut AnyObject> = Vec::new();
         for (i, (loc, recognizer)) in recognizers.iter().enumerate() {
             let recog_ptr = *recognizer;
@@ -652,7 +687,7 @@ mod tests {
     // single recognizer (recognizer_locales → zh-CN). These tests exercise the state machine
     // with multiple pending terminals to cover the wait/pick/fallback paths — they do NOT
     // imply concurrent multi-language recognition is enabled.
-    use super::{should_autostop, should_stop_on_disable, Emit, Selection};
+    use super::{should_accept_start, should_autostop, should_stop_on_disable, Emit, Selection};
 
     fn fresh(pending: usize) -> Selection {
         Selection {
@@ -695,6 +730,14 @@ mod tests {
         assert!(!should_stop_on_disable(false, false)); // off but not recording → nothing
         assert!(!should_stop_on_disable(true, true)); // enabling never stops
         assert!(!should_stop_on_disable(true, false));
+    }
+
+    #[test]
+    fn accepts_start_only_when_enabled_and_idle() {
+        assert!(!should_accept_start(false, false)); // disabled, idle → ignore (mic stays shut)
+        assert!(!should_accept_start(false, true)); // disabled mid-record → ignore
+        assert!(should_accept_start(true, false)); // enabled, idle → open the mic
+        assert!(!should_accept_start(true, true)); // enabled but already recording → idempotent
     }
 
     #[test]
