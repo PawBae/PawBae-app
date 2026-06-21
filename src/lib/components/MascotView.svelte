@@ -202,7 +202,12 @@
   // and pops a rotating line. Detection is the system-level `get_now_playing` Rust command
   // (already distinguishes music vs video vs the pet's own SFX); the hysteresis machine in
   // music-machine.ts debounces the between-track "none" gaps so the bubble doesn't flicker.
-  const MUSIC_POLL_MS = 1500; // snappy enough to feel responsive without hammering AppleScript
+  // Adaptive poll cadence: while NOT yet listening, poll fast so the pet reacts almost
+  // immediately when you hit play (this is the latency users feel). Once listening, slow
+  // right down — re-checking "still playing?" is not urgent, and it saves the AppleScript
+  // scan. The detection now runs off the main thread, so a fast idle poll won't stutter.
+  const MUSIC_POLL_MS_IDLE = 700;
+  const MUSIC_POLL_MS_LISTENING = 3000;
   const MUSIC_ROTATE_MS = 22000; // swap in a fresh line every ~22s while still listening
   let musicListening = $state(false);
   let musicPhrase = $state('');
@@ -243,6 +248,7 @@
     let timer: ReturnType<typeof setTimeout>;
     const tick = async () => {
       if (!alive) return;
+      const startedAt = Date.now();
       if (!busy) {
         busy = true;
         const sample = ((await tryInvoke<string>('get_now_playing')) ?? 'none') as NowPlaying;
@@ -263,9 +269,13 @@
           }
         }
       }
-      if (alive) timer = setTimeout(tick, MUSIC_POLL_MS);
+      // Schedule the next poll relative to when THIS one started, so the ~0.3s scan time
+      // doesn't compound onto the gap. Fast while idle, slow once we're already listening.
+      const period = musicListening ? MUSIC_POLL_MS_LISTENING : MUSIC_POLL_MS_IDLE;
+      const wait = Math.max(50, period - (Date.now() - startedAt));
+      if (alive) timer = setTimeout(tick, wait);
     };
-    timer = setTimeout(tick, 400);
+    timer = setTimeout(tick, 200);
     return () => {
       alive = false;
       clearTimeout(timer);
