@@ -149,7 +149,7 @@
     "inputKeyboardOff": "Keyboard sensing is unavailable — grant Accessibility access in System Settings.",
     "voiceInteraction": "Voice Interaction",
     "voiceInteractionDesc": "The pet hears and reacts to what you say. Audio is only recorded while you hold the shortcut, recognized on-device, and never leaves your machine.",
-    "voiceShortcutHint": "Shortcut: Control + Shift + V to start/stop. Chinese and English are auto-detected.",
+    "voiceShortcutHint": "Shortcut: Control + Shift + V to start/stop. Chinese recognition is supported first.",
     "preparingDownload": "Preparing download...",
     "downloadComplete": "Download complete",
     "exitFailed": "Exit failed: ",

@@ -126,6 +126,15 @@
     });
 
     addListener<{ text: string; is_final: boolean }>('voice-transcript', (e) => {
+      // Privacy gate: if voice was turned off (e.g. mid-recording), drop any in-flight /
+      // late transcript — no echo, no classification, no pet reply, no affection — and clear
+      // any lingering bubble state so the pet stays quiet.
+      if (!settingsStore.voiceEnabled) {
+        voiceText = '';
+        voiceReply = '';
+        voiceEmotion = null;
+        return;
+      }
       // Live partial results keep echoing in the orange "heard" bubble; on the final
       // result we classify it, hand off to the pet's reply, and react.
       if (!e.payload.is_final) {
@@ -216,9 +225,9 @@
     if (settingsStore.appMode) startModePolling();
   });
 
-  // Bilingual auto-recognition: the backend runs zh-CN + en-US recognizers together and
-  // picks the higher-confidence result, so the user can speak either language without
-  // switching anything (no-op off macOS).
+  // Recognition language: 'auto' resolves to the default single recognizer (Chinese) in the
+  // Rust `recognizer_locales`. macOS can't reliably run two recognizers at once, so there is
+  // no concurrent bilingual auto-detect (no-op off macOS).
   $effect(() => {
     tryInvoke('voice_set_locale', { locale: 'auto' });
   });

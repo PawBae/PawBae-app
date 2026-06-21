@@ -59,8 +59,22 @@ pub fn is_recording() -> bool {
     VOICE_ACTIVE.load(Ordering::SeqCst)
 }
 
+/// Whether flipping the master switch should stop an in-flight recording: only when voice is
+/// being turned OFF while a recording is active. Pure so the privacy-critical decision is
+/// unit-tested without the native recorder.
+fn should_stop_on_disable(enabled: bool, active: bool) -> bool {
+    !enabled && active
+}
+
 pub fn set_voice_enabled(enabled: bool) {
     VOICE_ENABLED.store(enabled, Ordering::SeqCst);
+    // Privacy: turning voice off mid-recording must close the mic immediately, not wait for
+    // the manual/auto stop. stop_recording() sends Stop; the speech thread tears the engine
+    // down and emits voice-status { recording: false } so the UI red dot clears.
+    if should_stop_on_disable(enabled, VOICE_ACTIVE.load(Ordering::SeqCst)) {
+        log::info!("[voice] disabled mid-recording — stopping to release the mic");
+        let _ = stop_recording();
+    }
 }
 
 pub fn start_recording() -> Result<(), String> {
@@ -156,9 +170,8 @@ unsafe fn make_nsstring(s: &str) -> *mut AnyObject {
     unsafe { msg_send![cls, stringWithUTF8String: c.as_ptr()] }
 }
 
-// Locale (e.g. "zh-CN" / "en-US") the recognizer is built with. The frontend sets this
-// from the app language via the `voice_set_locale` command, so a Chinese user's speech is
-// recognized as Chinese instead of falling back to the system locale. Empty → system default.
+// Locale the single recognizer is built with (e.g. "zh-CN"). The frontend sets it via the
+// `voice_set_locale` command; "auto"/empty resolves to the default in `recognizer_locales`.
 static VOICE_LOCALE: OnceLock<Mutex<String>> = OnceLock::new();
 
 pub fn set_voice_locale(locale: String) {
@@ -185,9 +198,10 @@ fn recognizer_locales() -> Vec<String> {
     }
 }
 
-/// Shared across the per-language result handlers: picks the highest-confidence FINAL
-/// transcript among the recognizers (each language hears the same audio; the wrong-language
-/// recognizer scores low), while letting partials echo live. Emits the final exactly once.
+/// Final/partial/fallback state machine for the recognizer result handler(s). It can pick the
+/// highest-confidence final across several recognizers, but the app currently runs a SINGLE
+/// recognizer (see `recognizer_locales`) — there is no concurrent multi-language recognition.
+/// Partials echo live; the final is emitted exactly once.
 struct Selection {
     pending_finals: usize,
     best_text: String,
@@ -205,8 +219,8 @@ enum Emit {
 }
 
 impl Selection {
-    /// A live partial result. Echo the longest one so far (monotonic) to avoid flicker
-    /// between the two languages.
+    /// A live partial result. Echo the longest one so far (monotonic) so the displayed text
+    /// doesn't jitter shorter between updates.
     fn on_partial(&mut self, text: String) -> Emit {
         if !self.emitted && text.len() > self.last_partial_len {
             self.last_partial_len = text.len();
@@ -217,9 +231,9 @@ impl Selection {
     }
 
     /// A recognizer reached a terminal state: `Some((text, conf))` for a final transcript,
-    /// or `None` on error (that language heard nothing). Decrements the pending count and
-    /// emits the highest-confidence final as soon as every recognizer is done — so a single
-    /// matching language no longer waits on the other's silence.
+    /// or `None` on error (it heard nothing). Decrements the pending count and emits the
+    /// highest-confidence final once every recognizer is done. With a single recognizer this
+    /// is just "emit its final, or nothing if it errored".
     fn on_done(&mut self, result: Option<(String, f64)>) -> Emit {
         if let Some((text, conf)) = result {
             if !text.trim().is_empty() && (!self.have_best || conf > self.best_conf) {
@@ -410,8 +424,9 @@ fn do_start_recording(app: &tauri::AppHandle) -> Result<RecordingState, String> 
         let req_cls = AnyClass::get(c"SFSpeechAudioBufferRecognitionRequest")
             .ok_or("SFSpeechAudioBufferRecognitionRequest not available")?;
 
-        // One recognizer + request per locale (e.g. zh-CN + en-US). A locale unavailable on
-        // this device is skipped; if none come up, bail.
+        // One recognizer + request per locale. recognizer_locales currently returns a single
+        // locale (zh-CN); the loop still supports more but they are NOT run concurrently. A
+        // locale unavailable on this device is skipped; if none come up, bail.
         let mut recognizers: Vec<(String, *mut AnyObject)> = Vec::new();
         let mut requests: Vec<*mut AnyObject> = Vec::new();
         for loc in &locales {
@@ -633,7 +648,11 @@ fn do_stop_recording(state: RecordingState) {
 
 #[cfg(test)]
 mod tests {
-    use super::{should_autostop, Emit, Selection};
+    // The Selection state machine supports several recognizers, but the app currently runs a
+    // single recognizer (recognizer_locales → zh-CN). These tests exercise the state machine
+    // with multiple pending terminals to cover the wait/pick/fallback paths — they do NOT
+    // imply concurrent multi-language recognition is enabled.
+    use super::{should_autostop, should_stop_on_disable, Emit, Selection};
 
     fn fresh(pending: usize) -> Selection {
         Selection {
@@ -649,9 +668,9 @@ mod tests {
     #[test]
     fn picks_highest_confidence_final_when_all_done() {
         let mut s = fresh(2);
-        // First language finalizes; nothing emitted yet (the other is still pending).
+        // First recognizer finalizes; nothing emitted yet (the other is still pending).
         assert_eq!(s.on_done(Some(("摸摸头".into(), 0.9))), Emit::None);
-        // Second (wrong-language) finalizes lower; best wins and emits once.
+        // Second recognizer finalizes lower-confidence; the best one wins and emits once.
         assert_eq!(s.on_done(Some(("garbage".into(), 0.3))), Emit::Final("摸摸头".into()));
     }
 
@@ -659,8 +678,23 @@ mod tests {
     fn error_counts_as_done_so_match_emits_immediately() {
         let mut s = fresh(2);
         assert_eq!(s.on_done(Some(("hello".into(), 0.8))), Emit::None);
-        // The other language heard nothing (error) — emit the match right away, no waiting.
+        // The other recognizer heard nothing (error) — emit the best right away, no waiting.
         assert_eq!(s.on_done(None), Emit::Final("hello".into()));
+    }
+
+    #[test]
+    fn single_recognizer_emits_its_own_final() {
+        // The real runtime case today: one recognizer.
+        let mut s = fresh(1);
+        assert_eq!(s.on_done(Some(("你好".into(), 0.95))), Emit::Final("你好".into()));
+    }
+
+    #[test]
+    fn stops_only_when_disabled_mid_recording() {
+        assert!(should_stop_on_disable(false, true)); // turned off while recording → stop
+        assert!(!should_stop_on_disable(false, false)); // off but not recording → nothing
+        assert!(!should_stop_on_disable(true, true)); // enabling never stops
+        assert!(!should_stop_on_disable(true, false));
     }
 
     #[test]

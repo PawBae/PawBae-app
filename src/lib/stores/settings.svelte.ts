@@ -26,7 +26,7 @@ class SettingsStore {
   petQueue = $state.raw<string[]>([]);
   skippedVersion = $state('');
   inputTrackingEnabled = $state(true);
-  voiceEnabled = $state(true);
+  voiceEnabled = $state(false);
   ocConnections = $state.raw<OcConnection[]>([{ id: 'local', type: 'local' }]);
 
   private storeInstance: Awaited<ReturnType<typeof load>> | null = null;
@@ -65,7 +65,7 @@ class SettingsStore {
     this.petQueue = ((await store.get('pet_queue')) as string[]) || [];
     this.skippedVersion = ((await store.get('skipped_version')) as string) || '';
     this.inputTrackingEnabled = ((await store.get('input_tracking_enabled')) as boolean) ?? true;
-    this.voiceEnabled = ((await store.get('voice_enabled')) as boolean) ?? true;
+    this.voiceEnabled = ((await store.get('voice_enabled')) as boolean) ?? false;
     this.ocConnections = ((await store.get('oc_connections')) as OcConnection[]) || [
       { id: 'local', type: 'local' },
     ];

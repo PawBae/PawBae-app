@@ -149,7 +149,7 @@
     "inputKeyboardOff": "键盘感应不可用——请在系统设置中授予辅助功能权限。",
     "voiceInteraction": "语音互动",
     "voiceInteractionDesc": "宠物能听懂你的话并做出反应。仅在你按下快捷键时录音，识别由系统本地完成，音频不会离开你的设备。",
-    "voiceShortcutHint": "快捷键：Control + Shift + V 开始/停止。中英文自动识别。",
+    "voiceShortcutHint": "快捷键：Control + Shift + V 开始/停止。当前优先支持中文识别。",
     "preparingDownload": "准备下载...",
     "downloadComplete": "下载完成",
     "exitFailed": "退出失败：",

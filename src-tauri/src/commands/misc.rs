@@ -195,8 +195,8 @@ pub fn voice_set_enabled(enabled: bool) {
     }
 }
 
-/// Set the speech-recognition locale (e.g. "zh-CN", "en-US") so transcription matches the
-/// language the user actually speaks. Called by the frontend from the app language.
+/// Set the speech-recognition locale (e.g. "zh-CN"). "auto" resolves to the default single
+/// recognizer (Chinese) in the speech module; macOS can't run multiple recognizers at once.
 #[tauri::command]
 pub fn voice_set_locale(locale: String) {
     #[cfg(target_os = "macos")]
