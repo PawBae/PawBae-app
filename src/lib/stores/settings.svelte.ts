@@ -27,6 +27,7 @@ class SettingsStore {
   skippedVersion = $state('');
   inputTrackingEnabled = $state(true);
   voiceEnabled = $state(false);
+  musicReactionEnabled = $state(true);
   ocConnections = $state.raw<OcConnection[]>([{ id: 'local', type: 'local' }]);
 
   private storeInstance: Awaited<ReturnType<typeof load>> | null = null;
@@ -66,6 +67,7 @@ class SettingsStore {
     this.skippedVersion = ((await store.get('skipped_version')) as string) || '';
     this.inputTrackingEnabled = ((await store.get('input_tracking_enabled')) as boolean) ?? true;
     this.voiceEnabled = ((await store.get('voice_enabled')) as boolean) ?? false;
+    this.musicReactionEnabled = ((await store.get('music_reaction_enabled')) as boolean) ?? true;
     this.ocConnections = ((await store.get('oc_connections')) as OcConnection[]) || [
       { id: 'local', type: 'local' },
     ];
@@ -200,6 +202,11 @@ class SettingsStore {
   async setVoiceEnabled(v: boolean) {
     this.voiceEnabled = v;
     await this.saveSetting('voice_enabled', v);
+  }
+
+  async setMusicReactionEnabled(v: boolean) {
+    this.musicReactionEnabled = v;
+    await this.saveSetting('music_reaction_enabled', v);
   }
 
   async setOcConnections(v: OcConnection[]) {

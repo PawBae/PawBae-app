@@ -1,6 +1,7 @@
 <script lang="ts">
   import { listen } from '@tauri-apps/api/event';
   import { untrack } from 'svelte';
+  import { _ } from 'svelte-i18n';
   import { agentStore } from '../stores/agents.svelte';
   import { petStore } from '../stores/pet.svelte';
   import { sessionStore } from '../stores/sessions.svelte';
@@ -20,6 +21,12 @@
   } from '../utils/idle-actions';
   import { tryInvoke } from '../utils/invoke';
   import { keyboardMoveDelta } from '../utils/keyboard-control';
+  import {
+    initialMusicState,
+    type NowPlaying,
+    stepMusic,
+  } from '../utils/music-machine';
+  import { MUSIC_PHRASE_KEYS, pickPhraseIndex } from '../utils/music-phrases';
   import type { PhysicsState } from '../utils/pet-physics';
   import { createPhysicsLoop } from '../utils/pet-physics';
   import {
@@ -31,6 +38,7 @@
   import AgentBubble from './AgentBubble.svelte';
   import CelebrationBubble from './CelebrationBubble.svelte';
   import MiniPetMascot from './MiniPetMascot.svelte';
+  import MusicBubble from './MusicBubble.svelte';
   import PetReplyBubble from './PetReplyBubble.svelte';
   import VoiceBubble from './VoiceBubble.svelte';
 
@@ -188,6 +196,88 @@
     };
   });
   const bubblePlacement = $derived<'above' | 'below'>(bubbleAbove ? 'above' : 'below');
+
+  // ── Music reaction ──────────────────────────────────────────────────────────────
+  // While the user is listening to music (QQ音乐 / 网易云 / Spotify / …) the pet "vibes"
+  // and pops a rotating line. Detection is the system-level `get_now_playing` Rust command
+  // (already distinguishes music vs video vs the pet's own SFX); the hysteresis machine in
+  // music-machine.ts debounces the between-track "none" gaps so the bubble doesn't flicker.
+  const MUSIC_POLL_MS = 2500; // listening is a long state — cheap polling is plenty
+  const MUSIC_ROTATE_MS = 22000; // swap in a fresh line every ~22s while still listening
+  let musicListening = $state(false);
+  let musicPhrase = $state('');
+  let lastMusicPhraseIndex = -1;
+  const musicMachine = initialMusicState();
+  let musicRotateTimer: ReturnType<typeof setInterval> | null = null;
+
+  function rollMusicPhrase() {
+    const idx = pickPhraseIndex(MUSIC_PHRASE_KEYS.length, lastMusicPhraseIndex, Math.random());
+    lastMusicPhraseIndex = idx;
+    musicPhrase = idx >= 0 ? $_(MUSIC_PHRASE_KEYS[idx]) : '';
+  }
+  function stopMusicRotate() {
+    if (musicRotateTimer) {
+      clearInterval(musicRotateTimer);
+      musicRotateTimer = null;
+    }
+  }
+  function resetMusic() {
+    musicListening = false;
+    musicPhrase = '';
+    musicMachine.listening = false;
+    musicMachine.musicStreak = 0;
+    musicMachine.silenceStreak = 0;
+    stopMusicRotate();
+  }
+
+  $effect(() => {
+    // Pet mode only, and only when the user opted in. Reading both here makes the effect
+    // re-run (and tear down the poll) the moment either changes.
+    const enabled = settingsStore.appMode === 'pet' && settingsStore.musicReactionEnabled;
+    if (!enabled) {
+      resetMusic();
+      return;
+    }
+    let alive = true;
+    let busy = false; // busy-lock: never overlap a slow get_now_playing call
+    let timer: ReturnType<typeof setTimeout>;
+    const tick = async () => {
+      if (!alive) return;
+      if (!busy) {
+        busy = true;
+        const sample = ((await tryInvoke<string>('get_now_playing')) ?? 'none') as NowPlaying;
+        busy = false;
+        if (alive) {
+          const r = stepMusic(musicMachine, sample);
+          if (r.justEntered) {
+            musicListening = true;
+            rollMusicPhrase();
+            stopMusicRotate();
+            musicRotateTimer = setInterval(() => {
+              if (musicListening) rollMusicPhrase();
+            }, MUSIC_ROTATE_MS);
+          } else if (r.justExited) {
+            musicListening = false;
+            musicPhrase = '';
+            stopMusicRotate();
+          }
+        }
+      }
+      if (alive) timer = setTimeout(tick, MUSIC_POLL_MS);
+    };
+    timer = setTimeout(tick, 400);
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+      stopMusicRotate();
+    };
+  });
+
+  // The music bubble yields to voice (recording / heard echo / reply) so an active
+  // interaction is never stepped on — listening to music is the lowest-priority bubble.
+  const musicBubbleText = $derived(
+    musicListening && !voiceRecording && !voiceText && !voiceReply ? musicPhrase : ''
+  );
 
   // Growth celebrations (Phase 6): play the queue head for a beat, then shift. The
   // effect re-arms per head change, so back-to-back unlocks show sequentially.
@@ -526,6 +616,8 @@
   />
 
   <PetReplyBubble text={voiceReply} placement={bubblePlacement} />
+
+  <MusicBubble text={musicBubbleText} placement={bubblePlacement} />
 </div>
 
 <style>
