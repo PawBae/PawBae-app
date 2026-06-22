@@ -38,7 +38,7 @@ mod setup;
 mod ssh_core;
 mod terminal;
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 mod speech;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

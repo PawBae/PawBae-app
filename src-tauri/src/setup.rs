@@ -8,7 +8,7 @@ use crate::mascot::MASCOT_TOP_INSET;
 use crate::platform::macos::{get_notch_offset, install_wry_webview_ime_fix};
 #[cfg(target_os = "windows")]
 use crate::platform::windows::fullscreen_foreground_monitor;
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 use crate::speech;
 use crate::state::WindowState;
 use crate::{socket, tray};
@@ -60,7 +60,7 @@ pub(crate) fn init(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error
     install_wry_webview_ime_fix();
 
     // Init speech recognition thread and register global shortcut
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
     {
         speech::init_speech_thread(app.handle().clone());
         log::info!("[voice] speech thread started, registering shortcut");
