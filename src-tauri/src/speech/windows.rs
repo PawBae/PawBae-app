@@ -70,6 +70,12 @@ pub(super) fn do_start_recording(app: &tauri::AppHandle) -> Result<RecordingStat
         .ContinuousRecognitionSession()
         .map_err(|e| format!("Failed to get ContinuousRecognitionSession: {e}"))?;
 
+    recognizer
+        .CompileConstraintsAsync()
+        .map_err(|e| format!("CompileConstraintsAsync failed: {e}"))?
+        .get()
+        .map_err(|e| format!("CompileConstraintsAsync.get() failed: {e}"))?;
+
     let start_ms = epoch_ms();
     RECORDING_START_MS.store(start_ms, Ordering::SeqCst);
     LAST_RESULT_TICK.store(0, Ordering::SeqCst);
