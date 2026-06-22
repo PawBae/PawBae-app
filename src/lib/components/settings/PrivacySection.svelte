@@ -65,6 +65,19 @@
         <span class="toggle-thumb"></span>
       </button>
     </div>
+
+    <div class="setting-row">
+      <div class="setting-info">
+        <span class="setting-label">{$_('settings.musicReaction')}</span>
+        <span class="setting-desc">{$_('settings.musicReactionDesc')}</span>
+      </div>
+      <button class="toggle" class:on={settingsStore.musicReactionEnabled}
+        onclick={() => settingsStore.setMusicReactionEnabled(!settingsStore.musicReactionEnabled)}
+        role="switch" aria-checked={settingsStore.musicReactionEnabled}
+        aria-label={$_('settings.musicReaction')}>
+        <span class="toggle-thumb"></span>
+      </button>
+    </div>
   </div>
 </section>
 

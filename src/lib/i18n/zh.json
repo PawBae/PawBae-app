@@ -150,6 +150,8 @@
     "voiceInteraction": "语音互动",
     "voiceInteractionDesc": "宠物能听懂你的话并做出反应。仅在你按下快捷键时录音，识别由系统本地完成，音频不会离开你的设备。",
     "voiceShortcutHint": "快捷键：Control + Shift + V 开始/停止。当前优先支持中文识别。",
+    "musicReaction": "听歌互动",
+    "musicReactionDesc": "当你播放音乐（Spotify、Apple Music、网易云、QQ音乐……）时，宠物会跟着进入听歌状态并冒一句话。仅读取系统的「正在播放」信息，不会获取音频内容。",
     "preparingDownload": "准备下载...",
     "downloadComplete": "下载完成",
     "exitFailed": "退出失败：",
@@ -330,5 +332,15 @@
       "callName": "在的在的，我在听！",
       "unknown": "嗯？没太听懂～"
     }
+  },
+  "petMusic": {
+    "p1": "music is my life～",
+    "p2": "这首歌我听过！",
+    "p3": "一起摇摆吧～",
+    "p4": "调大点声嘛",
+    "p5": "好上头的旋律",
+    "p6": "单曲循环中…",
+    "p7": "这节奏绝了",
+    "p8": "陪你一起听～"
   }
 }
