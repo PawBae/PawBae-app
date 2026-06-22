@@ -463,6 +463,9 @@
       for (const fn of listenerCleanups) fn();
       tryInvoke('set_stroll_mode', { enabled: false });
       tryInvoke('set_throw_tracking', { enabled: false });
+      if (isWindows) {
+        tryInvoke('set_pet_passthrough', { active: false });
+      }
     };
   });
 

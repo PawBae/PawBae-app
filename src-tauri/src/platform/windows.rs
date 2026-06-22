@@ -686,8 +686,9 @@ pub(crate) fn pet_passthrough_poll_windows(
             // Coding mode keeps the window permanently interactive. Pet mode
             // is interactive over the mascot, during a drag, and whenever the
             // context menu / pomodoro UI needs its buttons clickable.
+            let panel_open = ws.expanded.load(Ordering::SeqCst);
             let interactive = if pet_mode {
-                menu_open || pomodoro_active || over_mascot || drag_active
+                menu_open || pomodoro_active || panel_open || over_mascot || drag_active
             } else {
                 true
             };

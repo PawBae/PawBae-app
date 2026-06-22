@@ -335,9 +335,15 @@ pub fn set_pet_passthrough(
         if active {
             let mascot_scale = sanitized_mascot_scale(mascot_scale);
             let large_mascot_scale = large_mascot_scale.unwrap_or(LARGE_MASCOT_SIZE_MULTIPLIER);
-            ps.mascot_scale_bits.store(mascot_scale.to_bits(), Ordering::SeqCst);
-            ps.large_mascot_scale_bits.store(large_mascot_scale.to_bits(), Ordering::SeqCst);
-            if ps.passthrough_thread_alive.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_ok() {
+            ps.mascot_scale_bits
+                .store(mascot_scale.to_bits(), Ordering::SeqCst);
+            ps.large_mascot_scale_bits
+                .store(large_mascot_scale.to_bits(), Ordering::SeqCst);
+            if ps
+                .passthrough_thread_alive
+                .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+                .is_ok()
+            {
                 let app2 = app.clone();
                 let ws2 = Arc::clone(&*ws);
                 let ps2 = Arc::clone(&*ps);
