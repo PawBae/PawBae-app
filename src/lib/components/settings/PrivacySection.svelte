@@ -51,6 +51,33 @@
         <span class="toggle-thumb"></span>
       </button>
     </div>
+
+    <div class="setting-row">
+      <div class="setting-info">
+        <span class="setting-label">{$_('settings.voiceInteraction')}</span>
+        <span class="setting-desc">{$_('settings.voiceInteractionDesc')}</span>
+        <span class="setting-desc">{$_('settings.voiceShortcutHint')}</span>
+      </div>
+      <button class="toggle" class:on={settingsStore.voiceEnabled}
+        onclick={() => settingsStore.setVoiceEnabled(!settingsStore.voiceEnabled)}
+        role="switch" aria-checked={settingsStore.voiceEnabled}
+        aria-label={$_('settings.voiceInteraction')}>
+        <span class="toggle-thumb"></span>
+      </button>
+    </div>
+
+    <div class="setting-row">
+      <div class="setting-info">
+        <span class="setting-label">{$_('settings.musicReaction')}</span>
+        <span class="setting-desc">{$_('settings.musicReactionDesc')}</span>
+      </div>
+      <button class="toggle" class:on={settingsStore.musicReactionEnabled}
+        onclick={() => settingsStore.setMusicReactionEnabled(!settingsStore.musicReactionEnabled)}
+        role="switch" aria-checked={settingsStore.musicReactionEnabled}
+        aria-label={$_('settings.musicReaction')}>
+        <span class="toggle-thumb"></span>
+      </button>
+    </div>
   </div>
 </section>
 

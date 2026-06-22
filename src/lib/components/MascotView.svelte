@@ -1,5 +1,7 @@
 <script lang="ts">
   import { listen } from '@tauri-apps/api/event';
+  import { untrack } from 'svelte';
+  import { _ } from 'svelte-i18n';
   import { agentStore } from '../stores/agents.svelte';
   import { petStore } from '../stores/pet.svelte';
   import { sessionStore } from '../stores/sessions.svelte';
@@ -19,6 +21,12 @@
   } from '../utils/idle-actions';
   import { tryInvoke } from '../utils/invoke';
   import { keyboardMoveDelta } from '../utils/keyboard-control';
+  import {
+    initialMusicState,
+    type NowPlaying,
+    stepMusic,
+  } from '../utils/music-machine';
+  import { MUSIC_PHRASE_KEYS, pickPhraseIndex } from '../utils/music-phrases';
   import type { PhysicsState } from '../utils/pet-physics';
   import { createPhysicsLoop } from '../utils/pet-physics';
   import {
@@ -30,6 +38,8 @@
   import AgentBubble from './AgentBubble.svelte';
   import CelebrationBubble from './CelebrationBubble.svelte';
   import MiniPetMascot from './MiniPetMascot.svelte';
+  import MusicBubble from './MusicBubble.svelte';
+  import PetReplyBubble from './PetReplyBubble.svelte';
   import VoiceBubble from './VoiceBubble.svelte';
 
   interface MascotViewProps {
@@ -37,6 +47,12 @@
     voiceRecording?: boolean;
     voiceText?: string;
     voiceError?: string;
+    /** Pet's localized reply to the last final transcript (voice Phase C). */
+    voiceReply?: string;
+    /** CodexPetState emotion to play for the last intent, or null. */
+    voiceEmotion?: string | null;
+    /** Bumps on every final transcript so a repeated intent still replays. */
+    voiceNonce?: number;
   }
 
   let {
@@ -44,6 +60,9 @@
     voiceRecording = false,
     voiceText = '',
     voiceError = '',
+    voiceReply = '',
+    voiceEmotion = null,
+    voiceNonce = 0,
   }: MascotViewProps = $props();
 
   const isWindows = typeof navigator !== 'undefined' && navigator.userAgent.includes('Windows');
@@ -97,11 +116,178 @@
   let reactionTimer: ReturnType<typeof setTimeout> | null = null;
   let keyboardMoveTimer: ReturnType<typeof setTimeout> | null = null;
 
-  // Overlay slot fed to MiniPetMascot: a live input reaction always wins over an idle
-  // micro-action, which in turn sits above the base/physics sprite.
-  const overlaySprite = $derived<CodexPetState | null>(reactionSprite ?? idleSprite);
+  // Voice emotion overlay (voice Phase C): a recognized intent plays a longer-lived
+  // emotion (happy/sleep/eat/angry) on its own slot, kept separate from the 350ms
+  // keyboard/mouse reaction machine so the two never clobber each other.
+  const VOICE_EMOTION_MS = 2500;
+  let voiceEmotionSprite = $state<CodexPetState | null>(null);
+  let voiceEmotionTimer: ReturnType<typeof setTimeout> | null = null;
+
+  // Overlay slot fed to MiniPetMascot: a live input reaction wins over a voice emotion,
+  // which wins over an idle micro-action, which sits above the base/physics sprite.
+  const overlaySprite = $derived<CodexPetState | null>(
+    reactionSprite ?? voiceEmotionSprite ?? idleSprite
+  );
+
+  // The pet must not be mid-manipulation for a beat to steal its animation. Shared by the
+  // keyboard/mouse reaction and the voice emotion. Read live at fire time, never reactively.
+  function isBusyNow(): boolean {
+    return (
+      (physicsState !== null && physicsState !== 'on_floor') || // drag/throw/fall/bounce/wall
+      windowStore.mascotHover || // hover-jump in flight
+      petStore.currentAction === 'headpat' || // headpat beat
+      windowStore.settingsOpen // settings panel open
+    );
+  }
+
+  // Play the voice emotion when a new final transcript arrives. Only voiceNonce is tracked;
+  // everything else is read inside untrack so store changes can't re-fire this and replay a
+  // stale emotion. While busy we skip the animation but the reply bubble still shows.
+  $effect(() => {
+    voiceNonce; // tracked dependency
+    untrack(() => {
+      if (!voiceNonce || !voiceEmotion || isBusyNow()) return;
+      voiceEmotionSprite = voiceEmotion as CodexPetState;
+      if (voiceEmotionTimer) clearTimeout(voiceEmotionTimer);
+      voiceEmotionTimer = setTimeout(() => {
+        voiceEmotionSprite = null;
+        voiceEmotionTimer = null;
+      }, VOICE_EMOTION_MS);
+    });
+    return () => {
+      if (voiceEmotionTimer) {
+        clearTimeout(voiceEmotionTimer);
+        voiceEmotionTimer = null;
+      }
+    };
+  });
 
   const mascotSize = $derived(Math.round(60 * settingsStore.mascotScale));
+
+  // Smart bubble placement: above the pet's head normally, but flip below (and drop the
+  // head-room) when the pet window sits at the screen's top edge — bubbles are clipped to
+  // the window, so an 'above' bubble needs window/screen room above the pet. Polled cheaply
+  // (~1s, pet mode only) since the pet's screen position changes via drag/physics/WASD.
+  const TOP_EDGE_PX = 50;
+  let bubbleAbove = $state(false);
+  $effect(() => {
+    if (settingsStore.appMode !== 'pet') {
+      bubbleAbove = false;
+      return;
+    }
+    let alive = true;
+    let timer: ReturnType<typeof setTimeout>;
+    const tick = async () => {
+      if (!alive) return;
+      const origin = await windowStore.getOrigin();
+      const monitor = await windowStore.getMonitorRect();
+      if (alive && origin && monitor) {
+        // Cocoa bottom-left coords: origin.y is the window's bottom; its top is
+        // origin.y + window height. Room above = visible-frame top − window top.
+        const roomAbove = monitor.y + monitor.h - (origin.y + window.innerHeight);
+        bubbleAbove = roomAbove >= TOP_EDGE_PX;
+      }
+      if (alive) timer = setTimeout(tick, 1000);
+    };
+    timer = setTimeout(tick, 200);
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+    };
+  });
+  const bubblePlacement = $derived<'above' | 'below'>(bubbleAbove ? 'above' : 'below');
+
+  // ── Music reaction ──────────────────────────────────────────────────────────────
+  // While the user is listening to music (QQ音乐 / 网易云 / Spotify / …) the pet "vibes"
+  // and pops a rotating line. Detection is the system-level `get_now_playing` Rust command
+  // (already distinguishes music vs video vs the pet's own SFX); the hysteresis machine in
+  // music-machine.ts debounces the between-track "none" gaps so the bubble doesn't flicker.
+  // Adaptive poll cadence: while NOT yet listening, poll fast so the pet reacts almost
+  // immediately when you hit play (this is the latency users feel). Once listening, slow
+  // right down — re-checking "still playing?" is not urgent, and it saves the AppleScript
+  // scan. The detection now runs off the main thread, so a fast idle poll won't stutter.
+  const MUSIC_POLL_MS_IDLE = 700;
+  const MUSIC_POLL_MS_LISTENING = 3000;
+  const MUSIC_ROTATE_MS = 22000; // swap in a fresh line every ~22s while still listening
+  let musicListening = $state(false);
+  let musicPhrase = $state('');
+  let lastMusicPhraseIndex = -1;
+  const musicMachine = initialMusicState();
+  let musicRotateTimer: ReturnType<typeof setInterval> | null = null;
+
+  function rollMusicPhrase() {
+    const idx = pickPhraseIndex(MUSIC_PHRASE_KEYS.length, lastMusicPhraseIndex, Math.random());
+    lastMusicPhraseIndex = idx;
+    musicPhrase = idx >= 0 ? $_(MUSIC_PHRASE_KEYS[idx]) : '';
+  }
+  function stopMusicRotate() {
+    if (musicRotateTimer) {
+      clearInterval(musicRotateTimer);
+      musicRotateTimer = null;
+    }
+  }
+  function resetMusic() {
+    musicListening = false;
+    musicPhrase = '';
+    musicMachine.listening = false;
+    musicMachine.musicStreak = 0;
+    musicMachine.silenceStreak = 0;
+    stopMusicRotate();
+  }
+
+  $effect(() => {
+    // Pet mode only, and only when the user opted in. Reading both here makes the effect
+    // re-run (and tear down the poll) the moment either changes.
+    const enabled = settingsStore.appMode === 'pet' && settingsStore.musicReactionEnabled;
+    if (!enabled) {
+      resetMusic();
+      return;
+    }
+    let alive = true;
+    let busy = false; // busy-lock: never overlap a slow get_now_playing call
+    let timer: ReturnType<typeof setTimeout>;
+    const tick = async () => {
+      if (!alive) return;
+      const startedAt = Date.now();
+      if (!busy) {
+        busy = true;
+        const sample = ((await tryInvoke<string>('get_now_playing')) ?? 'none') as NowPlaying;
+        busy = false;
+        if (alive) {
+          const r = stepMusic(musicMachine, sample);
+          if (r.justEntered) {
+            musicListening = true;
+            rollMusicPhrase();
+            stopMusicRotate();
+            musicRotateTimer = setInterval(() => {
+              if (musicListening) rollMusicPhrase();
+            }, MUSIC_ROTATE_MS);
+          } else if (r.justExited) {
+            musicListening = false;
+            musicPhrase = '';
+            stopMusicRotate();
+          }
+        }
+      }
+      // Schedule the next poll relative to when THIS one started, so the ~0.3s scan time
+      // doesn't compound onto the gap. Fast while idle, slow once we're already listening.
+      const period = musicListening ? MUSIC_POLL_MS_LISTENING : MUSIC_POLL_MS_IDLE;
+      const wait = Math.max(50, period - (Date.now() - startedAt));
+      if (alive) timer = setTimeout(tick, wait);
+    };
+    timer = setTimeout(tick, 200);
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+      stopMusicRotate();
+    };
+  });
+
+  // The music bubble yields to voice (recording / heard echo / reply) so an active
+  // interaction is never stepped on — listening to music is the lowest-priority bubble.
+  const musicBubbleText = $derived(
+    musicListening && !voiceRecording && !voiceText && !voiceReply ? musicPhrase : ''
+  );
 
   // Growth celebrations (Phase 6): play the queue head for a beat, then shift. The
   // effect re-arms per head change, so back-to-back unlocks show sequentially.
@@ -120,7 +306,7 @@
   );
 
   // Evolution aura: a subtle glow from the branching stage up, tinted by work style.
-  // Class-only here; the drop-shadow lives in CSS so the sprite itself stays untouched.
+  // Class-only here; the radial-gradient halo lives in CSS so the sprite stays untouched.
   const auraClass = $derived.by(() => {
     const evo = petStore.evolution;
     if (evo.stageIndex < STYLE_FROM_STAGE) return '';
@@ -141,6 +327,7 @@
       celebration === null &&
       !voiceRecording &&
       !voiceText &&
+      !voiceReply &&
       (physicsState === null || physicsState === 'on_floor')
     );
   }
@@ -284,14 +471,8 @@
 
   function handleUserInput(ev: UserInputEvent) {
     // Suppress a reaction while the pet is being manipulated or otherwise busy, so it can
-    // never interrupt drag/throw/hover/headpat or the settings interaction. Guard on the
-    // discrete physics STATE (physicsSprite is always non-null once physics runs).
-    const busy =
-      (physicsState !== null && physicsState !== 'on_floor') || // drag/throw/fall/bounce/wall
-      windowStore.mascotHover || // hover-jump in flight
-      petStore.currentAction === 'headpat' || // headpat beat
-      windowStore.settingsOpen; // settings panel open
-    if (!requestReaction(reaction, ev, { busy })) return; // coalesced or guarded → drop
+    // never interrupt drag/throw/hover/headpat or the settings interaction.
+    if (!requestReaction(reaction, ev, { busy: isBusyNow() })) return; // coalesced or guarded → drop
     reactionSprite = reactionSpriteFor(reaction) as CodexPetState;
     if (reactionTimer) clearTimeout(reactionTimer);
     reactionTimer = setTimeout(() => {
@@ -405,6 +586,7 @@
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
   class="mascot-view"
+  class:headroom={bubbleAbove}
   data-tauri-drag-region={windowStore.settingsOpen ? undefined : ''}
   onclick={handleClick}
   oncontextmenu={handleContextMenu}
@@ -440,7 +622,12 @@
     recording={voiceRecording}
     error={voiceError}
     petMode={settingsStore.appMode === 'pet'}
+    placement={bubblePlacement}
   />
+
+  <PetReplyBubble text={voiceReply} placement={bubblePlacement} />
+
+  <MusicBubble text={musicBubbleText} placement={bubblePlacement} />
 </div>
 
 <style>
@@ -454,10 +641,17 @@
     justify-content: center;
   }
 
-  /* Evolution auras: stage drives intensity, work style drives the tint. Filters sit on
-     the wrapper so the sprite's own background-position animation is unaffected. */
+  /* Only when the bubble sits above: drop the mascot below the window's top edge so the
+     bubble has room above its head. At the screen's top edge the bubble flips below and
+     this is removed, letting the pet go flush. */
+  .mascot-view.headroom {
+    margin-top: 48px;
+  }
+
+  /* Evolution auras: stage drives intensity, work style drives the tint. */
   .aura {
     --aura-color: rgba(255, 200, 120, 0.55);
+    position: relative;
   }
 
   .aura.style-commander {
@@ -472,25 +666,61 @@
     --aura-color: rgba(255, 143, 179, 0.6);
   }
 
+  /* The halo is a radial-gradient sitting BEHIND the sprite, NOT a drop-shadow.
+     A drop-shadow traces the sprite silhouette and spills past the tiny ~96px
+     collapsed window, where `.root { overflow:hidden }` + the window's own bounds
+     slice it into a hard rectangle (the visible "frame"). This gradient instead
+     fades to fully transparent BEFORE it reaches the window edge — `closest-side`
+     keeps its radius < half the window — so there is nothing to clip. It is biased
+     slightly downward (top: 54%) so it haloes the body, not the bubble above. */
+  .aura::before {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 54%;
+    width: var(--aura-spread, 0);
+    height: var(--aura-spread, 0);
+    transform: translate(-50%, -50%);
+    border-radius: 50%;
+    background: radial-gradient(
+      circle closest-side,
+      var(--aura-color) 0%,
+      var(--aura-color) 18%,
+      transparent 100%
+    );
+    opacity: var(--aura-strength, 0);
+    z-index: -1;
+    pointer-events: none;
+  }
+
   .aura.stage-2 {
-    filter: drop-shadow(0 0 3px var(--aura-color));
+    --aura-spread: 72px;
+    --aura-strength: 0.5;
   }
 
   .aura.stage-3 {
-    filter: drop-shadow(0 0 5px var(--aura-color)) drop-shadow(0 0 10px var(--aura-color));
+    --aura-spread: 86px;
+    --aura-strength: 0.7;
   }
 
   .aura.stage-4 {
+    --aura-spread: 92px;
+    --aura-strength: 0.8;
+  }
+
+  .aura.stage-4::before {
     animation: legendPulse 3s ease-in-out infinite;
   }
 
   @keyframes legendPulse {
     0%,
     100% {
-      filter: drop-shadow(0 0 4px var(--aura-color)) drop-shadow(0 0 9px rgba(255, 215, 80, 0.5));
+      opacity: 0.6;
+      transform: translate(-50%, -50%) scale(0.92);
     }
     50% {
-      filter: drop-shadow(0 0 7px var(--aura-color)) drop-shadow(0 0 14px rgba(255, 215, 80, 0.75));
+      opacity: 0.9;
+      transform: translate(-50%, -50%) scale(1.04);
     }
   }
 
@@ -519,6 +749,9 @@
 
   @media (prefers-reduced-motion: reduce) {
     .aura-wrap.overload {
+      animation: none;
+    }
+    .aura.stage-4::before {
       animation: none;
     }
   }

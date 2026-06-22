@@ -530,11 +530,128 @@ pub(crate) fn nowplaying_cli_status() -> Option<(bool, String)> {
     let source_bid = lines.next().unwrap_or("").trim().to_lowercase();
     Some((rate > 0.01, source_bid))
 }
-pub(crate) fn is_any_music_app_playing() -> bool {
-    let script = r#"
+/// Build an autoreleased NSString from a Rust &str (null on failure).
+unsafe fn objc_nsstring(s: &str) -> *mut objc2::runtime::AnyObject {
+    use objc2::msg_send;
+    use objc2::runtime::AnyClass;
+    let Some(cls) = AnyClass::get(c"NSString") else {
+        return std::ptr::null_mut();
+    };
+    let Ok(c) = std::ffi::CString::new(s) else {
+        return std::ptr::null_mut();
+    };
+    msg_send![cls, stringWithUTF8String: c.as_ptr()]
+}
+
+/// Read an NSString* into an owned Rust String (empty on null).
+unsafe fn objc_read_nsstring(p: *mut objc2::runtime::AnyObject) -> String {
+    use objc2::msg_send;
+    if p.is_null() {
+        return String::new();
+    }
+    let utf8: *const std::os::raw::c_char = msg_send![&*p, UTF8String];
+    if utf8.is_null() {
+        return String::new();
+    }
+    std::ffi::CStr::from_ptr(utf8)
+        .to_string_lossy()
+        .into_owned()
+}
+
+/// Bundle identifiers of currently-running apps that declare themselves Music apps
+/// (Info.plist `LSApplicationCategoryType == public.app-category.music`). This is what lets
+/// the menu-bar fallback work for ANY music player WITHOUT hardcoding each one: NetEase, QQ
+/// Music, 酷狗, 酷我, 汽水… all set this category, so they are discovered at runtime. A short
+/// fallback set is unioned in for the rare player that ships a wrong/absent category.
+pub(crate) fn running_music_app_bundle_ids() -> Vec<String> {
+    use objc2::msg_send;
+    use objc2::runtime::{AnyClass, AnyObject};
+
+    const FALLBACK_BIDS: &[&str] = &[
+        "com.netease.163music",
+        "com.tencent.QQMusicMac",
+        "com.soda.music",
+        "com.bytedance.soda.music",
+    ];
+
+    let mut ids: Vec<String> = Vec::new();
+    let mut running: Vec<String> = Vec::new();
+    unsafe {
+        if let Some(cls) = AnyClass::get(c"NSWorkspace") {
+            let ws: *mut AnyObject = msg_send![cls, sharedWorkspace];
+            if !ws.is_null() {
+                let apps: *mut AnyObject = msg_send![&*ws, runningApplications];
+                if !apps.is_null() {
+                    let count: usize = msg_send![&*apps, count];
+                    let cat_key = objc_nsstring("LSApplicationCategoryType");
+                    let bundle_cls = AnyClass::get(c"NSBundle");
+                    for i in 0..count {
+                        let app: *mut AnyObject = msg_send![&*apps, objectAtIndex: i];
+                        if app.is_null() {
+                            continue;
+                        }
+                        let bid_ns: *mut AnyObject = msg_send![&*app, bundleIdentifier];
+                        let bid = objc_read_nsstring(bid_ns);
+                        if bid.is_empty() {
+                            continue;
+                        }
+                        running.push(bid.clone());
+                        let (Some(bcls), false) = (bundle_cls, cat_key.is_null()) else {
+                            continue;
+                        };
+                        let url: *mut AnyObject = msg_send![&*app, bundleURL];
+                        if url.is_null() {
+                            continue;
+                        }
+                        let bundle: *mut AnyObject = msg_send![bcls, bundleWithURL: url];
+                        if bundle.is_null() {
+                            continue;
+                        }
+                        let cat: *mut AnyObject =
+                            msg_send![&*bundle, objectForInfoDictionaryKey: cat_key];
+                        if objc_read_nsstring(cat) == "public.app-category.music"
+                            && !ids.contains(&bid)
+                        {
+                            ids.push(bid);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // Union the fallback ids, but ONLY for apps that are actually running — otherwise the
+    // returned list (and the log line built from it) would imply 汽水 et al. are present when
+    // they aren't, and we'd waste a menu scan on dead bundle ids every poll.
+    for f in FALLBACK_BIDS {
+        if running.iter().any(|b| b == f) && !ids.iter().any(|b| b == f) {
+            ids.push((*f).to_string());
+        }
+    }
+    ids
+}
+
+/// Whether any of the given running music apps is currently playing, by scanning each one's
+/// menus for a "暂停"/"Pause" toggle item (present only while playing). Pure subprocess work
+/// (osascript) — takes the already-discovered bundle ids so the caller can run NSWorkspace
+/// discovery on the main thread and this scan OFF it, keeping the UI thread unblocked.
+pub(crate) fn music_app_playing(music_ids: &[String]) -> bool {
+    // Bundle ids are ASCII (letters/digits/.-_); filter defensively so nothing we inject
+    // into the AppleScript string literal can break out of the quotes.
+    let list_lit = music_ids
+        .iter()
+        .filter(|b| {
+            b.chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_')
+        })
+        .map(|b| format!("\"{}\"", b))
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    let script = format!(
+        r#"
         set isPlaying to false
 
-        -- Check apps that support "player state" AppleScript
+        -- Apple Music: official AppleScript player state (reliable, no Accessibility needed).
         if application "Music" is running then
             tell application "Music"
                 try
@@ -543,32 +660,37 @@ pub(crate) fn is_any_music_app_playing() -> bool {
             end tell
         end if
 
-        if (not isPlaying) and application "Spotify" is running then
-            tell application "Spotify"
-                try
-                    if player state is playing then set isPlaying to true
-                end try
-            end tell
+        -- Spotify via `run script` so the outer script still COMPILES when Spotify isn't
+        -- installed (a static `tell application "Spotify"` would force-load its terminology
+        -- at compile time and fail with -2741, killing the whole script).
+        if not isPlaying then
+            try
+                if application "Spotify" is running then
+                    set spState to (run script "tell application \"Spotify\" to return (player state is playing)")
+                    if spState then set isPlaying to true
+                end if
+            end try
         end if
 
-        -- For apps without AppleScript player-state (NeteaseMusic, QQ Music, etc.),
-        -- check the system menu bar: the first item in the "控制" menu
-        -- toggles between "播放"/"暂停" or "Play"/"Pause".
+        -- Generic menu-bar scan over every running Music-category app (discovered at runtime,
+        -- not hardcoded per app). A playing app exposes a "暂停"/"Pause" toggle item somewhere
+        -- in its menus; a paused one shows "播放"/"Play". No per-app menu name needed, so new
+        -- players work with zero code changes.
         if not isPlaying then
             tell application "System Events"
-                set menuChecks to {{"com.netease.163music", "控制"}, {"com.tencent.qqmusic", "控制"}, {"com.soda.music", "控制"}, {"com.bytedance.soda.music", "控制"}}
-                repeat with entry in menuChecks
+                repeat with bid in {{{list}}}
                     if isPlaying then exit repeat
-                    set bid to item 1 of entry
-                    set menuName to item 2 of entry
                     try
                         set procs to every process whose bundle identifier is bid
                         if (count of procs) > 0 then
                             set p to item 1 of procs
-                            set firstItem to name of menu item 1 of menu 1 of menu bar item menuName of menu bar 1 of p
-                            if firstItem is "暂停" or firstItem is "Pause" then
-                                set isPlaying to true
-                            end if
+                            repeat with mb in menu bar items of menu bar 1 of p
+                                if isPlaying then exit repeat
+                                try
+                                    set nm to name of every menu item of menu 1 of mb
+                                    if nm contains "暂停" or nm contains "Pause" then set isPlaying to true
+                                end try
+                            end repeat
                         end if
                     end try
                 end repeat
@@ -580,16 +702,22 @@ pub(crate) fn is_any_music_app_playing() -> bool {
         else
             return "0"
         end if
-    "#;
+    "#,
+        list = list_lit
+    );
 
     match std::process::Command::new("osascript")
         .arg("-e")
-        .arg(script)
+        .arg(&script)
         .output()
     {
         Ok(output) => {
             let result = String::from_utf8_lossy(&output.stdout).trim() == "1";
-            log::info!("[now_playing/script] is_any_music_app_playing={}", result);
+            log::info!(
+                "[now_playing/script] music_app_playing={} music_apps={:?}",
+                result,
+                music_ids
+            );
             result
         }
         Err(_) => false,

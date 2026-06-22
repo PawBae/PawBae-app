@@ -147,6 +147,11 @@
     "inputReactions": "Input Reactions",
     "inputReactionsDesc": "Let the pet react to your typing and clicks. Only event counts are sensed — never which keys or what you type — and nothing leaves your device.",
     "inputKeyboardOff": "Keyboard sensing is unavailable — grant Accessibility access in System Settings.",
+    "voiceInteraction": "Voice Interaction",
+    "voiceInteractionDesc": "The pet hears and reacts to what you say. Audio is only recorded while you hold the shortcut, recognized on-device, and never leaves your machine.",
+    "voiceShortcutHint": "Shortcut: Control + Shift + V to start/stop. Chinese recognition is supported first.",
+    "musicReaction": "Music Reaction",
+    "musicReactionDesc": "When you play music (Spotify, Apple Music, NetEase, QQ Music…), the pet vibes along and says a line. Detection uses the system's now-playing info only — never the audio itself.",
     "preparingDownload": "Preparing download...",
     "downloadComplete": "Download complete",
     "exitFailed": "Exit failed: ",
@@ -314,5 +319,28 @@
     "dailyMessages": "Daily Messages",
     "token": "Token",
     "messagesLabel": "Messages"
+  },
+  "voice": {
+    "reply": {
+      "greet": "Hi there~",
+      "praise": "Hehe, thank you!",
+      "headpat": "So cozy~ do it again!",
+      "feed": "Yum yum!",
+      "sleep": "So sleepy… good night",
+      "play": "Yay, let's play!",
+      "scold": "Aww… I'm sorry",
+      "callName": "I'm here, I'm listening!",
+      "unknown": "Hmm? I didn't quite catch that~"
+    }
+  },
+  "petMusic": {
+    "p1": "music is my life~",
+    "p2": "I know this song!",
+    "p3": "Let's vibe together~",
+    "p4": "Turn it up a bit!",
+    "p5": "Such a catchy tune",
+    "p6": "On repeat right now…",
+    "p7": "This beat is unreal",
+    "p8": "Listening along with you~"
   }
 }

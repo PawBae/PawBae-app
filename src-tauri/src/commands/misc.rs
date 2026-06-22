@@ -180,3 +180,31 @@ pub fn voice_is_recording() -> bool {
         false
     }
 }
+
+/// Master on/off for voice interaction (Settings → Privacy). When off, the shortcut opens
+/// no microphone at all. Synced from the frontend setting.
+#[tauri::command]
+pub fn voice_set_enabled(enabled: bool) {
+    #[cfg(target_os = "macos")]
+    {
+        crate::speech::set_voice_enabled(enabled);
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = enabled;
+    }
+}
+
+/// Set the speech-recognition locale (e.g. "zh-CN"). "auto" resolves to the default single
+/// recognizer (Chinese) in the speech module; macOS can't run multiple recognizers at once.
+#[tauri::command]
+pub fn voice_set_locale(locale: String) {
+    #[cfg(target_os = "macos")]
+    {
+        crate::speech::set_voice_locale(locale);
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = locale;
+    }
+}

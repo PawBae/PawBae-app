@@ -20,11 +20,12 @@ pub(crate) use drag::request_drag_apply;
 
 // media.rs
 pub(crate) use media::get_frontmost_bundle_id;
-pub(crate) use media::is_any_music_app_playing;
 pub(crate) use media::is_browser;
 pub(crate) use media::is_music_app;
 pub(crate) use media::is_video_app;
+pub(crate) use media::music_app_playing;
 pub(crate) use media::nowplaying_cli_status;
+pub(crate) use media::running_music_app_bundle_ids;
 
 // interaction.rs
 pub(crate) use interaction::pet_context_schedule_restore_alpha;

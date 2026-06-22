@@ -121,7 +121,9 @@ pub fn run() {
             set_input_tracking,
             get_input_tracking_status,
             voice_toggle,
-            voice_is_recording
+            voice_is_recording,
+            voice_set_locale,
+            voice_set_enabled
         ])
         .manage(ActiveAgentPid {
             pid: Mutex::new(None),

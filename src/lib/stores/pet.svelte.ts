@@ -48,6 +48,9 @@ export const AFFECTION_HUNGRY_DECAY_PER_HOUR = 2;
 export const AFFECTION_OFFLINE_FLOOR = 10;
 export const AFFECTION_HEADPAT = 2;
 export const AFFECTION_HEADPAT_DAILY_LIMIT = 5;
+// Voice praise/headpat/play intents bump affection, but only once per cooldown so a
+// user can't farm it by talking continuously. Session-ephemeral like headpat.
+export const AFFECTION_VOICE_COOLDOWN_MS = 10_000;
 export const AFFECTION_ACTIVITY_PER_10MIN = 1;
 export const AFFECTION_FEED_HUNGRY = 5;
 export const HUNGER_ACTIVITY_PER_HOUR = 3;
@@ -159,6 +162,21 @@ class PetStore {
     setTimeout(() => {
       if (this.currentAction === 'headpat') this.currentAction = 'idle';
     }, 2000);
+  }
+
+  private lastVoiceAffectionAt = 0;
+
+  /** Add affection from a positive voice intent, rate-limited so talking can't farm it.
+   *  No-op for non-positive deltas or while still on cooldown. */
+  applyVoiceAffection(delta: number) {
+    if (delta <= 0) return;
+    const now = Date.now();
+    if (now - this.lastVoiceAffectionAt < AFFECTION_VOICE_COOLDOWN_MS) return;
+    this.lastVoiceAffectionAt = now;
+    this.petData = {
+      ...this.petData,
+      affection: Math.min(AFFECTION_MAX, this.petData.affection + delta),
+    };
   }
 
   /** Whether today's gift is still unclaimed. */
