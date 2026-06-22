@@ -204,15 +204,6 @@ pub(crate) fn emit_transcript_if_current(
 
 pub(crate) static LAST_RESULT_TICK: AtomicU64 = AtomicU64::new(0);
 
-pub(crate) static RECORDING_START_MS: AtomicU64 = AtomicU64::new(0);
-
-pub(crate) fn epoch_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::SystemTime::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64
-}
-
 pub fn init_speech_thread(app: tauri::AppHandle) {
     let (tx, rx) = mpsc::channel::<SpeechCommand>();
     let _ = SPEECH_TX.set(Mutex::new(tx));

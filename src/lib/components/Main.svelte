@@ -30,6 +30,8 @@
   let voiceEmotion = $state<string | null>(null);
   let voiceNonce = $state(0);
   let voiceReplyTimer: ReturnType<typeof setTimeout> | null = null;
+  let voiceTextTimer: ReturnType<typeof setTimeout> | null = null;
+  let voiceErrorTimer: ReturnType<typeof setTimeout> | null = null;
   const VOICE_REPLY_MS = 2600;
 
   let updateOpen = $state(false);
@@ -121,10 +123,12 @@
       voiceRecording = e.payload.recording;
       voiceError = e.payload.error || '';
       if (!e.payload.recording) {
-        setTimeout(() => { voiceText = ''; }, 2000);
+        if (voiceTextTimer) clearTimeout(voiceTextTimer);
+        voiceTextTimer = setTimeout(() => { voiceText = ''; voiceTextTimer = null; }, 2000);
       }
       if (e.payload.error) {
-        setTimeout(() => { voiceError = ''; }, 6000);
+        if (voiceErrorTimer) clearTimeout(voiceErrorTimer);
+        voiceErrorTimer = setTimeout(() => { voiceError = ''; voiceErrorTimer = null; }, 6000);
       }
     });
 

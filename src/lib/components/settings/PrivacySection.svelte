@@ -12,7 +12,7 @@
   let prevOpen = false;
   $effect(() => {
     const isOpen = open;
-    if (isOpen && !prevOpen && settingsStore.inputTrackingEnabled) {
+    if (isOpen && !prevOpen && !isWindows && settingsStore.inputTrackingEnabled) {
       tryInvoke<ListenerStatus>('get_input_tracking_status').then((s) => {
         status = s ?? null;
       });

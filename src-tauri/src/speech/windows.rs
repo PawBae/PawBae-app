@@ -12,8 +12,8 @@ use windows::Media::SpeechRecognition::{
 };
 
 use super::{
-    emit_transcript_if_current, epoch_ms, recognizer_locales, Emit, Selection, LAST_RESULT_TICK,
-    RECORDING_GEN, RECORDING_START_MS,
+    emit_transcript_if_current, recognizer_locales, Emit, Selection, LAST_RESULT_TICK,
+    RECORDING_GEN,
 };
 
 pub(super) struct RecordingState {
@@ -26,6 +26,9 @@ pub(super) struct RecordingState {
     generation: u64,
 }
 
+// SAFETY: RecordingState wraps STA-bound WinRT COM objects (SpeechRecognizer,
+// SpeechContinuousRecognitionSession). This is sound only because the speech thread
+// is the sole accessor after construction — never move this to another thread.
 unsafe impl Send for RecordingState {}
 
 impl RecordingState {
@@ -54,33 +57,35 @@ pub(super) fn do_start_recording(app: &tauri::AppHandle) -> Result<RecordingStat
     })?;
 
     let recognizer = SpeechRecognizer::Create(&lang).map_err(|e| {
-        if e.code().0 as u32 == 0x80070005 {
-            "Speech recognition denied. Enable \"Online speech recognition\" in \
-             Settings → Privacy & security → Speech."
-                .to_string()
-        } else {
+        let friendly = speech_denied_message(e.code().0 as u32);
+        friendly.unwrap_or_else(|| {
             format!(
                 "Failed to create SpeechRecognizer for '{locale_tag}'. \
                  Ensure the language pack is installed. Error: {e}"
             )
-        }
+        })
     })?;
 
     let session = recognizer
         .ContinuousRecognitionSession()
         .map_err(|e| format!("Failed to get ContinuousRecognitionSession: {e}"))?;
 
-    recognizer
+    let compile_result = recognizer
         .CompileConstraintsAsync()
         .map_err(|e| format!("CompileConstraintsAsync failed: {e}"))?
         .get()
         .map_err(|e| format!("CompileConstraintsAsync.get() failed: {e}"))?;
+    use windows::Media::SpeechRecognition::SpeechRecognitionResultStatus as CompileStatus;
+    if compile_result.Status().unwrap_or(CompileStatus(99)) != CompileStatus::Success {
+        return Err("Speech recognition constraint compilation failed. \
+            The current locale may not be supported."
+            .into());
+    }
 
-    let start_ms = epoch_ms();
-    RECORDING_START_MS.store(start_ms, Ordering::SeqCst);
     LAST_RESULT_TICK.store(0, Ordering::SeqCst);
 
     let generation = RECORDING_GEN.fetch_add(1, Ordering::SeqCst) + 1;
+    let start_time = Instant::now();
 
     let selection = Arc::new(Mutex::new(Selection {
         pending_finals: 1,
@@ -95,19 +100,21 @@ pub(super) fn do_start_recording(app: &tauri::AppHandle) -> Result<RecordingStat
     {
         let sel = selection.clone();
         let app_handle = app.clone();
+        let cb_start = start_time;
         recognizer
             .HypothesisGenerated(&TypedEventHandler::<
                 SpeechRecognizer,
                 SpeechRecognitionHypothesisGeneratedEventArgs,
             >::new(move |_sender, args| {
+                if RECORDING_GEN.load(Ordering::SeqCst) != generation {
+                    return Ok(());
+                }
                 if let Some(args) = args {
                     if let Ok(hyp) = args.Hypothesis() {
                         if let Ok(text_h) = hyp.Text() {
                             let text = text_h.to_string_lossy();
                             if !text.is_empty() {
-                                let now = epoch_ms();
-                                let elapsed =
-                                    now.saturating_sub(RECORDING_START_MS.load(Ordering::SeqCst));
+                                let elapsed = cb_start.elapsed().as_millis() as u64;
                                 LAST_RESULT_TICK.store(elapsed, Ordering::SeqCst);
 
                                 log::info!("[voice] [windows] partial: '{text}'");
@@ -132,11 +139,15 @@ pub(super) fn do_start_recording(app: &tauri::AppHandle) -> Result<RecordingStat
     {
         let sel = selection.clone();
         let app_handle = app.clone();
+        let cb_start = start_time;
         session
             .ResultGenerated(&TypedEventHandler::<
                 SpeechContinuousRecognitionSession,
                 SpeechContinuousRecognitionResultGeneratedEventArgs,
             >::new(move |_sender, args| {
+                if RECORDING_GEN.load(Ordering::SeqCst) != generation {
+                    return Ok(());
+                }
                 if let Some(args) = args {
                     if let Ok(result) = args.Result() {
                         let status = result.Status().unwrap_or(SpeechRecognitionResultStatus(99));
@@ -145,9 +156,7 @@ pub(super) fn do_start_recording(app: &tauri::AppHandle) -> Result<RecordingStat
                                 let text = text_h.to_string_lossy();
                                 let conf = result.RawConfidence().unwrap_or(0.0);
 
-                                let now = epoch_ms();
-                                let elapsed =
-                                    now.saturating_sub(RECORDING_START_MS.load(Ordering::SeqCst));
+                                let elapsed = cb_start.elapsed().as_millis() as u64;
                                 LAST_RESULT_TICK.store(elapsed, Ordering::SeqCst);
 
                                 log::info!("[voice] [windows] final: '{text}' conf={conf:.2}");
@@ -219,13 +228,8 @@ pub(super) fn do_start_recording(app: &tauri::AppHandle) -> Result<RecordingStat
 
     log::info!("[voice] [windows] starting continuous recognition");
     let map_start_err = |e: windows::core::Error| -> String {
-        if e.code().0 as u32 == 0x80045509 {
-            "Enable \"Online speech recognition\" in Windows Settings → \
-             Privacy & security → Speech, then try again."
-                .to_string()
-        } else {
-            format!("StartAsync failed: {e}")
-        }
+        speech_denied_message(e.code().0 as u32)
+            .unwrap_or_else(|| format!("StartAsync failed: {e}"))
     };
     session
         .StartAsync()
@@ -239,9 +243,20 @@ pub(super) fn do_start_recording(app: &tauri::AppHandle) -> Result<RecordingStat
         recognizer,
         session,
         selection,
-        start_time: Instant::now(),
+        start_time,
         generation,
     })
+}
+
+fn speech_denied_message(hresult: u32) -> Option<String> {
+    match hresult {
+        0x80070005 | 0x80045509 => Some(
+            "Enable \"Online speech recognition\" in Windows Settings → \
+             Privacy & security → Speech, then try again."
+                .to_string(),
+        ),
+        _ => None,
+    }
 }
 
 pub(super) fn do_stop_recording(state: RecordingState) {
@@ -251,12 +266,14 @@ pub(super) fn do_stop_recording(state: RecordingState) {
     }
     log::info!("[voice] [windows] recording stopped");
 
-    // Fallback: same 900ms grace as macOS for stuck recognizers
     let sel = state.selection.clone();
     let app = state.app.clone();
     let generation = state.generation;
     std::thread::spawn(move || {
         std::thread::sleep(Duration::from_millis(900));
+        if RECORDING_GEN.load(Ordering::SeqCst) != generation {
+            return;
+        }
         let emit = match sel.lock() {
             Ok(mut s) => s.force_emit(),
             Err(_) => Emit::None,

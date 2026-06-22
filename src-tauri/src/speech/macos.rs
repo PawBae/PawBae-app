@@ -7,8 +7,8 @@ use objc2::msg_send;
 use objc2::runtime::{AnyClass, AnyObject};
 
 use super::{
-    emit_transcript_if_current, epoch_ms, recognizer_locales, Emit, Selection, LAST_RESULT_TICK,
-    RECORDING_GEN, RECORDING_START_MS,
+    emit_transcript_if_current, recognizer_locales, Emit, Selection, LAST_RESULT_TICK,
+    RECORDING_GEN,
 };
 
 #[link(name = "Speech", kind = "framework")]
@@ -17,7 +17,7 @@ unsafe extern "C" {}
 unsafe extern "C" {}
 
 pub(super) struct RecordingState {
-    pub app: tauri::AppHandle,
+    pub(super) app: tauri::AppHandle,
     engine: *mut AnyObject,
     requests: Vec<*mut AnyObject>,
     tasks: Vec<*mut AnyObject>,
@@ -161,11 +161,10 @@ pub(super) fn do_start_recording(app: &tauri::AppHandle) -> Result<RecordingStat
         let channel_count: u32 = msg_send![&*format, channelCount];
         log::info!("[voice] audio format: sampleRate={sample_rate} channels={channel_count}");
 
-        let start_ms = epoch_ms();
-        RECORDING_START_MS.store(start_ms, Ordering::SeqCst);
         LAST_RESULT_TICK.store(0, Ordering::SeqCst);
 
         let generation = RECORDING_GEN.fetch_add(1, Ordering::SeqCst) + 1;
+        let start_time = Instant::now();
 
         let selection = Arc::new(Mutex::new(Selection {
             pending_finals: recognizers.len(),
@@ -184,7 +183,11 @@ pub(super) fn do_start_recording(app: &tauri::AppHandle) -> Result<RecordingStat
             let sel = selection.clone();
             let loc_label = loc.clone();
             let done = Arc::new(AtomicBool::new(false));
+            let cb_start = start_time;
             let handler = RcBlock::new(move |result: *mut AnyObject, error: *mut AnyObject| {
+                if RECORDING_GEN.load(Ordering::SeqCst) != generation {
+                    return;
+                }
                 let mut to_emit = Emit::None;
                 if !result.is_null() {
                     let best: *mut AnyObject = msg_send![&*result, bestTranscription];
@@ -193,8 +196,7 @@ pub(super) fn do_start_recording(app: &tauri::AppHandle) -> Result<RecordingStat
                     let is_final: bool = msg_send![&*result, isFinal];
                     let conf = average_confidence(best);
 
-                    let now = epoch_ms();
-                    let elapsed = now.saturating_sub(RECORDING_START_MS.load(Ordering::SeqCst));
+                    let elapsed = cb_start.elapsed().as_millis() as u64;
                     LAST_RESULT_TICK.store(elapsed, Ordering::SeqCst);
 
                     log::info!("[voice] [{loc_label}] '{text}' final={is_final} conf={conf:.2}");
@@ -290,7 +292,7 @@ pub(super) fn do_start_recording(app: &tauri::AppHandle) -> Result<RecordingStat
             requests,
             tasks,
             selection,
-            start_time: Instant::now(),
+            start_time,
             generation,
         })
     }
