@@ -13,12 +13,19 @@ pub(crate) fn collapsed_x(sx: f64, sw: f64, win_w: f64, position: &str, notch_of
     }
 }
 
-// Bumped from 60x45 so the codex sprite-pet (rendered at ~86x93 CSS px due
-// to the MINI_SPRITE_DISPLAY_MULTIPLIER=2 used in Mini.tsx) fits entirely
-// inside the native window. Without the extra room the sprite gets clipped
-// at the bottom/right edges of the OS-level mascot window.
+// Width was bumped from 60 so the sprite-pet (rendered at ~86 CSS px wide) fits inside the
+// native window with room for its evolution-aura glow on the left/right.
 pub(crate) const COLLAPSED_MASCOT_BASE_W: f64 = 96.0;
-pub(crate) const COLLAPSED_MASCOT_BASE_H: f64 = 96.0;
+// Height is TALLER than width on purpose. The collapsed window stacks its content from the
+// top (`.root` is flex-column, flex-start), and when a bubble can sit above the pet the
+// sprite is pushed DOWN ~48px (`.mascot-view.headroom`) to make room for it. With a square
+// 96px window that push shoved a ~65px-tall sprite (yoonie/default atlas aspect ≈ 1.083)
+// past the window's bottom edge, clipping the pet's legs AND the bottom of its aura glow.
+// The window's top is pinned by the positioning formula (`y = sy + sh - win_h - INSET`,
+// independent of win_h), so growing the height only extends the window DOWNWARD — the pet's
+// on-screen position is unchanged, it just gains the room its legs + glow need. Edge/physics
+// re-measure the sprite-to-window gap, so the floor still lands under the pet's feet.
+pub(crate) const COLLAPSED_MASCOT_BASE_H: f64 = 128.0;
 // Vertical inset applied to the default mascot position so the sprite is
 // always rendered below the macOS menu bar / notch (or the equivalent top
 // chrome on Windows). Covers both notched (~38pt) and non-notched (~24pt)

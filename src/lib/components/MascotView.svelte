@@ -546,10 +546,10 @@
     margin-top: 48px;
   }
 
-  /* Evolution auras: stage drives intensity, work style drives the tint. Filters sit on
-     the wrapper so the sprite's own background-position animation is unaffected. */
+  /* Evolution auras: stage drives intensity, work style drives the tint. */
   .aura {
     --aura-color: rgba(255, 200, 120, 0.55);
+    position: relative;
   }
 
   .aura.style-commander {
@@ -564,25 +564,61 @@
     --aura-color: rgba(255, 143, 179, 0.6);
   }
 
+  /* The halo is a radial-gradient sitting BEHIND the sprite, NOT a drop-shadow.
+     A drop-shadow traces the sprite silhouette and spills past the tiny ~96px
+     collapsed window, where `.root { overflow:hidden }` + the window's own bounds
+     slice it into a hard rectangle (the visible "frame"). This gradient instead
+     fades to fully transparent BEFORE it reaches the window edge — `closest-side`
+     keeps its radius < half the window — so there is nothing to clip. It is biased
+     slightly downward (top: 54%) so it haloes the body, not the bubble above. */
+  .aura::before {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 54%;
+    width: var(--aura-spread, 0);
+    height: var(--aura-spread, 0);
+    transform: translate(-50%, -50%);
+    border-radius: 50%;
+    background: radial-gradient(
+      circle closest-side,
+      var(--aura-color) 0%,
+      var(--aura-color) 18%,
+      transparent 100%
+    );
+    opacity: var(--aura-strength, 0);
+    z-index: -1;
+    pointer-events: none;
+  }
+
   .aura.stage-2 {
-    filter: drop-shadow(0 0 3px var(--aura-color));
+    --aura-spread: 72px;
+    --aura-strength: 0.5;
   }
 
   .aura.stage-3 {
-    filter: drop-shadow(0 0 5px var(--aura-color)) drop-shadow(0 0 10px var(--aura-color));
+    --aura-spread: 86px;
+    --aura-strength: 0.7;
   }
 
   .aura.stage-4 {
+    --aura-spread: 92px;
+    --aura-strength: 0.8;
+  }
+
+  .aura.stage-4::before {
     animation: legendPulse 3s ease-in-out infinite;
   }
 
   @keyframes legendPulse {
     0%,
     100% {
-      filter: drop-shadow(0 0 4px var(--aura-color)) drop-shadow(0 0 9px rgba(255, 215, 80, 0.5));
+      opacity: 0.6;
+      transform: translate(-50%, -50%) scale(0.92);
     }
     50% {
-      filter: drop-shadow(0 0 7px var(--aura-color)) drop-shadow(0 0 14px rgba(255, 215, 80, 0.75));
+      opacity: 0.9;
+      transform: translate(-50%, -50%) scale(1.04);
     }
   }
 
@@ -611,6 +647,9 @@
 
   @media (prefers-reduced-motion: reduce) {
     .aura-wrap.overload {
+      animation: none;
+    }
+    .aura.stage-4::before {
       animation: none;
     }
   }
