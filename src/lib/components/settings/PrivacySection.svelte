@@ -3,7 +3,7 @@
   import { settingsStore } from '../../stores/settings.svelte';
   import { tryInvoke } from '../../utils/invoke';
 
-  let { open }: { open: boolean } = $props();
+  let { open, isWindows = false }: { open: boolean; isWindows?: boolean } = $props();
 
   type ListenerStatus = { keyboard: boolean; mouse: boolean; reason?: string };
 
@@ -37,6 +37,7 @@
 <section class="section">
   <h2>{$_('settings.privacy')}</h2>
   <div class="card">
+    {#if !isWindows}
     <div class="setting-row">
       <div class="setting-info">
         <span class="setting-label">{$_('settings.inputReactions')}</span>
@@ -51,6 +52,7 @@
         <span class="toggle-thumb"></span>
       </button>
     </div>
+    {/if}
 
     <div class="setting-row">
       <div class="setting-info">
