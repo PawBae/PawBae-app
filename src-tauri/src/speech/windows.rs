@@ -212,11 +212,20 @@ pub(super) fn do_start_recording(app: &tauri::AppHandle) -> Result<RecordingStat
     }
 
     log::info!("[voice] [windows] starting continuous recognition");
+    let map_start_err = |e: windows::core::Error| -> String {
+        if e.code().0 as u32 == 0x80045509 {
+            "Enable \"Online speech recognition\" in Windows Settings → \
+             Privacy & security → Speech, then try again."
+                .to_string()
+        } else {
+            format!("StartAsync failed: {e}")
+        }
+    };
     session
         .StartAsync()
-        .map_err(|e| format!("StartAsync failed: {e}"))?
+        .map_err(&map_start_err)?
         .get()
-        .map_err(|e| format!("StartAsync.get() failed: {e}"))?;
+        .map_err(&map_start_err)?;
     log::info!("[voice] [windows] continuous recognition started");
 
     Ok(RecordingState {

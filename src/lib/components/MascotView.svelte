@@ -627,7 +627,7 @@
   {/if}
 
   <VoiceBubble
-    visible={voiceRecording || !!voiceText}
+    visible={voiceRecording || !!voiceText || !!voiceError}
     text={voiceText}
     recording={voiceRecording}
     error={voiceError}

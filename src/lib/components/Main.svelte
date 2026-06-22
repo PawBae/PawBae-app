@@ -123,6 +123,9 @@
       if (!e.payload.recording) {
         setTimeout(() => { voiceText = ''; }, 2000);
       }
+      if (e.payload.error) {
+        setTimeout(() => { voiceError = ''; }, 6000);
+      }
     });
 
     addListener<{ text: string; is_final: boolean }>('voice-transcript', (e) => {
