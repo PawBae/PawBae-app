@@ -321,6 +321,40 @@ pub fn set_throw_tracking(app: tauri::AppHandle, enabled: bool) -> Result<(), St
     Ok(())
 }
 #[tauri::command]
+pub fn set_pet_passthrough(
+    #[allow(unused_variables)] app: tauri::AppHandle,
+    #[allow(unused_variables)] active: bool,
+    #[allow(unused_variables)] mascot_scale: Option<f64>,
+    #[allow(unused_variables)] large_mascot_scale: Option<f64>,
+) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        let ps = app.state::<Arc<PetState>>();
+        let ws = app.state::<Arc<WindowState>>();
+        ps.passthrough_active.store(active, Ordering::SeqCst);
+        if active {
+            let mascot_scale = sanitized_mascot_scale(mascot_scale);
+            let large_mascot_scale = large_mascot_scale.unwrap_or(LARGE_MASCOT_SIZE_MULTIPLIER);
+            ps.mascot_scale_bits
+                .store(mascot_scale.to_bits(), Ordering::SeqCst);
+            ps.large_mascot_scale_bits
+                .store(large_mascot_scale.to_bits(), Ordering::SeqCst);
+            if ps
+                .passthrough_thread_alive
+                .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+                .is_ok()
+            {
+                let app2 = app.clone();
+                let ws2 = Arc::clone(&*ws);
+                let ps2 = Arc::clone(&*ps);
+                std::thread::spawn(move || pet_passthrough_poll_windows(app2, ws2, ps2));
+            }
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn set_pet_mode_window(
     app: tauri::AppHandle,
     active: bool,

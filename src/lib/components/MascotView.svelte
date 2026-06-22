@@ -408,6 +408,13 @@
 
     tryInvoke('set_stroll_mode', { enabled: true });
     tryInvoke('set_throw_tracking', { enabled: true });
+    if (isWindows) {
+      tryInvoke('set_pet_passthrough', {
+        active: true,
+        mascotScale: settingsStore.mascotScale,
+        largeMascotScale: settingsStore.largeMascotScale,
+      });
+    }
 
     const loop = createPhysicsLoop({
       pet: currentPet,
@@ -456,6 +463,9 @@
       for (const fn of listenerCleanups) fn();
       tryInvoke('set_stroll_mode', { enabled: false });
       tryInvoke('set_throw_tracking', { enabled: false });
+      if (isWindows) {
+        tryInvoke('set_pet_passthrough', { active: false });
+      }
     };
   });
 
@@ -617,7 +627,7 @@
   {/if}
 
   <VoiceBubble
-    visible={voiceRecording || !!voiceText}
+    visible={voiceRecording || !!voiceText || !!voiceError}
     text={voiceText}
     recording={voiceRecording}
     error={voiceError}

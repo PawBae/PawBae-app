@@ -44,10 +44,7 @@
           <SoundSection {isWindows} />
         {/if}
 
-        {#if !isWindows}
-          <!-- Global input sensing is macOS-only (Phase 1); hide where it can't run. -->
-          <PrivacySection {open} />
-        {/if}
+        <PrivacySection {open} {isWindows} />
 
         <AboutSection {open} />
       </div>

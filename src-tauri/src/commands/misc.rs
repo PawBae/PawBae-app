@@ -155,7 +155,7 @@ pub async fn request_ax_permission() -> Result<(), String> {
 
 #[tauri::command]
 pub async fn voice_toggle() -> Result<(), String> {
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
     {
         if crate::speech::is_recording() {
             crate::speech::stop_recording()
@@ -163,7 +163,7 @@ pub async fn voice_toggle() -> Result<(), String> {
             crate::speech::start_recording()
         }
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         Err("Voice input not supported on this platform".into())
     }
@@ -171,11 +171,11 @@ pub async fn voice_toggle() -> Result<(), String> {
 
 #[tauri::command]
 pub fn voice_is_recording() -> bool {
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
     {
         crate::speech::is_recording()
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         false
     }
@@ -185,25 +185,25 @@ pub fn voice_is_recording() -> bool {
 /// no microphone at all. Synced from the frontend setting.
 #[tauri::command]
 pub fn voice_set_enabled(enabled: bool) {
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
     {
         crate::speech::set_voice_enabled(enabled);
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         let _ = enabled;
     }
 }
 
 /// Set the speech-recognition locale (e.g. "zh-CN"). "auto" resolves to the default single
-/// recognizer (Chinese) in the speech module; macOS can't run multiple recognizers at once.
+/// recognizer (Chinese) in the speech module.
 #[tauri::command]
 pub fn voice_set_locale(locale: String) {
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
     {
         crate::speech::set_voice_locale(locale);
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         let _ = locale;
     }

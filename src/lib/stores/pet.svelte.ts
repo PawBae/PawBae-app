@@ -235,6 +235,7 @@ class PetStore {
     // double-count this span with pomodoro coins (PR #15 review).
     clearFocusStreak(this.rewards);
     this.currentAction = 'work';
+    tryInvoke('set_pet_pomodoro_active', { active: true });
 
     this.pomodoroInterval = setInterval(() => {
       if (!this.pomodoro?.active) return;
@@ -264,6 +265,7 @@ class PetStore {
     }
     this.pomodoro = null;
     this.currentAction = 'idle';
+    tryInvoke('set_pet_pomodoro_active', { active: false });
   }
 
   setAction(action: PetAction) {
