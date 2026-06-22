@@ -408,6 +408,13 @@
 
     tryInvoke('set_stroll_mode', { enabled: true });
     tryInvoke('set_throw_tracking', { enabled: true });
+    if (isWindows) {
+      tryInvoke('set_pet_passthrough', {
+        active: true,
+        mascotScale: settingsStore.mascotScale,
+        largeMascotScale: settingsStore.largeMascotScale,
+      });
+    }
 
     const loop = createPhysicsLoop({
       pet: currentPet,

@@ -112,6 +112,7 @@ pub fn run() {
             debug_log,
             update_tray_language,
             set_pet_mode_window,
+            set_pet_passthrough,
             set_pet_context_menu,
             set_pet_pomodoro_active,
             get_now_playing,

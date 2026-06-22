@@ -203,6 +203,12 @@
 
     if (!settingsStore.appMode) {
       showOnboarding = true;
+      windowStore.setSettingsOpen(true);
+      try {
+        await invoke('set_mini_size', { restore: false });
+      } catch (e) {
+        console.warn('[onboarding] set_mini_size failed:', e);
+      }
     }
   }
 
@@ -218,7 +224,13 @@
 
   async function handleModeSelect(mode: AppMode) {
     showOnboarding = false;
+    windowStore.setSettingsOpen(false);
     await settingsStore.setAppMode(mode);
+    try {
+      await invoke('set_mini_size', { restore: true, mascotScale: settingsStore.mascotScale });
+    } catch (e) {
+      console.warn('[onboarding] restore size failed:', e);
+    }
   }
 
   $effect(() => {
