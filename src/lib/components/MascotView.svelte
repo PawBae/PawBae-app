@@ -666,12 +666,15 @@
     --aura-color: rgba(255, 143, 179, 0.6);
   }
 
+  /* Glow radii are kept tight so the halo hugs the sprite. A wider glow (the old
+     10–14px) spilled ~15px past the pet's head and bled onto the speech bubble that
+     sits right above it, making the bubble look haloed. */
   .aura.stage-2 {
-    filter: drop-shadow(0 0 3px var(--aura-color));
+    filter: drop-shadow(0 0 2px var(--aura-color));
   }
 
   .aura.stage-3 {
-    filter: drop-shadow(0 0 5px var(--aura-color)) drop-shadow(0 0 10px var(--aura-color));
+    filter: drop-shadow(0 0 3px var(--aura-color)) drop-shadow(0 0 6px var(--aura-color));
   }
 
   .aura.stage-4 {
@@ -681,10 +684,10 @@
   @keyframes legendPulse {
     0%,
     100% {
-      filter: drop-shadow(0 0 4px var(--aura-color)) drop-shadow(0 0 9px rgba(255, 215, 80, 0.5));
+      filter: drop-shadow(0 0 3px var(--aura-color)) drop-shadow(0 0 5px rgba(255, 215, 80, 0.5));
     }
     50% {
-      filter: drop-shadow(0 0 7px var(--aura-color)) drop-shadow(0 0 14px rgba(255, 215, 80, 0.75));
+      filter: drop-shadow(0 0 4px var(--aura-color)) drop-shadow(0 0 8px rgba(255, 215, 80, 0.75));
     }
   }
 
