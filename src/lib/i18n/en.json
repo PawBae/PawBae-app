@@ -140,6 +140,8 @@
     "petSfx": "Character SFX",
     "petSfxDesc": "Play character sound effects during interactions",
     "petBehavior": "Behavior",
+    "strollMode": "Stroll Mode",
+    "strollModeDesc": "Let the pet roam the screen — walk around, get dragged and thrown",
     "petIdleInterval": "Random Action Interval",
     "petIdleIntervalDesc": "How often the mascot triggers a random action while idle",
     "minutesShort": "min",

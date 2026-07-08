@@ -49,6 +49,17 @@
     <div class="card">
       <div class="setting-row">
         <div class="setting-info">
+          <span class="setting-label">{$_('settings.strollMode')}</span>
+          <span class="setting-desc">{$_('settings.strollModeDesc')}</span>
+        </div>
+        <button class="toggle" class:on={settingsStore.strollEnabled}
+          onclick={() => settingsStore.setStrollEnabled(!settingsStore.strollEnabled)}
+          role="switch" aria-checked={settingsStore.strollEnabled}>
+          <span class="toggle-thumb"></span>
+        </button>
+      </div>
+      <div class="setting-row">
+        <div class="setting-info">
           <span class="setting-label">{$_('settings.petIdleInterval')}</span>
           <span class="setting-desc">{$_('settings.petIdleIntervalDesc')}</span>
         </div>
