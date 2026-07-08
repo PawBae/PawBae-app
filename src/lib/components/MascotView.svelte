@@ -11,7 +11,7 @@
   import { aggregateSessions, isOverloaded, mascotStateFor } from '../utils/agent-activity';
   import { dayPartFor } from '../utils/circadian';
   import type { CodexPet, CodexPetState } from '../utils/codex-pet';
-  import { petStateToCodexState } from '../utils/codex-pet';
+  import { mealSpriteFor, petStateToCodexState } from '../utils/codex-pet';
   import { STYLE_FROM_STAGE } from '../utils/evolution';
   import {
     availableIdleActions,
@@ -123,10 +123,26 @@
   let voiceEmotionSprite = $state<CodexPetState | null>(null);
   let voiceEmotionTimer: ReturnType<typeof setTimeout> | null = null;
 
-  // Overlay slot fed to MiniPetMascot: a live input reaction wins over a voice emotion,
-  // which wins over an idle micro-action, which sits above the base/physics sprite.
+  // Meal beat (token feeding loop / manual feed): while the store holds the 3s 'eat'
+  // action, show the pet's eat row (happy fallback for sheets without one). Read
+  // reactively — unlike the one-shot machines below — so the beat yields to
+  // manipulation (drag/throw/hover) and the settings panel, then resumes if the
+  // meal window hasn't lapsed.
+  const actionSprite = $derived<CodexPetState | null>(
+    petStore.currentAction === 'eat' &&
+      (physicsState === null || physicsState === 'on_floor') &&
+      !windowStore.mascotHover &&
+      !windowStore.settingsOpen
+      ? mealSpriteFor(pet?.animations)
+      : null
+  );
+
+  // Overlay slot fed to MiniPetMascot: the meal beat wins over a live input reaction
+  // (a 350ms typing blip must not step on the care-loop's payoff moment), which wins
+  // over a voice emotion, which wins over an idle micro-action, which sits above the
+  // base/physics sprite.
   const overlaySprite = $derived<CodexPetState | null>(
-    reactionSprite ?? voiceEmotionSprite ?? idleSprite
+    actionSprite ?? reactionSprite ?? voiceEmotionSprite ?? idleSprite
   );
 
   // The pet must not be mid-manipulation for a beat to steal its animation. Shared by the
