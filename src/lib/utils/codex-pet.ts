@@ -121,6 +121,20 @@ export function animationFor(pet: CodexPet, state: CodexPetState): AnimationRow 
   return pet.animations[state];
 }
 
+/**
+ * The sprite for the meal beat (token feeding loop / manual feed): the pet's own
+ * `eat` row when its sheet declares one, else the `happy` row, else null — the meal
+ * stays a stat-only event and the mascot keeps its base sprite.
+ */
+export function mealSpriteFor(
+  animations: Record<string, AnimationRow> | null | undefined,
+): CodexPetState | null {
+  if (!animations) return null;
+  if (animations.eat) return 'eat';
+  if (animations.happy) return 'happy';
+  return null;
+}
+
 export const DEFAULT_PET_ID = 'yoonie';
 
 const BUILTIN_BASE = '/assets/builtin';

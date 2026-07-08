@@ -102,3 +102,19 @@ hunger bar move.
 Daily token budget alerts (ROADMAP §2.2's second half), per-meal speech bubbles,
 souvenir drops (Phase-1 冒险 feature), persistence of baselines, settings toggle
 (core loop, always on — manual feeding already has no toggle).
+
+## Addendum — meal-beat render path (2026-07-08)
+
+Live verification of this feature surfaced a gap: `currentAction = 'eat'` had no
+renderer — nothing mapped the action to a sprite (manual feeding shared the same
+blindness; the only `currentAction` consumer was MascotView's headpat busy-check),
+so the meal was a stat-only event. Fixed alongside this feature: `mealSpriteFor`
+(codex-pet.ts) picks the pet's `eat` row when the sheet declares one, else the
+`happy` row, else null; MascotView derives an `actionSprite` overlay from it while
+the store holds the eat action. The overlay outranks the 350ms input-reaction blips
+(the payoff beat must not be stepped on by typing) and yields reactively to
+drag/throw/hover and the settings panel.
+
+Verified end-to-end on 2026-07-08: synthetic UserPromptSubmit→Stop over the hook
+socket with a real ~3.9k-token cc delta → snack settled, hunger +5, and the pet
+visibly played the beat (yoonie: happy fallback) for the full 3s window.
