@@ -24,13 +24,14 @@ PawBae 是 Yining 的创业项目:AI agent 发展很快但只有少数人在用,
 
 - **功能**:agent 真正完成任务时,按该来源自上次进餐以来的 token 增量(input+output,不计 cache)给宠物开饭——零食 ≥2k / 正餐 ≥60k / 大餐 ≥300k,恢复对应饥饿度并播放进食动画。不足零食的碎屑累积。免费(不动金币账本,金币仍由既有 agent_stop 路径发)。token 消耗**永不**扣饥饿度。
 - **实现**:纯 reducer `src/lib/utils/token-feed.ts`(基线水位 + delta 结算,启动时经 `get_claude_stats` 预热,内存态)+ `pet.svelte.ts` 在 `claude-task-complete` 事件上结算。设计文档:`docs/superpowers/specs/2026-07-07-token-feeding-loop-design.md`。
-- **测试**:vitest 194/194 全绿(含 12 个 reducer 测试 + 3 个 store 胶水测试),svelte-check 0 错误,biome 干净(仓库既有 1 个无关警告)。零 Rust 改动。
+- **测试**:vitest 197/197 全绿(含 12 个 reducer 测试 + 3 个 store 胶水测试 + 3 个 meal-sprite 测试),svelte-check 0 错误,biome 干净(仓库既有 1 个无关警告)。零 Rust 改动。
 
-### 验证状态(诚实版)
+### 验证状态(2026-07-08 更新:视觉确认已完成)
 
 - ✅ 单元/类型/lint 全绿。
-- ✅ 实跑链路验证:dev app 运行中,通过 `/tmp/ooclaw-claude.sock` 注入合成 hook 事件序列(UserPromptSubmit → Stop),Rust 日志确认事件按预期流转(processing → stopped,触发 claude-task-complete)。
-- ⚠️ **进食动画的视觉确认未完成**:宠物窗口被全屏 Space 遮挡时 webview 渲染节流,窗口截图是冻结帧,无法确认 eat 精灵帧。接手后建议:在可见桌面上跑 `pnpm tauri dev`,完成一个真实 CC 任务(或按下面的方法注入合成事件),肉眼确认宠物进食 3 秒。
+- ✅ 实跑链路验证:通过 `/tmp/ooclaw-claude.sock` 注入合成 hook 事件序列(UserPromptSubmit → Stop),Rust 日志确认事件流转(processing → stopped),`pet.json` reward_ledger 出现对应 agent_stop 条目证明前端收到了 claude-task-complete。
+- ✅ **视觉确认完成,且挡出一个真 bug**:原实现里 `currentAction='eat'` 全前端没有任何渲染通道(全仓库唯一消费者是 MascotView 的 headpat busy 检查),且 yoonie 精灵表没有 `eat` 行——宠物"隐形进食",手动喂食同样中招。已在 feat 分支修复(commit `6588a01`):`mealSpriteFor`(eat 行优先、happy 回退)+ MascotView `actionSprite` overlay(压过 350ms 打字反应,对拖拽/悬停/设置面板响应式让位)。修复后实拍确认:注入合成完成事件(~3.9k token 增量 → snack),宠物在散步中站起、举爪、抱食物,节拍持续满 3 秒后回落。
+- 视觉验证方法备忘:宠物窗口在桌面 Space(macOS 无全屏隐藏逻辑),若当前 Space 是全屏 app,截屏前先 `open -a Finder` 切回桌面。
 - 合成事件注入方法(app 运行时):
   ```bash
   printf '%s' '{"sessionId":"test-1","cwd":"/tmp","event":"UserPromptSubmit","claudeStatus":"running","interactive":true,"pid":1}' | nc -U /tmp/ooclaw-claude.sock
@@ -49,7 +50,7 @@ PawBae 是 Yining 的创业项目:AI agent 发展很快但只有少数人在用,
 
 ## 建议的下一步(按优先级)
 
-1. 合并 token 喂养循环 PR(先补上面那步视觉确认);
+1. 合并 token 喂养循环 PR(视觉确认已完成,含进食渲染修复,待 owner review 合并);
 2. 遥测 + 签名(战略 30 天清单第 1–2 项);
 3. 叼来审批单 [S](终端聚焦代码已有,`pet.svelte.ts` 已处理 waiting 事件,纯增量);
 4. 每日任务板 + 宽容连胜 [S](成就系统已有,照抄模式);
