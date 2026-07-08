@@ -137,6 +137,18 @@ export interface ClaudeSession {
 
 export type ClaudeStatsSource = 'cc' | 'codex' | 'cursor';
 
+// Wire shape of the `get_claude_stats` Tauri command (claude_sessions.rs ClaudeStats,
+// serde camelCase renames). Only the scalar totals the frontend consumes are typed;
+// dailyStats/model ride along untyped until something needs them.
+export interface ClaudeStats {
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  totalCacheReadTokens: number;
+  totalCacheWriteTokens: number;
+  totalMessages: number;
+  totalSessions: number;
+}
+
 // Wire payload of the Tauri "claude-task-complete" event
 // (src-tauri/src/commands/hook/event_process.rs — camelCase keys). Rust pre-filters:
 // it emits only on a genuine main-agent completion (Stop with no pending sub-agents,
