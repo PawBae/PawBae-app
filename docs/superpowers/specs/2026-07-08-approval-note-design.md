@@ -97,3 +97,31 @@ Note-in-mouth sprite overlay and walk-to-cursor (deferred tiers), per-session no
 stacking UI, response-time analytics, sound on note appearance (never-interrupt says
 default silent; revisit with the sound settings section), Windows-specific terminal
 focus differences (jump command's existing behavior is what it is).
+
+## Addendum — what live click testing surfaced (2026-07-08, second pass)
+
+The owner's real clicks (and a long adversarial session of synthetic ones) found four
+real defects the unit suite could not see, all fixed on this branch:
+
+1. **Bubbles clipped at the bottom edge.** Coding mode forced `bubbleAbove = false`,
+   so every bubble rendered below the pet and clipped to a sliver whenever the pet
+   walked the screen's bottom edge — its usual habitat. The placement poll now runs in
+   both modes and ApprovalNote takes a `placement` prop (CelebrationBubble idiom).
+2. **Collapsed-mode DOM clicks are not a thing on macOS.** The mini window is a
+   non-key floating panel: presses land in `pet_core`'s NSEvent machinery (that is why
+   hover and drag are Rust-driven). The note press was being consumed as a drag-start.
+   Fix: `pet_core` detects presses inside the note strip (fed by the new
+   `set_note_hitbox` command + `PetState` atomics) and emits `approval-note-click`;
+   MascotView listens and jumps. The DOM button stays for Windows (fully interactive
+   window) and accessibility. Note taps outrank drag-engage where the zones overlap.
+3. **A bare `waitingKey;` statement is not a tracked read.** The step effect never
+   re-fired, so the approval machine stayed empty and a visible note had no session to
+   jump to. Ids now derive from `waitingKey` inside the effect; `respondToApproval`
+   also falls back to the live store's first waiting session.
+4. **`ClaudeSession.id` never existed on the wire.** Rust serializes
+   `session_id → sessionId`; the TS interface said `id`, so consumers read undefined —
+   including the pre-existing Panel session list (keys and click-to-select). Interface
+   and all consumers now use `sessionId`.
+
+Diagnostics kept on purpose: `[approval-note] native tap` (pet_core) and the frontend
+`jump via …` debug_log — one line on each side of the native→webview hop.

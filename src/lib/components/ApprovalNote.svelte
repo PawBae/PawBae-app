@@ -1,16 +1,19 @@
 <script lang="ts">
   import { _ } from 'svelte-i18n';
+  import { tryInvoke } from '../utils/invoke';
 
   interface ApprovalNoteProps {
     /** Waiting sessions the note stands for; 0 hides it. */
     count: number;
     /** Celebrations, voice output and the expanded panel own the same space. */
     suppressed?: boolean;
+    /** Smart placement from MascotView — 'below' only when the pet hugs the top edge. */
+    placement?: 'above' | 'below';
     /** Injected click handler — the component is pure presentation. */
     onrespond: () => void;
   }
 
-  let { count, suppressed = false, onrespond }: ApprovalNoteProps = $props();
+  let { count, suppressed = false, placement = 'above', onrespond }: ApprovalNoteProps = $props();
 
   const visible = $derived(count > 0 && !suppressed);
   const countSuffix = $derived(count > 1 ? ` (${count})` : '');
@@ -24,7 +27,7 @@
 </script>
 
 {#if visible}
-  <div class="approval-note-wrap">
+  <div class="approval-note-wrap {placement}">
     <button
       type="button"
       class="approval-note"
@@ -39,12 +42,20 @@
 <style>
   .approval-note-wrap {
     position: absolute;
-    bottom: 0;
     left: 50%;
-    transform: translate(-50%, 100%);
     display: flex;
     justify-content: center;
     z-index: 95; /* above the agent bubble (90), below celebrations (100) */
+  }
+
+  .approval-note-wrap.above {
+    top: 0;
+    transform: translate(-50%, -100%);
+  }
+
+  .approval-note-wrap.below {
+    bottom: 0;
+    transform: translate(-50%, 100%);
   }
 
   /* A slip of paper, deliberately unlike the dark status bubbles: this one is a

@@ -320,6 +320,20 @@ pub fn set_throw_tracking(app: tauri::AppHandle, enabled: bool) -> Result<(), St
     ps.throw_tracking.store(enabled, Ordering::SeqCst);
     Ok(())
 }
+/// Approval-note hitbox (叼来审批单): while the note bubble is visible, the
+/// macOS passthrough poll must treat the strip it occupies as interactive —
+/// otherwise clicks on the note fall through to the desktop (caught by the
+/// feature's first live click test). Windows needs no poll change: its coding
+/// mode window stays fully interactive, and pet mode never shows the note.
+#[tauri::command]
+pub fn set_note_hitbox(app: tauri::AppHandle, active: bool, above: bool) -> Result<(), String> {
+    log::info!("[note_hitbox] active={} above={}", active, above);
+    let ps = app.state::<Arc<PetState>>();
+    ps.note_hitbox_active.store(active, Ordering::SeqCst);
+    ps.note_hitbox_above.store(above, Ordering::SeqCst);
+    Ok(())
+}
+
 #[tauri::command]
 pub fn set_pet_passthrough(
     #[allow(unused_variables)] app: tauri::AppHandle,

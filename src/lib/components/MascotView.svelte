@@ -185,14 +185,12 @@
   // Smart bubble placement: above the pet's head normally, but flip below (and drop the
   // head-room) when the pet window sits at the screen's top edge — bubbles are clipped to
   // the window, so an 'above' bubble needs window/screen room above the pet. Polled cheaply
-  // (~1s, pet mode only) since the pet's screen position changes via drag/physics/WASD.
+  // (~1s) since the pet's screen position changes via drag/physics/WASD/stroll. Both modes:
+  // the approval-note click test caught coding mode's forced-below bubbles clipping to a
+  // sliver whenever the pet walks the screen's bottom edge — its usual habitat.
   const TOP_EDGE_PX = 50;
   let bubbleAbove = $state(false);
   $effect(() => {
-    if (settingsStore.appMode !== 'pet') {
-      bubbleAbove = false;
-      return;
-    }
     let alive = true;
     let timer: ReturnType<typeof setTimeout>;
     const tick = async () => {
@@ -334,27 +332,62 @@
       ? sessionStore.claudeSessions.filter((s) => s.status === 'waiting')
       : []
   );
-  const waitingKey = $derived(waitingSessions.map((s) => s.id).join('\n'));
+  const waitingKey = $derived(waitingSessions.map((s) => s.sessionId).join('\n'));
   $effect(() => {
-    waitingKey; // tracked dependency
+    // Deriving ids FROM waitingKey (not from waitingSessions) is what registers
+    // the dependency: a bare `waitingKey;` statement is not a tracked read, so
+    // the machine silently never stepped — caught live when a visible note's
+    // click had no session to jump to.
+    const ids = waitingKey ? waitingKey.split('\n') : [];
     untrack(() => {
-      const { responses } = stepApprovalNotes(
-        approvalMachine,
-        waitingSessions.map((s) => s.id),
-        Date.now()
-      );
+      const { responses } = stepApprovalNotes(approvalMachine, ids, Date.now());
       for (const r of responses) petStore.applyApprovalResponse(r.waitedMs);
     });
   });
 
-  /** Focus the longest-waiting session's terminal (deterministic — no picker). */
+  /**
+   * Focus the longest-waiting session's terminal (deterministic — no picker).
+   * The machine supplies age order; the live store is the fallback so a click
+   * on a visible note always jumps even if the machine hasn't stepped yet.
+   */
   function respondToApproval() {
-    const id = oldestPending(approvalMachine);
+    const id = oldestPending(approvalMachine) ?? waitingSessions[0]?.sessionId;
     if (!id) return;
-    const source = sessionStore.claudeSessions.find((s) => s.id === id)?.source;
+    const source = sessionStore.claudeSessions.find((s) => s.sessionId === id)?.source;
     const cmd = source === 'cursor' ? 'focus_cursor_terminal' : 'jump_to_claude_terminal';
+    void tryInvoke('debug_log', { scope: 'approval-note', msg: `jump via ${cmd} for ${id}` });
     void tryInvoke(cmd, { sessionId: id });
   }
+
+  // The macOS passthrough poll only keeps the mascot body clickable; while the
+  // note is visible, Rust must open the strip it occupies too — the feature's
+  // first live click test had clicks falling straight through to the desktop.
+  const approvalNoteVisible = $derived(
+    settingsStore.appMode === 'coding' && waitingSessions.length > 0 && !agentBubbleSuppressed
+  );
+  $effect(() => {
+    void tryInvoke('set_note_hitbox', {
+      active: approvalNoteVisible,
+      above: bubblePlacement === 'above',
+    });
+  });
+
+  // Collapsed-mode presses land in the native pet_core machine, never the DOM
+  // (non-key floating window) — the note tap arrives as this event on macOS.
+  // The DOM button stays for Windows, whose coding-mode window is fully
+  // interactive, and for accessibility.
+  $effect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | null = null;
+    listen('approval-note-click', () => respondToApproval()).then((u) => {
+      if (disposed) u();
+      else unlisten = u;
+    });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  });
 
   // Evolution aura: a subtle glow from the branching stage up, tinted by work style.
   // Class-only here; the radial-gradient halo lives in CSS so the sprite stays untouched.
@@ -677,6 +710,7 @@
     <ApprovalNote
       count={waitingSessions.length}
       suppressed={agentBubbleSuppressed}
+      placement={bubblePlacement}
       onrespond={respondToApproval}
     />
     <!-- The note owns the waiting state's surface; the readout bubble yields to it
