@@ -129,8 +129,11 @@ export interface PomodoroState {
   startedAt: number;
 }
 
+// Wire shape of `get_claude_sessions` (state.rs ClaudeSession: serde renames
+// session_id → sessionId). The field was previously typed `id`, which the wire
+// never carried — every consumer read undefined.
 export interface ClaudeSession {
-  id: string;
+  sessionId: string;
   cwd?: string;
   source?: string;
   status?: string;
