@@ -1,6 +1,8 @@
 import { listen } from '@tauri-apps/api/event';
 import { load } from '@tauri-apps/plugin-store';
 import type {
+  ClaudeStats,
+  ClaudeStatsSource,
   ClaudeTaskCompleteEvent,
   CoinAward,
   CoinSource,
@@ -34,6 +36,14 @@ import {
   sanitizeStoredCount,
   snapshotRewardState,
 } from '../utils/rewards';
+import {
+  initialTokenFeedState,
+  nutritionOf,
+  primeTokenBaseline,
+  settleTokenMeal,
+  TOKEN_FEED_SOURCES,
+  type TokenMeal,
+} from '../utils/token-feed';
 import { settingsStore } from './settings.svelte';
 
 export const HUNGER_MAX = 100;
@@ -97,6 +107,10 @@ class PetStore {
   private initPromise: Promise<() => void> | null = null;
   private inputCountDirty = false;
   private flushTimer: ReturnType<typeof setInterval> | null = null;
+  // Token feeding loop: per-source nutrition watermarks (ephemeral, like hunger itself)
+  // and a busy lock so a completion can't race a stats scan already in flight.
+  private tokenFeed = initialTokenFeedState();
+  private tokenFeedBusy = false;
 
   applyDecay() {
     const now = Date.now();
@@ -125,26 +139,43 @@ class PetStore {
     return this.petData.coins >= FEED_COST_COINS && this.petData.hunger < HUNGER_MAX;
   }
 
+  /**
+   * Shared meal application: hunger restore (clamped), the hungry-affection bonus,
+   * and the eat beat with its revert timer.
+   */
+  private consumeMeal(restore: number) {
+    const wasHungry = this.petData.hunger < 30;
+    const affectionBonus = wasHungry ? AFFECTION_FEED_HUNGRY : 0;
+    this.petData = {
+      ...this.petData,
+      hunger: Math.min(HUNGER_MAX, this.petData.hunger + restore),
+      affection: Math.min(AFFECTION_MAX, this.petData.affection + affectionBonus),
+      lastTickAt: Date.now(),
+    };
+    this.currentAction = 'eat';
+    setTimeout(() => {
+      if (this.currentAction === 'eat') this.currentAction = 'idle';
+    }, 3000);
+  }
+
   applyFeed(amount: number = 20): boolean {
     // UI gate: feeding while broke would be free (the reducer clamps the spend at
     // zero) and feeding at full hunger would burn coins for nothing. The reducer's
     // clamp stays as a defensive backstop behind this.
     if (!this.canFeed) return false;
-    const wasHungry = this.petData.hunger < 30;
-    const newHunger = Math.min(HUNGER_MAX, this.petData.hunger + amount);
-    const affectionBonus = wasHungry ? AFFECTION_FEED_HUNGRY : 0;
-    this.petData = {
-      ...this.petData,
-      hunger: newHunger,
-      affection: Math.min(AFFECTION_MAX, this.petData.affection + affectionBonus),
-      lastTickAt: Date.now(),
-    };
+    this.consumeMeal(amount);
     this.awardCoins('feed', -FEED_COST_COINS);
-    this.currentAction = 'eat';
-    setTimeout(() => {
-      if (this.currentAction === 'eat') this.currentAction = 'idle';
-    }, 3000);
     return true;
+  }
+
+  /**
+   * Free food the agent brought home (token feeding loop): restores hunger by the meal
+   * size with no coin movement — the coin economy already pays agent_stop separately,
+   * and the ledger stays coins-only. Safe at full hunger (clamps — the pet just
+   * nibbles).
+   */
+  applyTokenMeal(meal: TokenMeal) {
+    this.consumeMeal(meal.restore);
   }
 
   applyHeadpat() {
@@ -366,6 +397,42 @@ class PetStore {
         at: Date.now(), // the wire payload carries no timestamp
       }),
     );
+    // Token feeding loop: a genuine completion (not a permission wait) may earn a meal.
+    if (!payload.waiting) void this.settleTokenFeed(payload.source);
+  }
+
+  /**
+   * Fetch the source's cumulative token totals and settle them against the watermark;
+   * a meal feeds the pet. Busy-locked (CLAUDE.md polling lesson): a completion landing
+   * while a previous scan is in flight is skipped — its tokens stay in the delta and
+   * are picked up by the next completion instead.
+   */
+  private async settleTokenFeed(source: ClaudeStatsSource) {
+    if (this.tokenFeedBusy) return;
+    this.tokenFeedBusy = true;
+    try {
+      const stats = await tryInvoke<ClaudeStats>('get_claude_stats', { source });
+      if (!stats) return;
+      const meal = settleTokenMeal(this.tokenFeed, source, nutritionOf(stats));
+      if (meal) this.applyTokenMeal(meal);
+    } finally {
+      this.tokenFeedBusy = false;
+    }
+  }
+
+  /**
+   * Best-effort baseline priming so the FIRST completion of a run feeds a real delta
+   * instead of only setting the watermark. Fire-and-forget per source; a failed fetch
+   * merely downgrades that source's first completion to baseline-setting (never a
+   * retro-feast), and primeTokenBaseline refuses to rewind a watermark a fast settle
+   * already advanced.
+   */
+  private primeTokenBaselines() {
+    for (const source of TOKEN_FEED_SOURCES) {
+      void tryInvoke<ClaudeStats>('get_claude_stats', { source }).then((stats) => {
+        if (stats) primeTokenBaseline(this.tokenFeed, source, nutritionOf(stats));
+      });
+    }
   }
 
   private handleUserInput(ev: UserInputEvent) {
@@ -406,6 +473,7 @@ class PetStore {
     // listener exists so the first flushed batch cannot fall into a gap. Idempotent in
     // Rust, so MascotView's own tracking lifecycle composes safely with this.
     tryInvoke('set_input_tracking', { active: true });
+    this.primeTokenBaselines();
     this.startFlushTimer();
     return () => {
       for (const unsub of unsubs) unsub();

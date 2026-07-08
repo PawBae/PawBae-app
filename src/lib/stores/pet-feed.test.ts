@@ -85,3 +85,30 @@ describe('petStore feed loop', () => {
     expect(petStore.petData.hunger).toBe(HUNGER_MAX);
   });
 });
+
+describe('petStore token meals', () => {
+  it('feeds for free: hunger up, coins and ledger untouched, eat beat plays', () => {
+    petStore.loadPetData({ ...petStore.defaultPetData(), coins: 7, hunger: 50 });
+    const ledgerBefore = petStore.rewards.recent.length;
+    petStore.applyTokenMeal({ tier: 'meal', restore: 12, tokens: 80_000 });
+    expect(petStore.petData.hunger).toBe(62);
+    expect(petStore.petData.coins).toBe(7); // the agent brought dinner home — no coin spend
+    expect(petStore.rewards.recent.length).toBe(ledgerBefore); // ledger is coins-only
+    expect(petStore.currentAction).toBe('eat');
+  });
+
+  it('grants the affection bonus when the meal lands while hungry', () => {
+    petStore.loadPetData({ ...petStore.defaultPetData(), hunger: 20, affection: 50 });
+    petStore.applyTokenMeal({ tier: 'snack', restore: 5, tokens: 3_000 });
+    expect(petStore.petData.hunger).toBe(25);
+    expect(petStore.petData.affection).toBe(50 + AFFECTION_FEED_HUNGRY);
+  });
+
+  it('clamps at full hunger — the pet just nibbles, no refusal', () => {
+    petStore.loadPetData({ ...petStore.defaultPetData(), hunger: 95, affection: 80 });
+    petStore.applyTokenMeal({ tier: 'feast', restore: 20, tokens: 400_000 });
+    expect(petStore.petData.hunger).toBe(HUNGER_MAX);
+    expect(petStore.petData.affection).toBe(80); // not hungry — no bonus
+    expect(petStore.currentAction).toBe('eat');
+  });
+});
