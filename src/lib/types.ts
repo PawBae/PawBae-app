@@ -105,6 +105,10 @@ export interface PetData {
   lastDailyGift: string;
   headpatToday: number;
   headpatDate: string;
+  // Approval note (叼来审批单): fast responses awarded today. Ephemeral daily counter
+  // like headpat's — survives day rollover within a run, not restarts.
+  approvalToday: number;
+  approvalDate: string;
   pomodoroCoins: number;
   // Phase 6 growth: consecutive daily-gift days (persisted) and the adoption moment
   // (persisted once, drives "days together" memories + achievements).

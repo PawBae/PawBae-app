@@ -18,6 +18,7 @@ import {
   evaluateAchievements,
   sanitizeUnlockMap,
 } from '../utils/achievements';
+import { approvalAwardFor } from '../utils/approval-note';
 import { type EvolutionInfo, evolutionInfo } from '../utils/evolution';
 import { tryInvoke } from '../utils/invoke';
 import {
@@ -83,6 +84,8 @@ function defaultPetData(): PetData {
     lastDailyGift: '',
     headpatToday: 0,
     headpatDate: todayStr(),
+    approvalToday: 0,
+    approvalDate: todayStr(),
     pomodoroCoins: 0,
     giftStreak: 0,
     firstMeetAt: Date.now(),
@@ -193,6 +196,26 @@ class PetStore {
     setTimeout(() => {
       if (this.currentAction === 'headpat') this.currentAction = 'idle';
     }, 2000);
+  }
+
+  /**
+   * A waiting agent got its answer (approval note): affection for a fast response,
+   * regardless of whether the user clicked the note or answered in the terminal
+   * directly. Slow responses are a silent no-op — never punish. Window and daily-cap
+   * math live in utils/approval-note.ts; the ephemeral counter mirrors headpat's.
+   */
+  applyApprovalResponse(waitedMs: number): boolean {
+    const today = todayStr();
+    const count = this.petData.approvalDate === today ? this.petData.approvalToday : 0;
+    const award = approvalAwardFor(waitedMs, count);
+    if (award === 0) return false;
+    this.petData = {
+      ...this.petData,
+      affection: Math.min(AFFECTION_MAX, this.petData.affection + award),
+      approvalToday: count + 1,
+      approvalDate: today,
+    };
+    return true;
   }
 
   private lastVoiceAffectionAt = 0;

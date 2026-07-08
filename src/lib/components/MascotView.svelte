@@ -9,6 +9,7 @@
   import { windowStore } from '../stores/window.svelte';
   import type { UserInputEvent } from '../types';
   import { aggregateSessions, isOverloaded, mascotStateFor } from '../utils/agent-activity';
+  import { initialApprovalState, oldestPending, stepApprovalNotes } from '../utils/approval-note';
   import { dayPartFor } from '../utils/circadian';
   import type { CodexPet, CodexPetState } from '../utils/codex-pet';
   import { mealSpriteFor, petStateToCodexState } from '../utils/codex-pet';
@@ -36,6 +37,7 @@
     requestReaction,
   } from '../utils/reaction-machine';
   import AgentBubble from './AgentBubble.svelte';
+  import ApprovalNote from './ApprovalNote.svelte';
   import CelebrationBubble from './CelebrationBubble.svelte';
   import MiniPetMascot from './MiniPetMascot.svelte';
   import MusicBubble from './MusicBubble.svelte';
@@ -320,6 +322,39 @@
   const agentBubbleSuppressed = $derived(
     celebration !== null || voiceRecording || !!voiceText || windowStore.expanded
   );
+
+  // Approval note (叼来审批单): sessions blocked on the user get a clickable slip.
+  // The machine owns first-seen timestamps (plain state like the reaction machine);
+  // waitingKey collapses the 2s poll's fresh array identities so the effect only
+  // fires when the waiting SET actually changes. Fast responses earn affection —
+  // however the user answered; a slow response is a silent no-op (never punish).
+  const approvalMachine = initialApprovalState();
+  const waitingSessions = $derived(
+    settingsStore.appMode === 'coding'
+      ? sessionStore.claudeSessions.filter((s) => s.status === 'waiting')
+      : []
+  );
+  const waitingKey = $derived(waitingSessions.map((s) => s.id).join('\n'));
+  $effect(() => {
+    waitingKey; // tracked dependency
+    untrack(() => {
+      const { responses } = stepApprovalNotes(
+        approvalMachine,
+        waitingSessions.map((s) => s.id),
+        Date.now()
+      );
+      for (const r of responses) petStore.applyApprovalResponse(r.waitedMs);
+    });
+  });
+
+  /** Focus the longest-waiting session's terminal (deterministic — no picker). */
+  function respondToApproval() {
+    const id = oldestPending(approvalMachine);
+    if (!id) return;
+    const source = sessionStore.claudeSessions.find((s) => s.id === id)?.source;
+    const cmd = source === 'cursor' ? 'focus_cursor_terminal' : 'jump_to_claude_terminal';
+    void tryInvoke(cmd, { sessionId: id });
+  }
 
   // Evolution aura: a subtle glow from the branching stage up, tinted by work style.
   // Class-only here; the radial-gradient halo lives in CSS so the sprite stays untouched.
@@ -639,7 +674,17 @@
   />
 
   {#if settingsStore.appMode === 'coding'}
-    <AgentBubble {activity} suppressed={agentBubbleSuppressed} />
+    <ApprovalNote
+      count={waitingSessions.length}
+      suppressed={agentBubbleSuppressed}
+      onrespond={respondToApproval}
+    />
+    <!-- The note owns the waiting state's surface; the readout bubble yields to it
+         (waiting already outranked compacting/working in bubbleKindFor anyway). -->
+    <AgentBubble
+      {activity}
+      suppressed={agentBubbleSuppressed || waitingSessions.length > 0}
+    />
   {/if}
 
   <VoiceBubble
