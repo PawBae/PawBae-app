@@ -57,6 +57,46 @@ export function stepAdventure(
   return { away };
 }
 
+export interface AwayGateInput {
+  /** The eligibility machine (or the DEV demo) says a long trip is running. */
+  eligible: boolean;
+  /** Sessions blocked on the user — the pet stays home to deliver the note. */
+  waitingCount: number;
+  /** A growth celebration is playing on the pet. */
+  celebrating: boolean;
+  /** The meal beat is playing. */
+  eating: boolean;
+  settingsOpen: boolean;
+  /** Recording, transcript, or reply bubble in flight. */
+  voiceActive: boolean;
+  /** Live physics state, or null while the loop is torn down. */
+  physicsState: string | null;
+  /**
+   * The physics loop is PAUSED (panel expanded). Pausing freezes the state at
+   * whatever it was mid-flight — the loop (re)starts as 'falling' and never reaches
+   * 'on_floor' while paused, so a frozen state must never block the departure
+   * (found live: pet could never leave while the panel was open).
+   */
+  physicsPaused: boolean;
+}
+
+/**
+ * The display-layer decision "should the pet be away right now": pure politeness on
+ * top of eligibility — home whenever anything needs her presence. Ending the visual
+ * never loses a souvenir (the trip machine is consumed independently on completion).
+ */
+export function awayDisplayGate(i: AwayGateInput): boolean {
+  if (!i.eligible) return false;
+  if (i.waitingCount > 0 || i.celebrating || i.eating || i.settingsOpen || i.voiceActive) {
+    return false;
+  }
+  // Mid-manipulation (drag/throw/fall/bounce/wall) only counts while the loop is live.
+  if (i.physicsState !== null && i.physicsState !== 'on_floor' && !i.physicsPaused) {
+    return false;
+  }
+  return true;
+}
+
 /**
  * Consume the trip a genuine completion ends: returns how long the session had been
  * out (clock regressions clamp to 0) and forgets it, or null if no trip was ever

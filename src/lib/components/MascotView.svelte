@@ -8,6 +8,7 @@
   import { settingsStore } from '../stores/settings.svelte';
   import { windowStore } from '../stores/window.svelte';
   import type { UserInputEvent } from '../types';
+  import { awayDisplayGate } from '../utils/adventure';
   import { aggregateSessions, isOverloaded, mascotStateFor } from '../utils/agent-activity';
   import { initialApprovalState, oldestPending, stepApprovalNotes } from '../utils/approval-note';
   import { dayPartFor } from '../utils/circadian';
@@ -465,20 +466,21 @@
     };
   });
 
-  // "Away" is pure politeness on top of eligibility: the pet stays home whenever
-  // anything needs her presence — a note to deliver, a meal beat, a celebration,
-  // the settings panel, a voice exchange, or a manipulation in flight. Ending the
-  // visual never loses the souvenir (the trip machine is consumed independently).
+  // "Away" is pure politeness on top of eligibility (the pure gate lives in
+  // adventure.ts). physicsPaused mirrors the pause driver below: while the panel is
+  // expanded the loop is frozen mid-state (it restarts as 'falling' and stays there),
+  // and a frozen state must not block the departure — found live in acceptance.
   const awayWanted = $derived(
-    ((settingsStore.appMode === 'coding' && petStore.adventureAway) || devAwayForced) &&
-      waitingSessions.length === 0 &&
-      celebration === null &&
-      petStore.currentAction !== 'eat' &&
-      !windowStore.settingsOpen &&
-      !voiceRecording &&
-      !voiceText &&
-      !voiceReply &&
-      (physicsState === null || physicsState === 'on_floor')
+    awayDisplayGate({
+      eligible: (settingsStore.appMode === 'coding' && petStore.adventureAway) || devAwayForced,
+      waitingCount: waitingSessions.length,
+      celebrating: celebration !== null,
+      eating: petStore.currentAction === 'eat',
+      settingsOpen: windowStore.settingsOpen,
+      voiceActive: voiceRecording || !!voiceText || !!voiceReply,
+      physicsState,
+      physicsPaused: windowStore.expanded,
+    })
   );
 
   // Four-phase display machine stepping `tripPhase` (declared up with the overlay

@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { ADVENTURE_MIN_MS, consumeTrip, initialAdventureState, stepAdventure } from './adventure';
+import {
+  ADVENTURE_MIN_MS,
+  awayDisplayGate,
+  consumeTrip,
+  initialAdventureState,
+  stepAdventure,
+} from './adventure';
 
 const T0 = 1_700_000_000_000;
 
@@ -50,6 +56,46 @@ describe('stepAdventure', () => {
     const s = initialAdventureState();
     expect(stepAdventure(s, ['a'], ['a'], Number.NaN).away).toBe(false);
     expect(s.pending.size).toBe(0);
+  });
+});
+
+describe('awayDisplayGate', () => {
+  const calm = {
+    eligible: true,
+    waitingCount: 0,
+    celebrating: false,
+    eating: false,
+    settingsOpen: false,
+    voiceActive: false,
+    physicsState: null,
+    physicsPaused: false,
+  };
+
+  it('departs when eligible and nothing needs the pet', () => {
+    expect(awayDisplayGate(calm)).toBe(true);
+    expect(awayDisplayGate({ ...calm, physicsState: 'on_floor' })).toBe(true);
+  });
+
+  it('never departs without eligibility', () => {
+    expect(awayDisplayGate({ ...calm, eligible: false })).toBe(false);
+  });
+
+  it('stays home for a note, a celebration, a meal, settings, or voice', () => {
+    expect(awayDisplayGate({ ...calm, waitingCount: 1 })).toBe(false);
+    expect(awayDisplayGate({ ...calm, celebrating: true })).toBe(false);
+    expect(awayDisplayGate({ ...calm, eating: true })).toBe(false);
+    expect(awayDisplayGate({ ...calm, settingsOpen: true })).toBe(false);
+    expect(awayDisplayGate({ ...calm, voiceActive: true })).toBe(false);
+  });
+
+  it('a live manipulation blocks; the same state frozen by pause does not', () => {
+    // Live fall/drag: wait it out.
+    expect(awayDisplayGate({ ...calm, physicsState: 'falling' })).toBe(false);
+    expect(awayDisplayGate({ ...calm, physicsState: 'pinched' })).toBe(false);
+    // Panel expanded pauses the loop mid-'falling' and freezes it there forever —
+    // the frozen state must not block (the pet could never leave with the panel
+    // open before this).
+    expect(awayDisplayGate({ ...calm, physicsState: 'falling', physicsPaused: true })).toBe(true);
   });
 });
 
