@@ -26,6 +26,7 @@ import {
   stepAdventure,
 } from '../utils/adventure';
 import { approvalAwardFor } from '../utils/approval-note';
+import { dayPartFor } from '../utils/circadian';
 import {
   type BoardState,
   type BoardTaskId,
@@ -36,6 +37,20 @@ import {
   sanitizeBoardDone,
   streakBucket,
 } from '../utils/daily-board';
+import {
+  appendDiary,
+  type DiaryDayCounters,
+  type DiaryEntry,
+  type DiaryMoment,
+  type DiaryMomentKind,
+  freshCounters,
+  greetingFor,
+  lastDaySummary,
+  localDayOf,
+  sanitizeDiary,
+  sanitizeDiaryDay,
+  settleDay,
+} from '../utils/diary';
 import {
   addWarmth,
   EGG_COST_COINS,
@@ -162,6 +177,15 @@ class PetStore {
   // single incubating egg. Ready-to-hatch is derived from warmth, never stored.
   metNeighbors = $state<string[]>([]);
   egg = $state<EggState | null>(null);
+  // 宠物日记: the capped entry log ($state — DiaryModal renders it live), the current
+  // day's counters, and the last local date a greeting was shown. Entries hold
+  // structured data only; the UI renders them through i18n at display time.
+  diary = $state<DiaryEntry[]>([]);
+  private diaryDay: DiaryDayCounters | null = null;
+  private lastGreetDate = '';
+  // greetDailyCheck() runs off a UI tick that can fire before hydration finishes; a
+  // greeting decided from unhydrated state would double-greet or clobber the file.
+  private hydrated = false;
   adventureAway = $state(false);
   private adventure: AdventureState = initialAdventureState();
   private pomodoroInterval: ReturnType<typeof setInterval> | null = null;
@@ -207,6 +231,8 @@ class PetStore {
    */
   private consumeMeal(restore: number) {
     this.markBoardTask('meal'); // both meal paths (manual feed + agent meal) land here
+    this.bumpDiary('meals');
+    this.persistRewards(); // the token-meal path has no coin movement to ride
     const wasHungry = this.petData.hunger < 30;
     const affectionBonus = wasHungry ? AFFECTION_FEED_HUNGRY : 0;
     this.petData = {
@@ -350,6 +376,7 @@ class PetStore {
     }
     if (result.perfectDay) {
       this.celebrations = [...this.celebrations, { kind: 'perfect_day' }];
+      this.noteDiaryMoment('perfect_day');
       track('board_perfect_day');
       // awardCoins → commitCoins persists, carrying the board slice with the coins.
       this.awardCoins('task_board', PERFECT_DAY_COINS, { reason: result.state.boardDate });
@@ -459,6 +486,10 @@ class PetStore {
       this.petData = { ...this.petData, coins: result.coinsAfter };
     }
     if (result.awards.length > 0) {
+      // Diary counters ride the same persist as the balance. Earned only — spends
+      // don't shrink the day (one-way, same口径 as evolution XP).
+      const earned = result.awards.reduce((s, a) => (a.amount > 0 ? s + a.amount : s), 0);
+      if (earned > 0) this.bumpDiaryCoins(earned);
       // Growth runs BEFORE the persist so one save carries the balance, any new unlock
       // timestamps and the celebrated-stage marker together.
       this.checkGrowth(result.awards[result.awards.length - 1].at);
@@ -483,6 +514,7 @@ class PetStore {
         ...this.celebrations,
         { kind: 'evolution', stageIndex: info.stageIndex },
       ];
+      this.noteDiaryMoment('evolution', String(info.stageIndex));
       dirty = true;
     }
     const ctx: AchievementContext = {
@@ -501,6 +533,7 @@ class PetStore {
         ...this.celebrations,
         ...fresh.map((d): GrowthCelebration => ({ kind: 'achievement', id: d.id })),
       ];
+      for (const def of fresh) this.noteDiaryMoment('achievement', def.id);
       dirty = true;
     }
     return dirty;
@@ -520,6 +553,62 @@ class PetStore {
   stepAdventure(busyIds: readonly string[], aliveIds: readonly string[], now: number) {
     const { away } = stepAdventure(this.adventure, busyIds, aliveIds, now);
     if (this.adventureAway !== away) this.adventureAway = away;
+  }
+
+  // ── 宠物日记 + 早安问候 ──────────────────────────────────────────
+
+  /**
+   * Ensure the live counters belong to `today`, folding a finished day into a
+   * day-summary entry first (all-zero days settle to nothing). Every diary write
+   * funnels through here, so the book can never mix days in one counter.
+   */
+  private rolloverDiary(today: string): DiaryDayCounters {
+    if (this.diaryDay !== null && this.diaryDay.date === today) return this.diaryDay;
+    if (this.diaryDay !== null) {
+      const settled = settleDay(this.diaryDay, Date.now());
+      if (settled) this.diary = appendDiary(this.diary, settled);
+    }
+    this.diaryDay = freshCounters(today);
+    return this.diaryDay;
+  }
+
+  /** Count one completed agent task or meal toward today's diary page. No persist —
+   *  every call site already sits next to one. */
+  private bumpDiary(key: 'agentTasks' | 'meals') {
+    const day = this.rolloverDiary(todayStr());
+    this.diaryDay = { ...day, [key]: day[key] + 1 };
+  }
+
+  private bumpDiaryCoins(amount: number) {
+    const day = this.rolloverDiary(todayStr());
+    this.diaryDay = { ...day, coinsEarned: day.coinsEarned + amount };
+  }
+
+  /** Record a special moment as its own diary line (same trigger points as the
+   *  celebration queue). Call sites persist right after, as they already do. */
+  private noteDiaryMoment(kind: DiaryMomentKind, ref?: string) {
+    const today = todayStr();
+    this.rolloverDiary(today);
+    const entry: DiaryMoment = { kind, day: today, at: Date.now() };
+    if (ref !== undefined) entry.ref = ref;
+    this.diary = appendDiary(this.diary, entry);
+  }
+
+  /**
+   * Once per local calendar day, on the first check after the date changes: settle
+   * yesterday's page, then queue the greeting bubble (day-part phrasing + yesterday's
+   * task count when the last summary really is yesterday's). Idempotent — MascotView
+   * ticks this freely; it also catches an app left open across midnight.
+   */
+  greetDailyCheck() {
+    if (!this.hydrated) return;
+    const today = todayStr();
+    if (this.lastGreetDate === today) return;
+    this.rolloverDiary(today);
+    const g = greetingFor(dayPartFor(new Date().getHours()), lastDaySummary(this.diary), today);
+    this.lastGreetDate = today;
+    this.celebrations = [...this.celebrations, { kind: 'greeting', part: g.part, tasks: g.tasks }];
+    this.persistRewards();
   }
 
   // ── 孵蛋与物种图鉴 ────────────────────────────────────────────────
@@ -575,6 +664,8 @@ class PetStore {
       return null;
     }
     this.metNeighbors = [...this.metNeighbors, id];
+    this.noteDiaryMoment('egg_hatched', id);
+    if (unmet.length === 1) this.noteDiaryMoment('dex_completed');
     // Builtin ids are a fixed vocabulary (never user content), safe for telemetry.
     track('egg_hatched', { species: id });
     if (unmet.length === 1) track('dex_completed');
@@ -604,12 +695,15 @@ class PetStore {
     ) {
       this.egg = { warmth: 0, since: now };
       this.celebrations = [...this.celebrations, { kind: 'egg_found' }];
+      this.noteDiaryMoment('egg_found');
       this.persistRewards();
       return;
     }
     const found = rollSouvenir(elapsed, Math.random);
     this.souvenirs = addSouvenir(this.souvenirs, found.id, now);
     this.celebrations = [...this.celebrations, { kind: 'souvenir', id: found.id }];
+    // Diary line for rare+ only — common souvenirs are too frequent for a memory book.
+    if (found.rarity !== 'common') this.noteDiaryMoment('souvenir', found.id);
     // Rarity only — the dictionary stays minimal (no item ids).
     track('souvenir_found', { rarity: found.rarity });
     this.persistRewards();
@@ -629,10 +723,15 @@ class PetStore {
     if (!payload.waiting) {
       track('agent_task_complete', { source: payload.source });
       this.markBoardTask('agent');
-      // Warmth rides the SAME per-session cooldown as the coin award: a duplicate stop
-      // event deduped from the ledger must not warm the egg either (Codex review). And
-      // warm BEFORE the trip settles, so an egg dropped by this completion starts cold.
-      if (stopAwards.length > 0) this.warmEgg();
+      // Warmth AND the diary's task count ride the SAME per-session cooldown as the
+      // coin award: a duplicate stop event deduped from the ledger must not warm the
+      // egg or inflate the day (Codex review). And warm BEFORE the trip settles, so
+      // an egg dropped by this completion starts cold.
+      if (stopAwards.length > 0) {
+        this.bumpDiary('agentTasks');
+        this.warmEgg();
+        this.persistRewards();
+      }
       this.settleAdventure(payload.sessionId, Date.now());
       void this.settleTokenFeed(payload.source);
     }
@@ -753,6 +852,10 @@ class PetStore {
     this.souvenirs = sanitizeSouvenirs(await store.get('souvenirs'));
     this.metNeighbors = sanitizeMetNeighbors(await store.get('met_neighbors'));
     this.egg = sanitizeEgg(await store.get('egg'));
+    this.diary = sanitizeDiary(await store.get('diary'));
+    this.diaryDay = sanitizeDiaryDay(await store.get('diary_day'));
+    const rawGreet = await store.get('last_greet_date');
+    this.lastGreetDate = typeof rawGreet === 'string' ? rawGreet : '';
     // Daily task board. Migration: an install that predates the board (no streak_date
     // key ever written) seeds the unified streak from the legacy gift streak, so a
     // live 30-day streak survives the upgrade instead of silently restarting.
@@ -787,10 +890,22 @@ class PetStore {
       lifetimeInputCount,
       lastAwardedMilestone,
     });
+    // 宠物日记: every install gets its adoption line — new installs dated today,
+    // upgrades backdated to firstMeetAt. Idempotent (only while the book has none).
+    let diaryDirty = false;
+    if (!this.diary.some((e) => e.kind === 'adopted')) {
+      this.diary = appendDiary(this.diary, {
+        kind: 'adopted',
+        day: localDayOf(firstMeetAt),
+        at: firstMeetAt,
+      });
+      diaryDirty = true;
+    }
     // Time/stage-driven growth (days-together, a ledger that out-leveled the celebrated
     // stage while this feature shipped) must be caught at startup, not only on the next
     // coin event. Persist immediately so a crash can't replay the celebration.
-    if (this.checkGrowth(Date.now())) this.persistRewards();
+    if (this.checkGrowth(Date.now()) || diaryDirty) this.persistRewards();
+    this.hydrated = true;
   }
 
   private saveInFlight: Promise<void> = Promise.resolve();
@@ -833,6 +948,12 @@ class PetStore {
     await store.set('souvenirs', { ...this.souvenirs });
     await store.set('met_neighbors', [...this.metNeighbors]);
     await store.set('egg', this.egg ? { ...this.egg } : null);
+    await store.set(
+      'diary',
+      this.diary.map((e) => ({ ...e })),
+    );
+    await store.set('diary_day', this.diaryDay ? { ...this.diaryDay } : null);
+    await store.set('last_greet_date', this.lastGreetDate);
     await store.save();
   }
 

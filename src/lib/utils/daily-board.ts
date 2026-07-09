@@ -79,7 +79,7 @@ export function sanitizeBoardDone(raw: unknown): BoardTaskId[] {
  * (both parse as UTC midnights), so it is timezone-independent even though the
  * strings themselves now come from the local calendar. NaN on corrupt input.
  */
-function daysApart(from: string, to: string): number {
+export function daysApart(from: string, to: string): number {
   return (Date.parse(to) - Date.parse(from)) / 86_400_000;
 }
 
