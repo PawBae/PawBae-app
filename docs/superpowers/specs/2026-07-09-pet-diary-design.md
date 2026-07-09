@@ -23,7 +23,7 @@
   - `evolution {stageIndex}`、`achievement {id}`、`perfect_day`
   - `souvenir {id}` —— **仅稀有及以上**（rare/legendary）；普通纪念品频率太高会刷屏
   - `adopted` —— 领养日。新安装首次 hydrate 写入；老用户迁移按 `firstMeetAt` 的日期补记一条（缺失才补，幂等）。
-- **早安问候**：持久化 `last_greet_date`。本地日期 ≠ lastGreetDate 时的第一次检查触发：
+- **早安问候**：持久化 `last_greet_date`。本地日期 ≠ lastGreetDate 时的第一次检查触发。**第一次检查由 store 在 hydration 完成后自行发起**（MascotView 挂载时 hydrate 仍在途，其立即检查会被 hydrated 守卫吞掉且无响应式重试——冷启动不能等 30s 定时器，Codex review）；MascotView 的 30s tick 负责接住开着跨零点的场景：
   1. 先结算日结（昨天的摘要才存在）；
   2. 再入队 greeting 气泡：`dayPartFor(hour)` 选时段文案（morning/day/evening/night 四套），昨天有日结则附一句摘要（"昨天我们完工 7 次！"），无日结则纯问候。
   - App 跨零点开着也适用：凌晨触发 night 文案（"这么晚还在忙"）。规则统一：每个本地日历日恰好一次。

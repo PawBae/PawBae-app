@@ -798,6 +798,13 @@ class PetStore {
     } catch (e) {
       console.warn('[pet] hydrate failed, starting with defaults:', e);
     }
+    // The day's first greeting fires HERE, not on the UI's 30s tick: MascotView mounts
+    // while hydrate is still awaiting the store, so its immediate check hits the
+    // hydrated guard and nothing re-runs when the flag flips — a cold start would wait
+    // out (or a short launch entirely miss) the interval, and a diary opened right
+    // after launch would show yesterday unrolled (Codex review). No-op if hydration
+    // failed: the guard keeps a default state from clobbering the real file.
+    this.greetDailyCheck();
     const unsubs: (() => void)[] = [];
     unsubs.push(
       await listen<ClaudeTaskCompleteEvent>('claude-task-complete', (e) =>
