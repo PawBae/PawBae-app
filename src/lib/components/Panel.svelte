@@ -4,9 +4,9 @@
   import { petStore } from '../stores/pet.svelte';
   import { sessionStore } from '../stores/sessions.svelte';
   import { settingsStore } from '../stores/settings.svelte';
+  import { skinsStore } from '../stores/skins.svelte';
   import { windowStore } from '../stores/window.svelte';
   import { ACHIEVEMENTS } from '../utils/achievements';
-  import { loadCodexPets, loadDefaultCodexPet } from '../utils/codex-pet';
   import { BOARD_TASKS } from '../utils/daily-board';
   import { tryInvoke } from '../utils/invoke';
   import { effectiveName } from '../utils/pet-name';
@@ -14,6 +14,7 @@
   import { SOUVENIR_CATALOG, type SouvenirDef, type SouvenirOwned } from '../utils/souvenirs';
   import ProfileCard from './ProfileCard.svelte';
   import ShareCardModal from './ShareCardModal.svelte';
+  import SkinWorkshopModal from './SkinWorkshopModal.svelte';
 
   let {
     class: className = '',
@@ -47,18 +48,13 @@
 
   let shareOpen = $state(false);
   let profileOpen = $state(false);
+  let skinOpen = $state(false);
 
-  // Official name of the active pet (sprite-pack displayName). The async write
-  // lands after the await — untracked, so no effect self-retrigger.
-  let officialName = $state('PawBae');
-  $effect(() => {
-    if (settingsStore.appMode === 'coding') return;
-    const wanted = settingsStore.miniPetId;
-    void loadCodexPets().then(async (pets) => {
-      const p = pets.find((x) => x.id === wanted) ?? (await loadDefaultCodexPet());
-      officialName = p?.displayName ?? 'PawBae';
-    });
-  });
+  // Official name of the active pet (sprite-pack displayName) — derived straight
+  // from the skins store, which Main keeps loaded and the workshop refreshes.
+  const officialName = $derived(
+    skinsStore.resolve(settingsStore.miniPetId)?.displayName ?? 'PawBae',
+  );
   const petName = $derived(
     effectiveName(settingsStore.petNicknames[settingsStore.miniPetId], officialName),
   );
@@ -81,6 +77,14 @@
       <div class="panel-topbar">
         <button
           class="settings-btn"
+          title={$_('skin.title')}
+          aria-label={$_('skin.title')}
+          onclick={() => (skinOpen = true)}
+        >
+          🎨
+        </button>
+        <button
+          class="settings-btn"
           title={$_('mini.settings')}
           aria-label={$_('mini.settings')}
           onclick={openSettings}
@@ -88,6 +92,7 @@
           ⚙️
         </button>
       </div>
+      <SkinWorkshopModal open={skinOpen} onclose={() => (skinOpen = false)} />
       {#if settingsStore.appMode === 'coding'}
         <div class="session-list">
           {#if sessionStore.claudeSessions.length === 0 && agentStore.agents.length === 0}

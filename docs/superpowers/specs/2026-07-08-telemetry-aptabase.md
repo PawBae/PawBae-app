@@ -34,6 +34,8 @@
 | `share_card_export` | `method`: save/copy | 晒卡率——直接量化「每周 3+ 自发晒卡」门槛 |
 | `pet_renamed` | —（**绝不带昵称内容**） | 起名率——依恋感（角色 IP 护城河）的最早可测信号 |
 | `souvenir_found` | `rarity`: common/rare/legendary | 冒险循环是否转起来——长任务频率与收集参与度 |
+| `skin_switched` | `id`: 内置皮肤原 id / 自定义一律 `custom`（**绝不带用户内容**） | 皮肤工坊使用率与内置皮肤受欢迎度 |
+| `skin_imported` | `kind`: folder/image；`result`: ok/invalid | UGC 创作漏斗——导入量与校验失败率 |
 
 加新事件 = 在此表加一行 + 一处 `track()` 调用。不进此表的事件不许发。
 

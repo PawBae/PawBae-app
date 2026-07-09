@@ -16,7 +16,7 @@ pub(crate) fn fix_path() {
                     let shell_path = String::from_utf8_lossy(&output.stdout).trim().to_string();
                     if !shell_path.is_empty() {
                         std::env::set_var("PATH", &shell_path);
-                        log::info!("[fix_path] PATH set to: {}", &shell_path);
+                        log::info!("[fix_path] PATH set to: {}", shell_path);
                         return;
                     }
                 }

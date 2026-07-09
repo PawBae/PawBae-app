@@ -6,10 +6,11 @@
   import { petStore } from '../stores/pet.svelte';
   import { sessionStore } from '../stores/sessions.svelte';
   import { settingsStore } from '../stores/settings.svelte';
+  import { skinsStore } from '../stores/skins.svelte';
   import { windowStore } from '../stores/window.svelte';
   import type { AppMode, UpdateModalInfo } from '../types';
   import type { CodexPet } from '../utils/codex-pet';
-  import { loadCodexPets, loadDefaultCodexPet } from '../utils/codex-pet';
+  import { loadDefaultCodexPet } from '../utils/codex-pet';
   import { tryInvoke } from '../utils/invoke';
   import { track } from '../utils/telemetry';
   import { classifyIntent } from '../utils/voice-intent';
@@ -20,6 +21,13 @@
   import UpdateModal from './UpdateModal.svelte';
 
   let pet = $state<CodexPet | null>(null);
+
+  // The skin workshop switches pets at runtime: re-resolve on a new id or a store
+  // refresh (a re-imported skin keeps its id, so the id alone would never re-fire).
+  $effect(() => {
+    const next = skinsStore.resolve(settingsStore.miniPetId);
+    if (next) pet = next;
+  });
   let showOnboarding = $state(false);
 
   let voiceRecording = $state(false);
@@ -211,9 +219,8 @@
     if (settingsStore.appMode) track('app_started', { mode: settingsStore.appMode });
 
     try {
-      const allPets = await loadCodexPets();
-      const selectedId = settingsStore.miniPetId;
-      pet = allPets.find((p) => p.id === selectedId) || (await loadDefaultCodexPet());
+      await skinsStore.ensureLoaded();
+      pet = skinsStore.resolve(settingsStore.miniPetId);
     } catch (e) {
       console.error('[init] pet loading failed:', e);
       pet = await loadDefaultCodexPet().catch(() => null);
