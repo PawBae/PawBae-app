@@ -1,5 +1,6 @@
 import { load } from '@tauri-apps/plugin-store';
 import type { AppMode, OcConnection } from '../types';
+import { sanitizeNickname, sanitizeNicknames } from '../utils/pet-name';
 
 class SettingsStore {
   appMode = $state<AppMode | null>(null);
@@ -23,6 +24,10 @@ class SettingsStore {
   petSfxEnabled = $state(true);
   petIdleIntervalMin = $state(2);
   miniPetId = $state<string>('yoonie');
+  // User nicknames per pet id (角色 IP: Yoonie stays the official name; this is the
+  // user's address for THEIR pet). Absent key = official name. utils/pet-name.ts
+  // owns the sanitize/fallback rules.
+  petNicknames = $state.raw<Record<string, string>>({});
   petQueue = $state.raw<string[]>([]);
   skippedVersion = $state('');
   inputTrackingEnabled = $state(true);
@@ -66,6 +71,7 @@ class SettingsStore {
     this.petSfxEnabled = ((await store.get('pet_sfx_enabled')) as boolean) ?? true;
     this.petIdleIntervalMin = ((await store.get('pet_idle_interval_min')) as number) ?? 2;
     this.miniPetId = ((await store.get('mini_pet_id')) as string) || 'yoonie';
+    this.petNicknames = sanitizeNicknames(await store.get('pet_nicknames'));
     this.petQueue = ((await store.get('pet_queue')) as string[]) || [];
     this.skippedVersion = ((await store.get('skipped_version')) as string) || '';
     this.inputTrackingEnabled = ((await store.get('input_tracking_enabled')) as boolean) ?? true;
@@ -186,6 +192,22 @@ class SettingsStore {
   async setMiniPetId(v: string) {
     this.miniPetId = v;
     await this.saveSetting('mini_pet_id', v);
+  }
+
+  /** Empty (post-sanitize) removes the nickname — the pet answers to her official
+   *  name again. Returns whether anything changed; the pet_renamed telemetry call
+   *  lives at the UI layer (telemetry.ts imports this store — no cycles). */
+  async setPetNickname(petId: string, raw: string): Promise<boolean> {
+    const nick = sanitizeNickname(raw);
+    const prev = this.petNicknames[petId] ?? '';
+    if (nick === prev) return false;
+    const next: Record<string, string> = Object.create(null);
+    Object.assign(next, this.petNicknames);
+    if (nick) next[petId] = nick;
+    else delete next[petId];
+    this.petNicknames = next;
+    await this.saveSetting('pet_nicknames', { ...next });
+    return true;
   }
 
   async setPetQueue(v: string[]) {

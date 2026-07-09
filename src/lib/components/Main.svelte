@@ -149,7 +149,10 @@
         voiceText = e.payload.text;
         return;
       }
-      const r = classifyIntent(e.payload.text, { petName: pet?.displayName ?? '' });
+      const r = classifyIntent(e.payload.text, {
+        // She answers to her official name AND the user's nickname.
+        petNames: pet ? [settingsStore.petNicknames[pet.id] ?? '', pet.displayName] : [],
+      });
       petStore.applyVoiceAffection(r.affectionDelta);
       voiceText = ''; // swap the echo bubble out for the pet's reply
       voiceEmotion = r.emotion;

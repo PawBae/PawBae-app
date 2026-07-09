@@ -32,6 +32,7 @@
     <div class="modal">
       <h2>{$_('onboarding.chooseModeTitle')}</h2>
       <p class="subtitle">{$_('onboarding.chooseModeSubtitle')}</p>
+      <p class="lore-tagline">{$_('lore.tagline')}</p>
 
       <div class="cards">
         <!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -92,6 +93,13 @@
     color: #fff;
     font-size: 20px;
     margin: 0 0 8px;
+  }
+
+  .lore-tagline {
+    color: rgba(100, 149, 237, 0.75);
+    font-size: 12px;
+    font-style: italic;
+    margin: -16px 0 24px;
   }
 
   .subtitle {

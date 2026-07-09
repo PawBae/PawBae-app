@@ -11,6 +11,7 @@
   import { animationFor, loadCodexPets, loadDefaultCodexPet } from '../utils/codex-pet';
   import { EVOLUTION_STAGES } from '../utils/evolution';
   import { tryInvoke } from '../utils/invoke';
+  import { effectiveName } from '../utils/pet-name';
   import { renderShareCard, type SpriteFrame } from '../utils/share-card';
   import { track } from '../utils/telemetry';
   import { STATS_BUCKET_SOURCES } from '../utils/token-feed';
@@ -42,6 +43,9 @@
       const pet =
         pets.find((p) => p.id === settingsStore.miniPetId) ?? (await loadDefaultCodexPet());
       if (!pet) return { sprite: null, name: 'PawBae' };
+      // The "together with __" line uses the name the user calls her (nickname
+      // wins); the pawbae.ai watermark stays the brand.
+      const name = effectiveName(settingsStore.petNicknames[pet.id], pet.displayName);
       const idle = animationFor(pet, 'idle');
       const image = await new Promise<HTMLImageElement | null>((resolve) => {
         const img = new globalThis.Image();
@@ -49,7 +53,7 @@
         img.onerror = () => resolve(null);
         img.src = pet.spritesheetUrl;
       });
-      if (!image) return { sprite: null, name: pet.displayName };
+      if (!image) return { sprite: null, name };
       return {
         sprite: {
           image,
@@ -58,7 +62,7 @@
           sw: pet.atlas.cellW,
           sh: pet.atlas.cellH,
         },
-        name: pet.displayName,
+        name,
       };
     } catch {
       return { sprite: null, name: 'PawBae' };

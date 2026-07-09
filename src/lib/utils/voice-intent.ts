@@ -35,8 +35,11 @@ export interface IntentResult {
 }
 
 export interface IntentContext {
-  /** Display name of the active pet, used for the `callName` intent. May be empty. */
-  petName: string;
+  /**
+   * Every name the active pet answers to (official name + user nickname), used for
+   * the `callName` intent. Empty entries are ignored; may be empty entirely.
+   */
+  petNames: readonly string[];
 }
 
 interface Rule {
@@ -151,8 +154,8 @@ export function classifyIntent(raw: string, ctx: IntentContext): IntentResult {
   if (!text) return unknownResult();
 
   // Name call wins only when nothing more specific was said.
-  const petName = ctx.petName.trim().toLowerCase();
-  if (petName && text.includes(petName) && !hasStrongIntent(text)) {
+  const petNames = ctx.petNames.map((n) => n.trim().toLowerCase()).filter(Boolean);
+  if (petNames.some((n) => text.includes(n)) && !hasStrongIntent(text)) {
     return {
       intent: 'callName',
       emotion: 'happy',

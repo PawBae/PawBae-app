@@ -375,5 +375,13 @@
     "copied": "Copied — paste it anywhere!",
     "saved": "Saved!",
     "exportFailed": "Export failed — check the log"
+  },
+  "profile": {
+    "nicknameLabel": "Nickname (what you call her)"
+  },
+  "lore": {
+    "species": "Cloud-eared creature · from the cloud where the agents work",
+    "short": "Born in the cloud where the agents work. Her cloud ears hear every task finish; the scent of done work is her dinner. Clouds never scold anyone.",
+    "tagline": "She slid down from the cloud where the agents work — and landed on your desktop."
   }
 }
