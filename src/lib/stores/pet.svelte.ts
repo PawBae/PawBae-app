@@ -618,7 +618,7 @@ class PetStore {
   private handleTaskComplete(payload: ClaudeTaskCompleteEvent) {
     // Rust already filters subagent stops, ESC interrupts, and compaction; the reducer
     // drops permission-waits (waiting: true) and dedupes per session with a cooldown.
-    this.commitCoins(
+    const stopAwards = this.commitCoins(
       awardAgentStop(this.rewards, this.petData.coins, {
         sessionId: payload.sessionId,
         waiting: payload.waiting,
@@ -629,9 +629,10 @@ class PetStore {
     if (!payload.waiting) {
       track('agent_task_complete', { source: payload.source });
       this.markBoardTask('agent');
-      // Warm the incubating egg BEFORE the trip settles: an egg dropped by this very
-      // completion starts cold instead of instantly absorbing its own arrival.
-      this.warmEgg();
+      // Warmth rides the SAME per-session cooldown as the coin award: a duplicate stop
+      // event deduped from the ledger must not warm the egg either (Codex review). And
+      // warm BEFORE the trip settles, so an egg dropped by this completion starts cold.
+      if (stopAwards.length > 0) this.warmEgg();
       this.settleAdventure(payload.sessionId, Date.now());
       void this.settleTokenFeed(payload.source);
     }
