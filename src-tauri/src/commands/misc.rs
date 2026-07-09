@@ -208,3 +208,16 @@ pub fn voice_set_locale(locale: String) {
         let _ = locale;
     }
 }
+
+/// Write a base64-encoded PNG (the weekly share card) to a user-chosen path.
+/// The path comes from the save dialog, so it is user-consented by construction.
+#[tauri::command]
+pub fn save_png_file(path: String, data: String) -> Result<(), String> {
+    use base64::Engine;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(data.as_bytes())
+        .map_err(|e| format!("bad base64: {e}"))?;
+    std::fs::write(&path, bytes).map_err(|e| format!("write failed: {e}"))?;
+    log::info!("[share-card] saved {path}");
+    Ok(())
+}

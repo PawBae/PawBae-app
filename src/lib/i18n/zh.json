@@ -362,5 +362,18 @@
     "perfectDay": "全勤达成！+15 金币",
     "streakHint": "打卡连胜：完成任意一项即可续上",
     "shieldHint": "连胜护盾：断一天自动消耗一个护盾而不清零（每连续 7 天送一个，上限 2）"
+  },
+  "share": {
+    "button": "周报卡",
+    "heroLabel": "本周投喂",
+    "tasks": "次任务",
+    "messages": "条消息",
+    "streak": "{days} 天连胜",
+    "together": "和 {name} 相伴第 {days} 天",
+    "save": "保存图片",
+    "copy": "复制",
+    "copied": "已复制——直接粘贴分享！",
+    "saved": "已保存！",
+    "exportFailed": "导出失败——请查看日志"
   }
 }

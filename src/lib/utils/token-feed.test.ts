@@ -57,6 +57,7 @@ describe('nutritionOf', () => {
       totalCacheWriteTokens: 8_888_888,
       totalMessages: 42,
       totalSessions: 3,
+      dailyStats: [],
     };
     expect(nutritionOf(stats)).toBe(14_000);
   });

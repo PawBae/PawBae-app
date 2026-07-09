@@ -16,6 +16,8 @@
     "core:window:allow-scale-factor",
     "store:default",
     "global-shortcut:default",
-    "aptabase:allow-track-event"
+    "aptabase:allow-track-event",
+    "dialog:default",
+    "clipboard-manager:allow-write-image"
   ]
 }

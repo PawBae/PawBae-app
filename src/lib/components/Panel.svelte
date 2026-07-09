@@ -8,6 +8,7 @@
   import { ACHIEVEMENTS } from '../utils/achievements';
   import { BOARD_TASKS } from '../utils/daily-board';
   import { FEED_COST_COINS } from '../utils/rewards';
+  import ShareCardModal from './ShareCardModal.svelte';
 
   let {
     class: className = '',
@@ -26,6 +27,8 @@
     if (locked && secret) return '???';
     return `${$_(`growth.ach.${id}`)} — ${$_(`growth.achDesc.${id}`)}`;
   }
+
+  let shareOpen = $state(false);
 </script>
 
 {#if windowStore.expanded}
@@ -126,7 +129,12 @@
                 ✓ {$_('pet.claimed')}
               {/if}
             </button>
+            <button class="action-btn" onclick={() => (shareOpen = true)}>
+              📸 {$_('share.button')}
+            </button>
           </div>
+
+          <ShareCardModal open={shareOpen} onclose={() => (shareOpen = false)} />
 
           <div class="board-section">
             <div class="board-title">

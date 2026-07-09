@@ -48,6 +48,7 @@ pub fn run() {
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build());
     // Anonymous opt-in telemetry (Aptabase). The app key is baked in at compile
     // time; keyless builds (local dev) skip registration and the frontend track()
@@ -135,7 +136,8 @@ pub fn run() {
             voice_toggle,
             voice_is_recording,
             voice_set_locale,
-            voice_set_enabled
+            voice_set_enabled,
+            save_png_file
         ])
         .manage(ActiveAgentPid {
             pid: Mutex::new(None),
