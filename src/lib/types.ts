@@ -154,9 +154,22 @@ export interface ClaudeSession {
 
 export type ClaudeStatsSource = 'cc' | 'codex' | 'cursor';
 
+// Wire shape of one day in `get_claude_stats` dailyStats. The Rust struct
+// (ClaudeDailyStats) has NO serde renames, so the wire is snake_case — typed
+// as-is on purpose (the ClaudeSession `id`-vs-`sessionId` lesson).
+export interface ClaudeDailyStats {
+  date: string; // YYYY-MM-DD
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  messages: number;
+  sessions: number;
+}
+
 // Wire shape of the `get_claude_stats` Tauri command (claude_sessions.rs ClaudeStats,
-// serde camelCase renames). Only the scalar totals the frontend consumes are typed;
-// dailyStats/model ride along untyped until something needs them.
+// serde camelCase renames on the totals; dailyStats entries stay snake_case).
+// dailyStats covers the trailing 14 days, zero-filled for missing days, oldest first.
 export interface ClaudeStats {
   totalInputTokens: number;
   totalOutputTokens: number;
@@ -164,6 +177,7 @@ export interface ClaudeStats {
   totalCacheWriteTokens: number;
   totalMessages: number;
   totalSessions: number;
+  dailyStats: ClaudeDailyStats[];
 }
 
 // Wire payload of the Tauri "claude-task-complete" event

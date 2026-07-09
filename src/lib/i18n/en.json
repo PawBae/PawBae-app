@@ -362,5 +362,18 @@
     "perfectDay": "Full board! +15 coins",
     "streakHint": "Check-in streak: any one task keeps it going",
     "shieldHint": "Streak shields: a missed day spends one instead of breaking the streak (earn one every 7 days, max 2)"
+  },
+  "share": {
+    "button": "Weekly card",
+    "heroLabel": "Fed this week",
+    "tasks": "agent tasks",
+    "messages": "messages",
+    "streak": "{days}-day streak",
+    "together": "Day {days} with {name}",
+    "save": "Save image",
+    "copy": "Copy",
+    "copied": "Copied — paste it anywhere!",
+    "saved": "Saved!",
+    "exportFailed": "Export failed — check the log"
   }
 }
