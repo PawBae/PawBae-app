@@ -65,6 +65,14 @@
       </div>
     </div>
   {/key}
+{:else if celebration?.kind === 'egg_found'}
+  {#key celebration}
+    <div class="bubble-wrap {placement}">
+      <div class="bubble">
+        🥚 {$_('egg.foundBubble')}
+      </div>
+    </div>
+  {/key}
 {/if}
 
 <style>

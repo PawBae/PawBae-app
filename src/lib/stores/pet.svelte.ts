@@ -36,6 +36,18 @@ import {
   sanitizeBoardDone,
   streakBucket,
 } from '../utils/daily-board';
+import {
+  addWarmth,
+  EGG_COST_COINS,
+  type EggState,
+  eggReady,
+  hatchablePool,
+  rollNeighbor,
+  sanitizeEgg,
+  sanitizeMetNeighbors,
+  shouldDropEgg,
+  unmetNeighbors,
+} from '../utils/eggs';
 import { type EvolutionInfo, evolutionInfo } from '../utils/evolution';
 import { tryInvoke } from '../utils/invoke';
 import {
@@ -55,6 +67,7 @@ import {
 } from '../utils/rewards';
 import {
   addSouvenir,
+  LONG_TRIP_MS,
   rollSouvenir,
   type SouvenirOwned,
   sanitizeSouvenirs,
@@ -69,6 +82,7 @@ import {
   type TokenMeal,
 } from '../utils/token-feed';
 import { settingsStore } from './settings.svelte';
+import { skinsStore } from './skins.svelte';
 
 export const HUNGER_MAX = 100;
 export const HUNGER_INIT = 100;
@@ -144,6 +158,10 @@ class PetStore {
   // and the display layer's "some session has been busy long enough" flag. The trip
   // machine itself is plain state — MascotView steps it off the 2s session poll.
   souvenirs = $state<Record<string, SouvenirOwned>>({});
+  // 孵蛋与物种图鉴: builtin neighbors already met (dex unlocks, persisted) and the
+  // single incubating egg. Ready-to-hatch is derived from warmth, never stored.
+  metNeighbors = $state<string[]>([]);
+  egg = $state<EggState | null>(null);
   adventureAway = $state(false);
   private adventure: AdventureState = initialAdventureState();
   private pomodoroInterval: ReturnType<typeof setInterval> | null = null;
@@ -210,6 +228,7 @@ class PetStore {
     if (!this.canFeed) return false;
     this.consumeMeal(amount);
     this.awardCoins('feed', -FEED_COST_COINS);
+    this.warmEgg();
     return true;
   }
 
@@ -503,10 +522,91 @@ class PetStore {
     if (this.adventureAway !== away) this.adventureAway = away;
   }
 
+  // ── 孵蛋与物种图鉴 ────────────────────────────────────────────────
+
+  /** Builtin ids only — customs are never gated and never hatch (UGC 红线). */
+  private get builtinSkinIds(): string[] {
+    return skinsStore.all.filter((p) => !skinsStore.customIds.has(p.id)).map((p) => p.id);
+  }
+
+  /** Neighbors the next hatch can reveal. Empty until the skins store has loaded. */
+  get unmetNeighborIds(): string[] {
+    return unmetNeighbors(hatchablePool(this.builtinSkinIds), this.metNeighbors);
+  }
+
+  get eggReady(): boolean {
+    return eggReady(this.egg);
+  }
+
+  get canBuyEgg(): boolean {
+    return (
+      this.egg === null && this.petData.coins >= EGG_COST_COINS && this.unmetNeighborIds.length > 0
+    );
+  }
+
+  buyEgg(): boolean {
+    if (!this.canBuyEgg) return false;
+    // Egg first: awardCoins → commitCoins persists, and that save must carry the egg.
+    this.egg = { warmth: 0, since: Date.now() };
+    this.awardCoins('egg', -EGG_COST_COINS);
+    track('egg_bought');
+    return true;
+  }
+
+  /** One unit of 完工暖香 (a genuine agent completion or a meal) toward the egg. */
+  private warmEgg() {
+    if (this.egg === null || eggReady(this.egg)) return;
+    this.egg = addWarmth(this.egg);
+    this.persistRewards();
+  }
+
+  /**
+   * Crack the ready egg: roll an unmet neighbor, mark it met, clear the egg. Returns
+   * the revealed id (the caller switches the active skin). If a migration edge emptied
+   * the pool after purchase, the egg is refunded instead — never punish.
+   */
+  revealEgg(): string | null {
+    if (!eggReady(this.egg)) return null;
+    const unmet = this.unmetNeighborIds;
+    const id = rollNeighbor(unmet, Math.random);
+    this.egg = null;
+    if (id === null) {
+      this.awardCoins('egg', EGG_COST_COINS, { reason: 'refund' });
+      return null;
+    }
+    this.metNeighbors = [...this.metNeighbors, id];
+    // Builtin ids are a fixed vocabulary (never user content), safe for telemetry.
+    track('egg_hatched', { species: id });
+    if (unmet.length === 1) track('dex_completed');
+    this.persistRewards();
+    return id;
+  }
+
+  /**
+   * One-shot migration guard (Main calls this once settings + skins are loaded): an
+   * install already using a builtin neighbor keeps it — never confiscate the current pet.
+   */
+  noteCurrentSkinMet(currentId: string) {
+    if (!hatchablePool(this.builtinSkinIds).includes(currentId)) return;
+    if (this.metNeighbors.includes(currentId)) return;
+    this.metNeighbors = [...this.metNeighbors, currentId];
+    this.persistRewards();
+  }
+
   /** A genuine completion ends the session's trip; a long-enough one earns a souvenir. */
   private settleAdventure(sessionId: string, now: number) {
     const elapsed = consumeTrip(this.adventure, sessionId, now);
     if (elapsed === null || elapsed < ADVENTURE_MIN_MS) return;
+    // A long trip may bring a free egg home instead of a souvenir (only while no egg
+    // is incubating and someone is left to meet) — the bigger surprise wins the slot.
+    if (
+      shouldDropEgg(elapsed >= LONG_TRIP_MS, this.egg, this.unmetNeighborIds.length, Math.random)
+    ) {
+      this.egg = { warmth: 0, since: now };
+      this.celebrations = [...this.celebrations, { kind: 'egg_found' }];
+      this.persistRewards();
+      return;
+    }
     const found = rollSouvenir(elapsed, Math.random);
     this.souvenirs = addSouvenir(this.souvenirs, found.id, now);
     this.celebrations = [...this.celebrations, { kind: 'souvenir', id: found.id }];
@@ -518,7 +618,7 @@ class PetStore {
   private handleTaskComplete(payload: ClaudeTaskCompleteEvent) {
     // Rust already filters subagent stops, ESC interrupts, and compaction; the reducer
     // drops permission-waits (waiting: true) and dedupes per session with a cooldown.
-    this.commitCoins(
+    const stopAwards = this.commitCoins(
       awardAgentStop(this.rewards, this.petData.coins, {
         sessionId: payload.sessionId,
         waiting: payload.waiting,
@@ -529,6 +629,10 @@ class PetStore {
     if (!payload.waiting) {
       track('agent_task_complete', { source: payload.source });
       this.markBoardTask('agent');
+      // Warmth rides the SAME per-session cooldown as the coin award: a duplicate stop
+      // event deduped from the ledger must not warm the egg either (Codex review). And
+      // warm BEFORE the trip settles, so an egg dropped by this completion starts cold.
+      if (stopAwards.length > 0) this.warmEgg();
       this.settleAdventure(payload.sessionId, Date.now());
       void this.settleTokenFeed(payload.source);
     }
@@ -647,6 +751,8 @@ class PetStore {
     this.achievements = sanitizeUnlockMap(await store.get('achievements'));
     this.evolutionStageSeen = sanitizeStoredCount(await store.get('evolution_stage_seen'));
     this.souvenirs = sanitizeSouvenirs(await store.get('souvenirs'));
+    this.metNeighbors = sanitizeMetNeighbors(await store.get('met_neighbors'));
+    this.egg = sanitizeEgg(await store.get('egg'));
     // Daily task board. Migration: an install that predates the board (no streak_date
     // key ever written) seeds the unified streak from the legacy gift streak, so a
     // live 30-day streak survives the upgrade instead of silently restarting.
@@ -725,6 +831,8 @@ class PetStore {
     await store.set('achievements', { ...this.achievements });
     await store.set('evolution_stage_seen', this.evolutionStageSeen);
     await store.set('souvenirs', { ...this.souvenirs });
+    await store.set('met_neighbors', [...this.metNeighbors]);
+    await store.set('egg', this.egg ? { ...this.egg } : null);
     await store.save();
   }
 

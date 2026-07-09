@@ -226,6 +226,11 @@
       pet = await loadDefaultCodexPet().catch(() => null);
     }
 
+    // Dex migration (孵蛋与物种图鉴): an install already using a builtin neighbor when
+    // the gate shipped keeps it — never confiscate the current pet. petStore.init() is
+    // idempotent (shared promise); the reward $effect owns its dispose.
+    petStore.init().then(() => petStore.noteCurrentSkinMet(settingsStore.miniPetId));
+
     if (!settingsStore.appMode) {
       showOnboarding = true;
       windowStore.setSettingsOpen(true);

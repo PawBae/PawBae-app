@@ -131,7 +131,8 @@ export type GrowthCelebration =
   | { kind: 'evolution'; stageIndex: number }
   | { kind: 'achievement'; id: string }
   | { kind: 'perfect_day' }
-  | { kind: 'souvenir'; id: string };
+  | { kind: 'souvenir'; id: string }
+  | { kind: 'egg_found' };
 
 export interface PomodoroState {
   active: boolean;
@@ -194,7 +195,7 @@ export interface ClaudeTaskCompleteEvent {
 
 // ── P1-C reward model ──────────────────────────────────────────────
 
-// Where a coin delta came from. Negative deltas (feed) flow through the same pipeline.
+// Where a coin delta came from. Negative deltas (feed, egg) flow through the same pipeline.
 export type CoinSource =
   | 'agent_stop'
   | 'focus_minutes'
@@ -202,7 +203,8 @@ export type CoinSource =
   | 'pomodoro'
   | 'daily_gift'
   | 'task_board'
-  | 'feed';
+  | 'feed'
+  | 'egg';
 
 // One reward-ledger entry. `amount` is the EFFECTIVE delta after the clamp-at-zero
 // (positive = earned, negative = spent); zero-effect awards are never ledgered.

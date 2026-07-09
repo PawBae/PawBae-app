@@ -523,5 +523,19 @@
       "importFailed": "导入失败：{reason}",
       "unreadable": "无法读取导入的皮肤"
     }
+  },
+  "egg": {
+    "title": "云蛋",
+    "buy": "买一颗云蛋",
+    "buyHint": "还没见过的邻居寄来的到访信物——用完工的暖香焐热它，焐够就破壳。",
+    "allMet": "云上的邻居都认识啦，新面孔还在路上！",
+    "warmthHint": "agent 每次真完工、每喂一顿饭，都会添一缕暖香。",
+    "ready": "焐好了！点一下破壳",
+    "hatchedSub": "新邻居搬进来啦！去画廊打个招呼吧。",
+    "foundBubble": "她带回来一颗云蛋！"
+  },
+  "dex": {
+    "metCount": "已认识 {met}/{total}",
+    "lockedHint": "还没认识这位邻居——孵一颗云蛋把 TA 请来吧。"
   }
 }

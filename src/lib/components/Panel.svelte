@@ -7,10 +7,13 @@
   import { skinsStore } from '../stores/skins.svelte';
   import { windowStore } from '../stores/window.svelte';
   import { ACHIEVEMENTS } from '../utils/achievements';
+  import type { CodexPet } from '../utils/codex-pet';
   import { BOARD_TASKS } from '../utils/daily-board';
+  import { EGG_COST_COINS, EGG_HATCH_WARMTH } from '../utils/eggs';
   import { tryInvoke } from '../utils/invoke';
   import { effectiveName } from '../utils/pet-name';
   import { FEED_COST_COINS } from '../utils/rewards';
+  import { tileFrameStyle } from '../utils/skins';
   import { SOUVENIR_CATALOG, type SouvenirDef, type SouvenirOwned } from '../utils/souvenirs';
   import ProfileCard from './ProfileCard.svelte';
   import ShareCardModal from './ShareCardModal.svelte';
@@ -49,6 +52,19 @@
   let shareOpen = $state(false);
   let profileOpen = $state(false);
   let skinOpen = $state(false);
+
+  // 孵蛋: the freshly hatched neighbor's reveal card (session-ephemeral — the dex
+  // itself persists in petStore.metNeighbors).
+  let hatchedPet = $state<CodexPet | null>(null);
+
+  async function revealEgg() {
+    const id = petStore.revealEgg();
+    if (!id) return;
+    // The new neighbor takes the stage right away; skin_switched is intentionally not
+    // tracked here — egg_hatched already carries the species.
+    await settingsStore.setMiniPetId(id);
+    hatchedPet = skinsStore.resolve(id);
+  }
 
   // Official name of the active pet (sprite-pack displayName) — derived straight
   // from the skins store, which Main keeps loaded and the workshop refreshes.
@@ -196,6 +212,52 @@
 
           <ShareCardModal open={shareOpen} onclose={() => (shareOpen = false)} />
           <ProfileCard open={profileOpen} onclose={() => (profileOpen = false)} />
+
+          <div class="board-section">
+            <div class="board-title">
+              <span>🥚 {$_('egg.title')}</span>
+              {#if petStore.egg && !petStore.eggReady}
+                <span class="ach-count">🔥 {petStore.egg.warmth}/{EGG_HATCH_WARMTH}</span>
+              {/if}
+            </div>
+            {#if hatchedPet}
+              <div class="hatched-card">
+                <div class="hatched-crop"><div style={tileFrameStyle(hatchedPet, 44)}></div></div>
+                <div class="hatched-text">
+                  <div class="hatched-name">{hatchedPet.displayName}</div>
+                  <div class="hatched-sub">{$_('egg.hatchedSub')}</div>
+                </div>
+                <button class="hatched-ok" onclick={() => (hatchedPet = null)}>✓</button>
+              </div>
+            {:else if petStore.egg === null}
+              <button
+                class="action-btn egg-buy"
+                disabled={!petStore.canBuyEgg}
+                onclick={() => petStore.buyEgg()}
+              >
+                🥚 {$_('egg.buy')} (-{EGG_COST_COINS} 🪙)
+              </button>
+              <p class="shelf-hint">
+                {petStore.unmetNeighborIds.length === 0 ? $_('egg.allMet') : $_('egg.buyHint')}
+              </p>
+            {:else if !petStore.eggReady}
+              <div class="egg-row">
+                <span class="egg-emoji">🥚</span>
+                <div class="egg-bar">
+                  <div
+                    class="egg-fill"
+                    style="width: {Math.round((petStore.egg.warmth / EGG_HATCH_WARMTH) * 100)}%"
+                  ></div>
+                </div>
+              </div>
+              <p class="shelf-hint">{$_('egg.warmthHint')}</p>
+            {:else}
+              <button class="egg-ready" onclick={revealEgg}>
+                <span class="egg-emoji pulse">🥚</span>
+                {$_('egg.ready')}
+              </button>
+            {/if}
+          </div>
 
           <div class="board-section">
             <div class="board-title">
@@ -664,5 +726,125 @@
     font-size: 10px;
     line-height: 1.5;
     text-align: left;
+  }
+
+  /* 孵蛋: buy button / incubation progress / ready-to-hatch / reveal card. */
+  .egg-buy {
+    width: 100%;
+    margin-top: 8px;
+    flex: none;
+  }
+
+  .egg-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 8px;
+  }
+
+  .egg-emoji {
+    font-size: 18px;
+    line-height: 1;
+  }
+
+  .egg-emoji.pulse {
+    animation: eggPulse 1.2s ease-in-out infinite;
+  }
+
+  .egg-bar {
+    flex: 1;
+    height: 6px;
+    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.08);
+    overflow: hidden;
+  }
+
+  .egg-fill {
+    height: 100%;
+    border-radius: 3px;
+    background: linear-gradient(90deg, #f5a623, #ff9d76);
+    transition: width 0.4s ease;
+  }
+
+  .egg-ready {
+    width: 100%;
+    margin-top: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 6px 8px;
+    border-radius: 8px;
+    border: 1px solid rgba(247, 206, 77, 0.6);
+    background: rgba(245, 166, 35, 0.16);
+    color: #f7ce4d;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .hatched-card {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 8px;
+    padding: 6px 8px;
+    border-radius: 10px;
+    border: 1px solid rgba(247, 206, 77, 0.5);
+    background: rgba(245, 166, 35, 0.1);
+    text-align: left;
+  }
+
+  .hatched-crop {
+    width: 44px;
+    height: 44px;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    overflow: hidden;
+    flex: none;
+  }
+
+  .hatched-text {
+    min-width: 0;
+    flex: 1;
+  }
+
+  .hatched-name {
+    color: rgba(255, 255, 255, 0.9);
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  .hatched-sub {
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 10px;
+    margin-top: 1px;
+  }
+
+  .hatched-ok {
+    background: none;
+    border: none;
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 13px;
+    cursor: pointer;
+    padding: 2px 4px;
+  }
+
+  .hatched-ok:hover {
+    color: #fff;
+  }
+
+  @keyframes eggPulse {
+    0%,
+    100% {
+      transform: scale(1) rotate(0deg);
+    }
+    25% {
+      transform: scale(1.1) rotate(-6deg);
+    }
+    75% {
+      transform: scale(1.1) rotate(6deg);
+    }
   }
 </style>
