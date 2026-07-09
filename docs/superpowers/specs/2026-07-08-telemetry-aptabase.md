@@ -29,6 +29,8 @@
 | `agent_task_complete` | `source`: cc/codex/cursor | 日均 agent 会话/任务量 —— 核心循环是否被真实使用 |
 | `meal_fed` | `tier`: snack/meal/feast | token 喂养循环参与度 |
 | `approval_response` | `awarded`: 0/2 | 叼来审批单是否改变了响应行为 |
+| `board_checkin` | `streak_bucket`: 1-2/3-6/7-29/30+ | 每日任务板打卡与连胜分布（匿名分桶，交叉验证 D1/D7/D30） |
+| `board_perfect_day` | — | 全勤率——任务板深度参与度 |
 
 加新事件 = 在此表加一行 + 一处 `track()` 调用。不进此表的事件不许发。
 

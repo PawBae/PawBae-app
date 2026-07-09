@@ -6,6 +6,7 @@
   import { settingsStore } from '../stores/settings.svelte';
   import { windowStore } from '../stores/window.svelte';
   import { ACHIEVEMENTS } from '../utils/achievements';
+  import { BOARD_TASKS } from '../utils/daily-board';
   import { FEED_COST_COINS } from '../utils/rewards';
 
   let {
@@ -127,11 +128,30 @@
             </button>
           </div>
 
-          {#if petStore.giftStreakLive >= 2}
-            <div class="streak">
-              🔥 {$_('growth.streak', { values: { days: petStore.giftStreakLive } })}
+          <div class="board-section">
+            <div class="board-title">
+              <span>📋 {$_('board.title')}</span>
+              <span class="board-badges">
+                {#if petStore.streakLive >= 2}
+                  <span class="streak" title={$_('board.streakHint')}>
+                    🔥 {$_('growth.streak', { values: { days: petStore.streakLive } })}
+                  </span>
+                {/if}
+                {#if petStore.petData.shields > 0}
+                  <span class="shields" title={$_('board.shieldHint')}>
+                    {'🛡️'.repeat(petStore.petData.shields)}
+                  </span>
+                {/if}
+              </span>
             </div>
-          {/if}
+            {#each BOARD_TASKS as t (t.id)}
+              {@const done = petStore.boardDoneToday.includes(t.id)}
+              <div class="board-row" class:done>
+                <span aria-hidden="true">{done ? '✅' : '⬜'}</span>
+                <span>{t.emoji} {$_(`board.task.${t.id}`)}</span>
+              </div>
+            {/each}
+          </div>
 
           <div class="ach-section">
             <div class="ach-title">
@@ -376,11 +396,50 @@
     color: #f7ce4d;
   }
 
+  .board-section {
+    margin-top: 12px;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    padding-top: 10px;
+    text-align: left;
+  }
+
+  .board-title {
+    color: rgba(255, 255, 255, 0.75);
+    font-size: 11px;
+    font-weight: 600;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .board-badges {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
   .streak {
-    margin-top: 8px;
     color: rgba(255, 180, 90, 0.9);
     font-size: 11px;
     font-weight: 600;
+  }
+
+  .shields {
+    font-size: 11px;
+    letter-spacing: 1px;
+  }
+
+  .board-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 6px;
+    color: rgba(255, 255, 255, 0.65);
+    font-size: 11px;
+  }
+
+  .board-row.done {
+    color: rgba(255, 255, 255, 0.4);
   }
 
   .ach-section {

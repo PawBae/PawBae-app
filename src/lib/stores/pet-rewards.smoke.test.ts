@@ -43,7 +43,12 @@ import { petStore } from './pet.svelte';
 
 describe('petStore reward integration (smoke)', () => {
   it('hydrates persisted state, wires listeners, and routes agent completions to coins', async () => {
-    const today = new Date().toISOString().slice(0, 10);
+    // LOCAL calendar date — must match the store's todayStr() (switched off UTC
+    // when the daily task board made the date line user-visible).
+    const d = new Date();
+    const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(
+      d.getDate(),
+    ).padStart(2, '0')}`;
     harness.data.set('coins', 30);
     harness.data.set('last_daily_gift', today);
 

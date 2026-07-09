@@ -42,6 +42,14 @@
       </div>
     </div>
   {/key}
+{:else if celebration?.kind === 'perfect_day'}
+  {#key celebration}
+    <div class="bubble-wrap {placement}">
+      <div class="bubble">
+        🎉 {$_('board.perfectDay')}
+      </div>
+    </div>
+  {/key}
 {/if}
 
 <style>

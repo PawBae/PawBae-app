@@ -34,6 +34,7 @@ const COIN_SOURCES: readonly CoinSource[] = [
   'input_milestone',
   'pomodoro',
   'daily_gift',
+  'task_board',
   'feed',
 ];
 
@@ -100,6 +101,7 @@ function zeroTotals(): Record<CoinSource, CoinSourceTotals> {
     input_milestone: zeroSourceTotals(),
     pomodoro: zeroSourceTotals(),
     daily_gift: zeroSourceTotals(),
+    task_board: zeroSourceTotals(),
     feed: zeroSourceTotals(),
   };
 }
@@ -261,8 +263,12 @@ export function trackFocusInput(
 }
 
 // ── Daily-gift streak ──────────────────────────────────────────────
-// Dates are the store's UTC YYYY-MM-DD strings (todayStr() in pet.svelte.ts), so
-// "yesterday" is computed in the same calendar and DST can't split a streak.
+// Dates are the store's LOCAL-calendar YYYY-MM-DD strings (todayStr() in
+// pet.svelte.ts). yesterdayOf does abstract date math on the string (parse as UTC
+// midnight, subtract a day, format back), so it stays in one calendar and DST
+// can't split a streak.
+// NOTE: nextGiftStreak/currentGiftStreak now only back the one-time migration into
+// the unified daily-board streak (utils/daily-board.ts) — new code goes there.
 
 function yesterdayOf(today: string): string {
   const parsed = Date.parse(`${today}T00:00:00Z`);
