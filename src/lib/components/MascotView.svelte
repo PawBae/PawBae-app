@@ -8,6 +8,7 @@
   import { settingsStore } from '../stores/settings.svelte';
   import { windowStore } from '../stores/window.svelte';
   import type { UserInputEvent } from '../types';
+  import { awayDisplayGate } from '../utils/adventure';
   import { aggregateSessions, isOverloaded, mascotStateFor } from '../utils/agent-activity';
   import { initialApprovalState, oldestPending, stepApprovalNotes } from '../utils/approval-note';
   import { dayPartFor } from '../utils/circadian';
@@ -140,12 +141,27 @@
       : null
   );
 
-  // Overlay slot fed to MiniPetMascot: the meal beat wins over a live input reaction
-  // (a 350ms typing blip must not step on the care-loop's payoff moment), which wins
+  // Adventure display phase (the machine driving it lives further down with the
+  // rest of the adventure wiring): home → departing → away (⛺) → returning.
+  let tripPhase = $state<'home' | 'departing' | 'away' | 'returning'>('home');
+
+  // Walk-off/walk-in rows during the trip transitions (standard rows every sheet
+  // has; a sheet that somehow lacks one just slides without the run cycle).
+  const tripSprite = $derived<CodexPetState | null>(
+    tripPhase === 'departing' && pet?.animations['run-left']
+      ? 'run-left'
+      : tripPhase === 'returning' && pet?.animations['run-right']
+        ? 'run-right'
+        : null
+  );
+
+  // Overlay slot fed to MiniPetMascot: a trip transition outranks everything — the
+  // pet is literally leaving. Then the meal beat wins over a live input reaction (a
+  // 350ms typing blip must not step on the care-loop's payoff moment), which wins
   // over a voice emotion, which wins over an idle micro-action, which sits above the
   // base/physics sprite.
   const overlaySprite = $derived<CodexPetState | null>(
-    actionSprite ?? reactionSprite ?? voiceEmotionSprite ?? idleSprite
+    tripSprite ?? actionSprite ?? reactionSprite ?? voiceEmotionSprite ?? idleSprite
   );
 
   // The pet must not be mid-manipulation for a beat to steal its animation. Shared by the
@@ -390,6 +406,116 @@
     };
   });
 
+  // ── Agent adventure (Phase 1 冒险) ─────────────────────────────────────────────
+  // The trip machine (eligibility) lives in petStore so a completion can consume it
+  // there; this component owns the stepping cadence and the "pet is away" DISPLAY.
+  // busy/alive keys collapse the 2s poll's fresh array identities (waitingKey
+  // precedent), and the ids are derived FROM the keys so the dependency registers
+  // (the approval note's bare-statement lesson). A threshold crossing changes no
+  // set, so a slow interval re-steps between poll changes.
+  const ADVENTURE_TICK_MS = 10_000;
+  const BUSY_STATUSES = new Set(['processing', 'tool_running', 'compacting']);
+  // "Alive" means non-terminal, NOT merely present: the poll keeps killed/ESC'd rows
+  // around with status stopped/idle, so an interrupted trip must be dropped here or a
+  // later run of the SAME sessionId would inherit the stale timestamp — instant away,
+  // and a souvenir-sized elapsed the resumed task never earned (Codex review, PR #45).
+  const LIVE_STATUSES = new Set(['processing', 'tool_running', 'compacting', 'waiting']);
+  const adventureBusyKey = $derived(
+    settingsStore.appMode === 'coding'
+      ? sessionStore.claudeSessions
+          .filter((s) => s.status !== undefined && BUSY_STATUSES.has(s.status))
+          .map((s) => s.sessionId)
+          .join('\n')
+      : ''
+  );
+  const adventureAliveKey = $derived(
+    settingsStore.appMode === 'coding'
+      ? sessionStore.claudeSessions
+          .filter((s) => s.status !== undefined && LIVE_STATUSES.has(s.status))
+          .map((s) => s.sessionId)
+          .join('\n')
+      : ''
+  );
+  $effect(() => {
+    const busy = adventureBusyKey ? adventureBusyKey.split('\n') : [];
+    const alive = adventureAliveKey ? adventureAliveKey.split('\n') : [];
+    untrack(() => petStore.stepAdventure(busy, alive, Date.now()));
+    // The sets are frozen until the next effect re-run, so the closure stays correct.
+    const tick = setInterval(() => petStore.stepAdventure(busy, alive, Date.now()), ADVENTURE_TICK_MS);
+    return () => clearInterval(tick);
+  });
+
+  // DEV-only demo: force the away visual for a few seconds, then play a souvenir
+  // celebration — the 3-minute trip is real-tested with a real agent task, but the
+  // depart/marker/return chain shouldn't need one. Celebrations are ephemeral (never
+  // persisted), so the demo leaves no fake data behind.
+  let devAwayForced = $state(false);
+  $effect(() => {
+    if (!import.meta.env.DEV) return;
+    const w = window as unknown as { __pawbaeAdventureDemo?: (secs?: number) => void };
+    const demo = (secs = 8) => {
+      devAwayForced = true;
+      setTimeout(() => {
+        devAwayForced = false;
+        petStore.celebrations = [...petStore.celebrations, { kind: 'souvenir', id: 'whole_kiwi' }];
+      }, secs * 1000);
+    };
+    w.__pawbaeAdventureDemo = demo;
+    return () => {
+      if (w.__pawbaeAdventureDemo === demo) w.__pawbaeAdventureDemo = undefined;
+    };
+  });
+
+  // "Away" is pure politeness on top of eligibility (the pure gate lives in
+  // adventure.ts). physicsPaused mirrors the pause driver below: while the panel is
+  // expanded the loop is frozen mid-state (it restarts as 'falling' and stays there),
+  // and a frozen state must not block the departure — found live in acceptance.
+  const awayWanted = $derived(
+    awayDisplayGate({
+      eligible: (settingsStore.appMode === 'coding' && petStore.adventureAway) || devAwayForced,
+      waitingCount: waitingSessions.length,
+      celebrating: celebration !== null,
+      eating: petStore.currentAction === 'eat',
+      settingsOpen: windowStore.settingsOpen,
+      voiceActive: voiceRecording || !!voiceText || !!voiceReply,
+      physicsState,
+      physicsPaused: windowStore.expanded,
+    })
+  );
+
+  // Four-phase display machine stepping `tripPhase` (declared up with the overlay
+  // slot): home → departing (run-left slides out) → away (⛺ marker) → returning
+  // (run-right slides back). Phase changes are driven ONLY by awayWanted flips —
+  // the timers finish transitions without re-triggering.
+  const TRIP_TRANSITION_MS = 1100;
+  let tripTimer: ReturnType<typeof setTimeout> | null = null;
+  $effect(() => {
+    const wanted = awayWanted; // tracked dependency — everything else is untracked
+    untrack(() => {
+      if (wanted && (tripPhase === 'home' || tripPhase === 'returning')) {
+        tripPhase = 'departing';
+        if (tripTimer) clearTimeout(tripTimer);
+        tripTimer = setTimeout(() => {
+          tripPhase = 'away';
+          tripTimer = null;
+        }, TRIP_TRANSITION_MS);
+      } else if (!wanted && (tripPhase === 'away' || tripPhase === 'departing')) {
+        tripPhase = 'returning';
+        if (tripTimer) clearTimeout(tripTimer);
+        tripTimer = setTimeout(() => {
+          tripPhase = 'home';
+          tripTimer = null;
+        }, TRIP_TRANSITION_MS);
+      }
+    });
+    return () => {
+      if (tripTimer) {
+        clearTimeout(tripTimer);
+        tripTimer = null;
+      }
+    };
+  });
+
   // Evolution aura: a subtle glow from the branching stage up, tinted by work style.
   // Class-only here; the radial-gradient halo lives in CSS so the sprite stays untouched.
   const auraClass = $derived.by(() => {
@@ -493,6 +619,8 @@
       physicsCapable: !!currentPet?.physics?.enabled,
       settingsOpen: windowStore.settingsOpen,
       strollEnabled: settingsStore.strollEnabled,
+      // Off adventuring (or mid-transition): the window must stay put under the ⛺.
+      away: tripPhase !== 'home',
     });
     if (gate.pushStrollMode !== null) {
       tryInvoke('set_stroll_mode', { enabled: gate.pushStrollMode });
@@ -694,8 +822,20 @@
   oncontextmenu={handleContextMenu}
   style="width: {mascotSize}px; height: {mascotSize}px;"
 >
-  {#if pet}
-    <div class="aura-wrap {auraClass}" class:overload={overloaded}>
+  {#if pet && tripPhase === 'away'}
+    <!-- Off adventuring: the pet is gone; the marker keeps the spot (inside the same
+         hitbox region, so the native right-click → panel still lands). -->
+    <div class="away-marker" style="height: {mascotSize}px;">
+      <span class="away-tent" style="font-size: {Math.round(mascotSize * 0.5)}px;">⛺</span>
+      <span class="away-note">{$_('adventure.awayNote')}</span>
+    </div>
+  {:else if pet}
+    <div
+      class="aura-wrap {auraClass}"
+      class:overload={overloaded}
+      class:trip-departing={tripPhase === 'departing'}
+      class:trip-returning={tripPhase === 'returning'}
+    >
       <MiniPetMascot
         {pet}
         baseState={spriteState}
@@ -860,11 +1000,65 @@
     }
   }
 
+  /* Adventure transitions: the pet walks off screen-left and back in. `forwards`
+     holds the departed pose until the phase machine swaps in the ⛺ marker. */
+  .aura-wrap.trip-departing {
+    animation: tripOut 1.1s ease-in forwards;
+  }
+
+  .aura-wrap.trip-returning {
+    animation: tripIn 1.1s ease-out;
+  }
+
+  @keyframes tripOut {
+    to {
+      transform: translateX(-150%);
+      opacity: 0;
+    }
+  }
+
+  @keyframes tripIn {
+    from {
+      transform: translateX(-150%);
+      opacity: 0;
+    }
+    to {
+      transform: translateX(0);
+      opacity: 1;
+    }
+  }
+
+  .away-marker {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 1px;
+  }
+
+  .away-tent {
+    line-height: 1.1;
+    filter: saturate(0.85);
+  }
+
+  .away-note {
+    font-size: 9px;
+    color: rgba(255, 255, 255, 0.6);
+    background: rgba(26, 26, 32, 0.75);
+    border-radius: 8px;
+    padding: 1px 6px;
+    white-space: nowrap;
+  }
+
   @media (prefers-reduced-motion: reduce) {
     .aura-wrap.overload {
       animation: none;
     }
     .aura.stage-4::before {
+      animation: none;
+    }
+    .aura-wrap.trip-departing,
+    .aura-wrap.trip-returning {
       animation: none;
     }
   }

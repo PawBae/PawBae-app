@@ -13,6 +13,11 @@ export interface StrollGateInput {
   settingsOpen: boolean;
   /** Persisted user setting (settings.json `stroll_mode_enabled`). */
   strollEnabled: boolean;
+  /**
+   * The pet is off on an adventure (or mid depart/return transition) — the window
+   * must stay put under the ⛺ marker, so native stroll is pushed off too.
+   */
+  away?: boolean;
 }
 
 export interface StrollGateResult {
@@ -23,6 +28,9 @@ export interface StrollGateResult {
 export function strollGate(input: StrollGateInput): StrollGateResult {
   if (!input.physicsCapable || input.settingsOpen) {
     return { runLoop: false, pushStrollMode: null };
+  }
+  if (input.away) {
+    return { runLoop: false, pushStrollMode: false };
   }
   if (!input.strollEnabled) {
     return { runLoop: false, pushStrollMode: false };

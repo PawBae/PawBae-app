@@ -18,6 +18,13 @@ import {
   evaluateAchievements,
   sanitizeUnlockMap,
 } from '../utils/achievements';
+import {
+  ADVENTURE_MIN_MS,
+  type AdventureState,
+  consumeTrip,
+  initialAdventureState,
+  stepAdventure,
+} from '../utils/adventure';
 import { approvalAwardFor } from '../utils/approval-note';
 import {
   type BoardState,
@@ -46,6 +53,12 @@ import {
   sanitizeStoredCount,
   snapshotRewardState,
 } from '../utils/rewards';
+import {
+  addSouvenir,
+  rollSouvenir,
+  type SouvenirOwned,
+  sanitizeSouvenirs,
+} from '../utils/souvenirs';
 import { track } from '../utils/telemetry';
 import {
   initialTokenFeedState,
@@ -127,6 +140,12 @@ class PetStore {
   achievements = $state<Record<string, number>>({});
   evolutionStageSeen = $state(0);
   celebrations = $state<GrowthCelebration[]>([]);
+  // Agent adventure (Phase 1 冒险): the souvenir shelf (id → count/firstAt, persisted)
+  // and the display layer's "some session has been busy long enough" flag. The trip
+  // machine itself is plain state — MascotView steps it off the 2s session poll.
+  souvenirs = $state<Record<string, SouvenirOwned>>({});
+  adventureAway = $state(false);
+  private adventure: AdventureState = initialAdventureState();
   private pomodoroInterval: ReturnType<typeof setInterval> | null = null;
   private storeInstance: Awaited<ReturnType<typeof load>> | null = null;
   private initPromise: Promise<() => void> | null = null;
@@ -473,6 +492,29 @@ class PetStore {
     if (this.celebrations.length > 0) this.celebrations = this.celebrations.slice(1);
   }
 
+  /**
+   * Step the adventure trip machine against the session poll (MascotView owns the
+   * cadence: on busy/alive set changes plus a slow tick, since a threshold crossing
+   * changes no set). Only updates the display flag when it actually flips — this is
+   * called from an effect, and an unconditional $state write would re-trigger it.
+   */
+  stepAdventure(busyIds: readonly string[], aliveIds: readonly string[], now: number) {
+    const { away } = stepAdventure(this.adventure, busyIds, aliveIds, now);
+    if (this.adventureAway !== away) this.adventureAway = away;
+  }
+
+  /** A genuine completion ends the session's trip; a long-enough one earns a souvenir. */
+  private settleAdventure(sessionId: string, now: number) {
+    const elapsed = consumeTrip(this.adventure, sessionId, now);
+    if (elapsed === null || elapsed < ADVENTURE_MIN_MS) return;
+    const found = rollSouvenir(elapsed, Math.random);
+    this.souvenirs = addSouvenir(this.souvenirs, found.id, now);
+    this.celebrations = [...this.celebrations, { kind: 'souvenir', id: found.id }];
+    // Rarity only — the dictionary stays minimal (no item ids).
+    track('souvenir_found', { rarity: found.rarity });
+    this.persistRewards();
+  }
+
   private handleTaskComplete(payload: ClaudeTaskCompleteEvent) {
     // Rust already filters subagent stops, ESC interrupts, and compaction; the reducer
     // drops permission-waits (waiting: true) and dedupes per session with a cooldown.
@@ -487,6 +529,7 @@ class PetStore {
     if (!payload.waiting) {
       track('agent_task_complete', { source: payload.source });
       this.markBoardTask('agent');
+      this.settleAdventure(payload.sessionId, Date.now());
       void this.settleTokenFeed(payload.source);
     }
   }
@@ -603,6 +646,7 @@ class PetStore {
         : Date.now();
     this.achievements = sanitizeUnlockMap(await store.get('achievements'));
     this.evolutionStageSeen = sanitizeStoredCount(await store.get('evolution_stage_seen'));
+    this.souvenirs = sanitizeSouvenirs(await store.get('souvenirs'));
     // Daily task board. Migration: an install that predates the board (no streak_date
     // key ever written) seeds the unified streak from the legacy gift streak, so a
     // live 30-day streak survives the upgrade instead of silently restarting.
@@ -680,6 +724,7 @@ class PetStore {
     await store.set('first_meet_at', this.petData.firstMeetAt);
     await store.set('achievements', { ...this.achievements });
     await store.set('evolution_stage_seen', this.evolutionStageSeen);
+    await store.set('souvenirs', { ...this.souvenirs });
     await store.save();
   }
 

@@ -130,7 +130,8 @@ export interface PetData {
 export type GrowthCelebration =
   | { kind: 'evolution'; stageIndex: number }
   | { kind: 'achievement'; id: string }
-  | { kind: 'perfect_day' };
+  | { kind: 'perfect_day' }
+  | { kind: 'souvenir'; id: string };
 
 export interface PomodoroState {
   active: boolean;

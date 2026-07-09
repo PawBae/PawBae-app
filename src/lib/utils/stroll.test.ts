@@ -37,4 +37,16 @@ describe('strollGate', () => {
       strollGate({ physicsCapable: false, settingsOpen: false, strollEnabled: false }),
     ).toEqual({ runLoop: false, pushStrollMode: null });
   });
+
+  it('stops the loop and pushes disabled while the pet is away on an adventure', () => {
+    expect(
+      strollGate({ physicsCapable: true, settingsOpen: false, strollEnabled: true, away: true }),
+    ).toEqual({ runLoop: false, pushStrollMode: false });
+  });
+
+  it('stays silent for an away non-physics pet — nothing was running to stop', () => {
+    expect(
+      strollGate({ physicsCapable: false, settingsOpen: false, strollEnabled: true, away: true }),
+    ).toEqual({ runLoop: false, pushStrollMode: null });
+  });
 });
