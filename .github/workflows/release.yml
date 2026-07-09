@@ -74,6 +74,10 @@ jobs:
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Aptabase telemetry app key, baked in at compile time. Missing secret
+          # (e.g. forks) resolves to "" and the app builds with telemetry
+          # disabled entirely — see src-tauri/src/lib.rs.
+          APTABASE_APP_KEY: ${{ secrets.APTABASE_APP_KEY }}
           # macOS signing + notarization — uncomment once the Apple Developer
           # secrets exist (and add the keychain import step; docs/RELEASING.md):
           # APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}

@@ -154,6 +154,8 @@
     "voiceShortcutHint": "快捷键：Control + Shift + V 开始/停止。当前优先支持中文识别。",
     "musicReaction": "听歌互动",
     "musicReactionDesc": "当你播放音乐（Spotify、Apple Music、网易云、QQ音乐……）时，宠物会跟着进入听歌状态并冒一句话。仅读取系统的「正在播放」信息，不会获取音频内容。",
+    "telemetry": "匿名使用统计",
+    "telemetryDesc": "分享匿名的功能使用计数（启动、agent 任务、进餐）帮助改进 PawBae。绝不包含提示词、文件路径或任何个人信息。默认关闭。",
     "preparingDownload": "准备下载...",
     "downloadComplete": "下载完成",
     "exitFailed": "退出失败：",
@@ -165,7 +167,8 @@
     "chooseModeSubtitle": "你可以随时在设置中切换模式。",
     "codingModeLongDesc": "监控你的 AI Agent。悬停看板娘可查看状态、会话和活动。",
     "petModeLongDesc": "养成你的桌面宠物！喂食、互动，并通过丰富动画提升好感。",
-    "recommended": "推荐"
+    "recommended": "推荐",
+    "telemetryOptIn": "分享匿名使用统计，帮助改进 PawBae"
   },
   "agentBubble": {
     "waiting": "需要你看一眼",

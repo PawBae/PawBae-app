@@ -80,6 +80,19 @@
         <span class="toggle-thumb"></span>
       </button>
     </div>
+
+    <div class="setting-row">
+      <div class="setting-info">
+        <span class="setting-label">{$_('settings.telemetry')}</span>
+        <span class="setting-desc">{$_('settings.telemetryDesc')}</span>
+      </div>
+      <button class="toggle" class:on={settingsStore.telemetryEnabled}
+        onclick={() => settingsStore.setTelemetryEnabled(!settingsStore.telemetryEnabled)}
+        role="switch" aria-checked={settingsStore.telemetryEnabled}
+        aria-label={$_('settings.telemetry')}>
+        <span class="toggle-thumb"></span>
+      </button>
+    </div>
   </div>
 </section>
 

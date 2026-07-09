@@ -11,6 +11,7 @@
   import type { CodexPet } from '../utils/codex-pet';
   import { loadCodexPets, loadDefaultCodexPet } from '../utils/codex-pet';
   import { tryInvoke } from '../utils/invoke';
+  import { track } from '../utils/telemetry';
   import { classifyIntent } from '../utils/voice-intent';
   import MascotView from './MascotView.svelte';
   import Onboarding from './Onboarding.svelte';
@@ -202,6 +203,10 @@
       console.warn('[init] settings load failed:', e);
     }
 
+    // Retention heartbeat (installs / DAU / D1-D7-D30). No-op unless the user
+    // opted in; first-run users fire theirs from handleModeSelect post-consent.
+    if (settingsStore.appMode) track('app_started', { mode: settingsStore.appMode });
+
     try {
       const allPets = await loadCodexPets();
       const selectedId = settingsStore.miniPetId;
@@ -232,9 +237,13 @@
     }
   }
 
-  async function handleModeSelect(mode: AppMode) {
+  async function handleModeSelect(mode: AppMode, shareTelemetry: boolean) {
     showOnboarding = false;
     windowStore.setSettingsOpen(false);
+    if (shareTelemetry) {
+      await settingsStore.setTelemetryEnabled(true);
+      track('app_started', { mode });
+    }
     await settingsStore.setAppMode(mode);
     try {
       await invoke('set_mini_size', { restore: true, mascotScale: settingsStore.mascotScale });
