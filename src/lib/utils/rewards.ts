@@ -36,6 +36,7 @@ const COIN_SOURCES: readonly CoinSource[] = [
   'daily_gift',
   'task_board',
   'feed',
+  'egg',
 ];
 
 export interface FocusStreakState {
@@ -103,6 +104,7 @@ function zeroTotals(): Record<CoinSource, CoinSourceTotals> {
     daily_gift: zeroSourceTotals(),
     task_board: zeroSourceTotals(),
     feed: zeroSourceTotals(),
+    egg: zeroSourceTotals(),
   };
 }
 

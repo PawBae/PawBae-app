@@ -523,5 +523,19 @@
       "importFailed": "Import failed: {reason}",
       "unreadable": "Could not read the imported skin"
     }
+  },
+  "egg": {
+    "title": "Cloud Egg",
+    "buy": "Buy an egg",
+    "buyHint": "A calling card from a neighbor you haven't met — warm it with finished work and it will hatch.",
+    "allMet": "Every cloud neighbor has already moved in. New faces are on their way!",
+    "warmthHint": "Each finished agent task and each meal adds one wisp of warm steam.",
+    "ready": "Warm enough — tap to hatch!",
+    "hatchedSub": "A new neighbor moved in! Say hi in the gallery.",
+    "foundBubble": "She brought a cloud egg home!"
+  },
+  "dex": {
+    "metCount": "met {met}/{total}",
+    "lockedHint": "You haven't met this neighbor yet — hatch a cloud egg to invite them."
   }
 }

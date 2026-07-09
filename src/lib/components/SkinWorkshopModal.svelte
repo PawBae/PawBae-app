@@ -2,6 +2,7 @@
   import { invoke } from '@tauri-apps/api/core';
   import { untrack } from 'svelte';
   import { _, locale } from 'svelte-i18n';
+  import { petStore } from '../stores/pet.svelte';
   import { settingsStore } from '../stores/settings.svelte';
   import { type CustomSkinMeta, skinsStore } from '../stores/skins.svelte';
   import { type CodexPet, DEFAULT_PET_ID } from '../utils/codex-pet';
@@ -37,7 +38,29 @@
     prevOpen = open;
   });
 
+  // 物种图鉴: unmet builtin neighbors show as silhouettes and can't be picked —
+  // hatch an egg to invite them. Yoonie and customs (UGC 红线) are never gated.
+  function isLocked(skin: CodexPet): boolean {
+    return (
+      !skinsStore.customIds.has(skin.id) &&
+      skin.id !== DEFAULT_PET_ID &&
+      !petStore.metNeighbors.includes(skin.id)
+    );
+  }
+
+  const dexTotal = $derived(skinsStore.all.filter((s) => !skinsStore.customIds.has(s.id)).length);
+  const dexMet = $derived(dexTotal - petStore.unmetNeighborIds.length);
+
+  let shakeId = $state<string | null>(null);
+
   async function choose(skin: CodexPet) {
+    if (isLocked(skin)) {
+      shakeId = skin.id;
+      setTimeout(() => {
+        if (shakeId === skin.id) shakeId = null;
+      }, 450);
+      return;
+    }
     if (skin.id === settingsStore.miniPetId) return;
     await settingsStore.setMiniPetId(skin.id);
     // Builtin ids are a fixed vocabulary; custom ids are user content — never sent.
@@ -132,22 +155,27 @@
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <div class="modal" onclick={(e) => e.stopPropagation()}>
-      <h3 class="title">🎨 {$_('skin.title')}</h3>
+      <h3 class="title">
+        🎨 {$_('skin.title')}
+        <span class="dex-count">{$_('dex.metCount', { values: { met: dexMet, total: dexTotal } })}</span>
+      </h3>
 
       <div class="grid">
         {#each skinsStore.all as skin (skin.id)}
+          {@const locked = isLocked(skin)}
           <div class="tile-wrap">
             <button
               class="tile"
               class:active={skin.id === settingsStore.miniPetId}
+              class:shake={shakeId === skin.id}
               onclick={() => choose(skin)}
-              title={skin.description}
+              title={locked ? $_('dex.lockedHint') : skin.description}
             >
-              <div class="sprite-crop">
+              <div class="sprite-crop" class:silhouette={locked}>
                 <div style={tileFrameStyle(skin, 56)}></div>
               </div>
               <span class="tile-name">
-                {effectiveName(settingsStore.petNicknames[skin.id], skin.displayName)}
+                {locked ? '???' : effectiveName(settingsStore.petNicknames[skin.id], skin.displayName)}
               </span>
               {#if skinsStore.customIds.has(skin.id)}
                 <span class="badge">{$_('skin.customBadge')}</span>
@@ -291,6 +319,39 @@
     align-items: flex-end;
     justify-content: center;
     overflow: hidden;
+  }
+
+  /* 图鉴: unmet neighbors render as dark silhouettes (zero extra art). */
+  .sprite-crop.silhouette {
+    filter: brightness(0);
+    opacity: 0.45;
+  }
+
+  .dex-count {
+    margin-left: 6px;
+    color: rgba(255, 255, 255, 0.35);
+    font-size: 11px;
+    font-weight: 500;
+  }
+
+  .tile.shake {
+    animation: tileShake 0.4s ease;
+  }
+
+  @keyframes tileShake {
+    0%,
+    100% {
+      transform: translateX(0);
+    }
+    25% {
+      transform: translateX(-3px);
+    }
+    50% {
+      transform: translateX(3px);
+    }
+    75% {
+      transform: translateX(-2px);
+    }
   }
 
   .tile-name {
