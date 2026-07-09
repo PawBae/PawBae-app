@@ -143,13 +143,10 @@ pub(crate) fn register<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::
                 raw_path,
                 file_path.display()
             );
-            build_asset_response(
-                &req,
-                path.as_ref(),
-                &file_path,
-                cfg!(target_os = "windows"),
-                "localasset",
-            )
+            // CORS on every platform: the app origin (tauri://localhost in prod,
+            // the vite server in dev) is always cross-origin to a custom scheme,
+            // and WebKit enforces CORS on fetch() just like WebView2 does.
+            build_asset_response(&req, path.as_ref(), &file_path, true, "localasset")
         })
         .register_uri_scheme_protocol("codexpet", |_ctx, req| {
             // Custom codex pets the user dropped into `~/.codex/pets`.
@@ -162,12 +159,8 @@ pub(crate) fn register<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::
             }
             let root = codex_pets_dir().unwrap_or_default();
             let file_path = root.join(path.trim_start_matches('/'));
-            build_asset_response(
-                &req,
-                path.as_ref(),
-                &file_path,
-                cfg!(target_os = "windows"),
-                "codexpet",
-            )
+            // Same cross-origin story as localasset — the skin validator fetches
+            // pet.json from this scheme, which dies without the CORS header.
+            build_asset_response(&req, path.as_ref(), &file_path, true, "codexpet")
         })
 }
