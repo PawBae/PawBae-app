@@ -486,5 +486,41 @@
       "name": "瓶装极光",
       "flavor": "极光冬天路过云顶时留下的一绺，晚上会自己变颜色。"
     }
+  },
+  "skin": {
+    "title": "皮肤工坊",
+    "importFolder": "导入文件夹",
+    "importImage": "导入图片",
+    "openFolder": "打开皮肤文件夹",
+    "guide": "创作指南",
+    "customBadge": "自定义",
+    "remove": "删除",
+    "cancel": "取消",
+    "removeConfirm": "删除这个皮肤？",
+    "importOk": "皮肤已导入——她已经穿上啦 ✓",
+    "issueErrors": "导入失败：",
+    "issueWarnings": "小提醒：",
+    "issue": {
+      "notObject": "pet.json 不是合法的 JSON 对象",
+      "invalidId": "皮肤 id 不安全：{id}",
+      "unsafeSheetPath": "图集路径不安全：{path}",
+      "atlasField": "图集参数 {field} 必须是正整数",
+      "atlasWiderThanImage": "图集需要 {need}px 宽，图片只有 {have}px",
+      "atlasTallerThanImage": "图集需要 {need}px 高，图片只有 {have}px",
+      "atlasRemainder": "图片在 {axis} 方向未被整除（用到 {used}px / 共 {actual}px）",
+      "inheritedRowsExceedAtlas": "未声明动画时按标准 9 行 × 8 列布局，但图集只有 {rows} 行 × {cols} 列",
+      "missingIdle": "动画必须包含 idle 行",
+      "badAnimation": "动画 {name} 不是对象",
+      "rowOutOfRange": "{name}：行号 {row} 超出图集（共 {rows} 行）",
+      "badFrames": "{name}：帧数必须为正整数（当前 {frames}）",
+      "framesOverflow": "{name}：需要 {need} 列，图集只有 {cols} 列",
+      "highFps": "{name}：{fps} fps 过高",
+      "unknownAnimation": "未知动画名：{name}（可能拼写有误）",
+      "missingStandardRows": "缺少标准动画行：{rows}（会自动优雅回退）",
+      "unknownStateMapTarget": "stateMap 的 {state} 指向未声明的动画 {target}",
+      "hugeImage": "图片很大（{w}×{h}），可能影响性能",
+      "importFailed": "导入失败：{reason}",
+      "unreadable": "无法读取导入的皮肤"
+    }
   }
 }

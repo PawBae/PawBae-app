@@ -140,7 +140,7 @@ export const DEFAULT_PET_ID = 'yoonie';
 const BUILTIN_BASE = '/assets/builtin';
 const MANIFEST_URL = `${BUILTIN_BASE}/pets-manifest.json`;
 
-interface RawPetMeta {
+export interface RawPetMeta {
   id?: string;
   displayName?: string;
   description?: string;
@@ -161,7 +161,7 @@ interface PetsManifest {
 
 let cachedPets: Promise<CodexPet[]> | null = null;
 
-function resolvePet(meta: RawPetMeta, fallbackId: string, spritesheetUrl: string): CodexPet {
+export function resolvePet(meta: RawPetMeta, fallbackId: string, spritesheetUrl: string): CodexPet {
   const atlas: AtlasSpec = {
     cellW: meta.atlas?.cellW ?? DEFAULT_ATLAS.cellW,
     cellH: meta.atlas?.cellH ?? DEFAULT_ATLAS.cellH,

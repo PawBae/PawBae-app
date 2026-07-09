@@ -26,6 +26,19 @@ fn asset_mime_for_path(path: &str) -> &'static str {
     }
 }
 
+/// Both schemes resolve percent-decoded request paths against a fixed root, and
+/// custom skins are stranger-supplied content — refuse any `..` segment outright.
+fn has_traversal(path: &str) -> bool {
+    path.split(['/', '\\']).any(|seg| seg == "..")
+}
+
+fn forbidden() -> tauri::http::Response<Vec<u8>> {
+    tauri::http::Response::builder()
+        .status(403)
+        .body(Vec::new())
+        .unwrap()
+}
+
 fn build_asset_response(
     req: &tauri::http::Request<Vec<u8>>,
     path: &str,
@@ -117,6 +130,9 @@ pub(crate) fn register<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::
         .register_uri_scheme_protocol("localasset", |ctx, req| {
             let raw_path = req.uri().path();
             let path = percent_decode_str(raw_path).decode_utf8_lossy();
+            if has_traversal(&path) {
+                return forbidden();
+            }
             let resource_dir = ctx.app_handle().path().resource_dir().unwrap_or_default();
             let file_path = resource_dir
                 .join("assets")
@@ -141,6 +157,9 @@ pub(crate) fn register<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::
             // display sprites that live outside the bundled assets dir.
             let raw_path = req.uri().path();
             let path = percent_decode_str(raw_path).decode_utf8_lossy();
+            if has_traversal(&path) {
+                return forbidden();
+            }
             let root = codex_pets_dir().unwrap_or_default();
             let file_path = root.join(path.trim_start_matches('/'));
             build_asset_response(

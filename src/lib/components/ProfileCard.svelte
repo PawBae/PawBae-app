@@ -2,8 +2,8 @@
   import { _ } from 'svelte-i18n';
   import { petStore } from '../stores/pet.svelte';
   import { settingsStore } from '../stores/settings.svelte';
+  import { skinsStore } from '../stores/skins.svelte';
   import type { CodexPet } from '../utils/codex-pet';
-  import { loadCodexPets, loadDefaultCodexPet } from '../utils/codex-pet';
   import { effectiveName, NICKNAME_MAX } from '../utils/pet-name';
   import { track } from '../utils/telemetry';
   import SpritePet from './SpritePet.svelte';
@@ -13,16 +13,17 @@
   let pet = $state<CodexPet | null>(null);
   let draft = $state('');
 
-  // Self-contained like ShareCardModal: resolve the active pet on first open and
-  // whenever the user has switched pets since.
+  // Self-contained like ShareCardModal: resolve the active pet on open, and again
+  // when the workshop switches skins (id) or upgrades one in place (revision).
   $effect(() => {
     if (!open) return;
     const wanted = settingsStore.miniPetId;
-    if (pet && pet.id === wanted) return;
+    void skinsStore.revision;
     void (async () => {
-      const pets = await loadCodexPets();
-      pet = pets.find((p) => p.id === wanted) ?? (await loadDefaultCodexPet());
-      draft = pet ? (settingsStore.petNicknames[pet.id] ?? '') : '';
+      await skinsStore.ensureLoaded();
+      const next = skinsStore.resolve(wanted);
+      pet = next;
+      draft = next ? (settingsStore.petNicknames[next.id] ?? '') : '';
     })();
   });
 

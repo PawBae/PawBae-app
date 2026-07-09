@@ -7,8 +7,9 @@
   import { _ } from 'svelte-i18n';
   import { petStore } from '../stores/pet.svelte';
   import { settingsStore } from '../stores/settings.svelte';
+  import { skinsStore } from '../stores/skins.svelte';
   import type { ClaudeStats } from '../types';
-  import { animationFor, loadCodexPets, loadDefaultCodexPet } from '../utils/codex-pet';
+  import { animationFor } from '../utils/codex-pet';
   import { EVOLUTION_STAGES } from '../utils/evolution';
   import { tryInvoke } from '../utils/invoke';
   import { effectiveName } from '../utils/pet-name';
@@ -39,9 +40,8 @@
 
   async function loadSprite(): Promise<{ sprite: SpriteFrame | null; name: string }> {
     try {
-      const pets = await loadCodexPets();
-      const pet =
-        pets.find((p) => p.id === settingsStore.miniPetId) ?? (await loadDefaultCodexPet());
+      await skinsStore.ensureLoaded();
+      const pet = skinsStore.resolve(settingsStore.miniPetId);
       if (!pet) return { sprite: null, name: 'PawBae' };
       // The "together with __" line uses the name the user calls her (nickname
       // wins); the pawbae.ai watermark stays the brand.

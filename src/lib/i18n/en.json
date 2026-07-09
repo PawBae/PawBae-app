@@ -486,5 +486,41 @@
       "name": "Bottled aurora",
       "flavor": "A lock left behind when the aurora passed the cloud's roof. Changes color by itself at night."
     }
+  },
+  "skin": {
+    "title": "Skin Workshop",
+    "importFolder": "Import folder",
+    "importImage": "Import image",
+    "openFolder": "Open skins folder",
+    "guide": "Creator guide",
+    "customBadge": "custom",
+    "remove": "Remove",
+    "cancel": "Cancel",
+    "removeConfirm": "Remove this skin?",
+    "importOk": "Skin imported — she's wearing it now ✓",
+    "issueErrors": "Import failed:",
+    "issueWarnings": "Heads up:",
+    "issue": {
+      "notObject": "pet.json is not a JSON object",
+      "invalidId": "Unsafe skin id: {id}",
+      "unsafeSheetPath": "Unsafe spritesheet path: {path}",
+      "atlasField": "Atlas field {field} must be a positive integer",
+      "atlasWiderThanImage": "Atlas needs {need}px of width but the image has {have}px",
+      "atlasTallerThanImage": "Atlas needs {need}px of height but the image has {have}px",
+      "atlasRemainder": "Image is not evenly divided along {axis} ({used}px used of {actual}px)",
+      "inheritedRowsExceedAtlas": "No animations declared, so the standard 9-row × 8-column layout applies — but the atlas is only {rows} rows × {cols} columns",
+      "missingIdle": "animations must include an idle row",
+      "badAnimation": "Animation {name} is not an object",
+      "rowOutOfRange": "{name}: row {row} is outside the atlas ({rows} rows)",
+      "badFrames": "{name}: frames must be a positive integer (got {frames})",
+      "framesOverflow": "{name}: needs {need} columns but the atlas has {cols}",
+      "highFps": "{name}: {fps} fps is unusually high",
+      "unknownAnimation": "Unknown animation name: {name} (typo?)",
+      "missingStandardRows": "Missing standard rows: {rows} (they fall back gracefully)",
+      "unknownStateMapTarget": "stateMap {state} points to undeclared animation {target}",
+      "hugeImage": "Very large image ({w}×{h}) — may affect performance",
+      "importFailed": "Import failed: {reason}",
+      "unreadable": "Could not read the imported skin"
+    }
   }
 }

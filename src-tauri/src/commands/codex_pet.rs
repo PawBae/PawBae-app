@@ -20,6 +20,54 @@ pub struct CodexPetMeta {
 pub(crate) fn codex_pets_dir() -> Option<PathBuf> {
     dirs::home_dir().map(|h| h.join(".codex").join("pets"))
 }
+
+/// Skin ids double as folder names under `~/.codex/pets`, and skins are
+/// stranger-supplied content. Unicode is welcome (creators name skins in
+/// Chinese); separators, dot-tricks, drive colons, and control chars are not.
+/// Mirrors `isSafeSkinId` in `src/lib/utils/skin-validate.ts`.
+pub(crate) fn is_safe_skin_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.chars().count() <= 64
+        && !id.starts_with('.')
+        && !id.contains("..")
+        && !id
+            .chars()
+            .any(|c| c == '/' || c == '\\' || c == ':' || c.is_control())
+}
+
+/// Fold an image filename stem into a safe skin id: separators/whitespace
+/// collapse to dashes, unicode survives. Falls back to a deterministic hash id
+/// when nothing safe remains.
+fn slug_skin_id(stem: &str) -> String {
+    let mut out = String::new();
+    let mut last_dash = true; // suppress leading dashes
+    for ch in stem.chars() {
+        let dashy = ch == '/' || ch == '\\' || ch == ':' || ch.is_control() || ch.is_whitespace();
+        if dashy {
+            if !last_dash {
+                out.push('-');
+            }
+            last_dash = true;
+        } else {
+            out.push(ch);
+            last_dash = false;
+        }
+    }
+    let trimmed: String = out
+        .trim_matches(|c| c == '-' || c == '.')
+        .chars()
+        .take(48)
+        .collect();
+    if is_safe_skin_id(&trimmed) {
+        return trimmed;
+    }
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in stem.as_bytes() {
+        h ^= u64::from(*b);
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    format!("skin-{:08x}", (h & 0xffff_ffff) as u32)
+}
 /// List custom codex pets the user has dropped into `~/.codex/pets`. Each
 /// pet folder must contain a `pet.json` metadata file plus a spritesheet
 /// (.webp/.png/.jpg). Missing pieces are skipped silently.
@@ -189,6 +237,9 @@ pub async fn import_codex_pet(src_path: String) -> Result<CodexPetMeta, String> 
                 .map(|n| n.to_string_lossy().to_string())
                 .unwrap_or_else(|| "pet".into())
         });
+    if !is_safe_skin_id(&id) {
+        return Err(format!("unsafe pet id: {id:?}"));
+    }
     let Some(root) = codex_pets_dir() else {
         return Err("home directory not found".into());
     };
@@ -251,6 +302,103 @@ fn codex_asset_url(abs: &std::path::Path) -> String {
     };
     format!("{}/{}", prefix, parts.join("/"))
 }
+const SKIN_IMAGE_EXTS: [&str; 5] = ["png", "webp", "jpg", "jpeg", "gif"];
+
+/// Native file picker for the single-image skin import ("宽进"). Same
+/// parent-window + floating-reassert dance as `pick_codex_pet_folder`.
+#[tauri::command]
+pub async fn pick_skin_image(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    use tauri::Manager;
+    use tauri_plugin_dialog::DialogExt;
+
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let mut builder = app
+        .dialog()
+        .file()
+        .set_title("选择皮肤图片")
+        .add_filter("Image", &SKIN_IMAGE_EXTS);
+    if let Some(win) = app.get_webview_window("main") {
+        builder = builder.set_parent(&win);
+    }
+    builder.pick_file(move |path| {
+        let _ = tx.send(path);
+    });
+    let picked = rx.await.map_err(|e| e.to_string())?;
+    let result = picked
+        .and_then(|p| p.into_path().ok())
+        .map(|p| p.to_string_lossy().into_owned());
+    crate::pet_core::reassert_mini_floating(&app);
+    Ok(result)
+}
+
+/// Wrap a single still image into a full skin folder: whole image = a 1×1 atlas
+/// with a 1-frame `idle` row; every other animation falls back gracefully at
+/// runtime. This is the lowest rung of the "宽进严出" creator funnel.
+#[tauri::command]
+pub async fn import_skin_image(src_path: String) -> Result<CodexPetMeta, String> {
+    let src = PathBuf::from(&src_path);
+    if !src.is_file() {
+        return Err(format!("not a file: {}", src_path));
+    }
+    let ext = src
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())
+        .unwrap_or_default();
+    if !SKIN_IMAGE_EXTS.contains(&ext.as_str()) {
+        return Err(format!("unsupported image type: .{ext}"));
+    }
+    let dim = imagesize::size(&src).map_err(|e| format!("cannot read image size: {e}"))?;
+    let stem = src
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| "skin".into());
+    let id = slug_skin_id(&stem);
+    let Some(root) = codex_pets_dir() else {
+        return Err("home directory not found".into());
+    };
+    let dst = root.join(&id);
+    if dst.exists() {
+        let _ = std::fs::remove_dir_all(&dst);
+    }
+    std::fs::create_dir_all(&dst).map_err(|e| e.to_string())?;
+    let sheet_name = format!("spritesheet.{ext}");
+    std::fs::copy(&src, dst.join(&sheet_name)).map_err(|e| e.to_string())?;
+    let manifest = serde_json::json!({
+        "id": id.clone(),
+        "displayName": stem.clone(),
+        "description": "",
+        "spritesheetPath": sheet_name.clone(),
+        "atlas": { "cellW": dim.width, "cellH": dim.height, "cols": 1, "rows": 1 },
+        "animations": { "idle": { "row": 0, "frames": 1 } },
+    });
+    let pretty = serde_json::to_string_pretty(&manifest).map_err(|e| e.to_string())?;
+    std::fs::write(dst.join("pet.json"), pretty).map_err(|e| e.to_string())?;
+    Ok(CodexPetMeta {
+        id,
+        display_name: stem,
+        description: String::new(),
+        spritesheet_url: codex_asset_url(&dst.join(&sheet_name)),
+    })
+}
+
+/// Delete a custom skin folder. The id is sanitized so a hostile value can't
+/// escape `~/.codex/pets` (defense in depth with the TS validator).
+#[tauri::command]
+pub async fn remove_custom_skin(id: String) -> Result<(), String> {
+    if !is_safe_skin_id(&id) {
+        return Err(format!("unsafe skin id: {id:?}"));
+    }
+    let Some(root) = codex_pets_dir() else {
+        return Err("home directory not found".into());
+    };
+    let dst = root.join(&id);
+    if dst.exists() {
+        std::fs::remove_dir_all(&dst).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> Result<(), String> {
     std::fs::create_dir_all(dst).map_err(|e| e.to_string())?;
     for entry in std::fs::read_dir(src).map_err(|e| e.to_string())? {
@@ -264,4 +412,39 @@ fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> Result<()
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{is_safe_skin_id, slug_skin_id};
+
+    #[test]
+    fn safe_ids_accept_plain_and_unicode() {
+        assert!(is_safe_skin_id("mimi-2"));
+        assert!(is_safe_skin_id("doro.codex-pet"));
+        assert!(is_safe_skin_id("云朵小猫"));
+    }
+
+    #[test]
+    fn safe_ids_reject_traversal_shapes() {
+        for bad in ["", "..", "../evil", "a/b", "a\\b", "C:evil", ".hidden"] {
+            assert!(!is_safe_skin_id(bad), "should reject {bad:?}");
+        }
+    }
+
+    #[test]
+    fn slug_folds_separators_and_keeps_unicode() {
+        assert_eq!(slug_skin_id("My Cool Cat"), "My-Cool-Cat");
+        assert_eq!(slug_skin_id("云朵 小猫"), "云朵-小猫");
+        assert_eq!(slug_skin_id("a/b:c"), "a-b-c");
+    }
+
+    #[test]
+    fn slug_falls_back_to_deterministic_hash() {
+        let a = slug_skin_id("...");
+        let b = slug_skin_id("...");
+        assert_eq!(a, b);
+        assert!(a.starts_with("skin-"));
+        assert!(is_safe_skin_id(&a));
+    }
 }
