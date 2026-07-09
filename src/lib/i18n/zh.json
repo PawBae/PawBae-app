@@ -537,5 +537,43 @@
   "dex": {
     "metCount": "已认识 {met}/{total}",
     "lockedHint": "还没认识这位邻居——孵一颗云蛋把 TA 请来吧。"
+  },
+  "diary": {
+    "title": "日记本",
+    "open": "日记",
+    "empty": "日记本还空着——一起去干点活吧！",
+    "today": "今天",
+    "yesterday": "昨天",
+    "dateLabel": "{m}月{d}日",
+    "joiner": "",
+    "sep": "，",
+    "end": "。",
+    "opener": {
+      "v0": "今天我们",
+      "v1": "记一笔：今天我们",
+      "v2": "又是并肩干活的一天——我们"
+    },
+    "seg": {
+      "tasks": "完工 {n} 次",
+      "meals": "吃了 {n} 顿",
+      "coins": "攒下 {n} 枚金币"
+    },
+    "m": {
+      "adopted": "我们第一次见面的日子。你好呀，是我！",
+      "evolution": "我长成{stage}啦！",
+      "achievement": "解锁了成就「{name}」！",
+      "perfectDay": "全勤日——今天的小事一件没落。",
+      "souvenir": "带回了一件宝贝：{name}。",
+      "eggFound": "冒险路上捡到一颗云蛋！",
+      "eggHatched": "蛋破壳了——欢迎回家，{name}！",
+      "dexCompleted": "云上的邻居，我们都认识啦。"
+    }
+  },
+  "greet": {
+    "morning": "早安！今天也请多指教。",
+    "day": "午安！看到你真好。",
+    "evening": "晚上好！今天辛苦啦。",
+    "night": "这么晚还在忙呀，我陪着你。",
+    "yesterday": "昨天我们完工 {n} 次！"
   }
 }

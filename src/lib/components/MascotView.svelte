@@ -445,6 +445,15 @@
     return () => clearInterval(tick);
   });
 
+  // 宠物日记: daily greeting check. Idempotent per local calendar day (the store
+  // gates on last_greet_date and hydration), so ticking freely is safe; the 30s
+  // cadence also catches an app left open across midnight.
+  $effect(() => {
+    petStore.greetDailyCheck();
+    const tick = setInterval(() => petStore.greetDailyCheck(), 30_000);
+    return () => clearInterval(tick);
+  });
+
   // DEV-only demo: force the away visual for a few seconds, then play a souvenir
   // celebration — the 3-minute trip is real-tested with a real agent task, but the
   // depart/marker/return chain shouldn't need one. Celebrations are ephemeral (never

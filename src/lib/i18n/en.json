@@ -537,5 +537,43 @@
   "dex": {
     "metCount": "met {met}/{total}",
     "lockedHint": "You haven't met this neighbor yet — hatch a cloud egg to invite them."
+  },
+  "diary": {
+    "title": "Diary",
+    "open": "Diary",
+    "empty": "The diary is still empty — let's get something done together!",
+    "today": "today",
+    "yesterday": "yesterday",
+    "dateLabel": "{m}/{d}",
+    "joiner": " ",
+    "sep": ", ",
+    "end": ".",
+    "opener": {
+      "v0": "Today we",
+      "v1": "Dear diary — today we",
+      "v2": "Another day side by side: we"
+    },
+    "seg": {
+      "tasks": "{n, plural, one {finished # task} other {finished # tasks}}",
+      "meals": "{n, plural, one {shared # meal} other {shared # meals}}",
+      "coins": "{n, plural, one {tucked away # coin} other {tucked away # coins}}"
+    },
+    "m": {
+      "adopted": "The day we first met. Hi, it's me!",
+      "evolution": "I grew into a {stage}!",
+      "achievement": "We unlocked \"{name}\"!",
+      "perfectDay": "A perfect day — every little task done.",
+      "souvenir": "I brought home a real treasure: {name}.",
+      "eggFound": "Found a cloud egg on my adventure!",
+      "eggHatched": "The egg hatched — welcome home, {name}!",
+      "dexCompleted": "We've now met every neighbor on the cloud."
+    }
+  },
+  "greet": {
+    "morning": "Good morning! Ready when you are.",
+    "day": "Good afternoon! Nice to see you.",
+    "evening": "Good evening! You made it through the day.",
+    "night": "Up this late? I'll keep you company.",
+    "yesterday": "{n, plural, one {We finished # task yesterday!} other {We finished # tasks yesterday!}}"
   }
 }

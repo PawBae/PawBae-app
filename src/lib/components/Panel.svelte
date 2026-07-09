@@ -15,6 +15,7 @@
   import { FEED_COST_COINS } from '../utils/rewards';
   import { tileFrameStyle } from '../utils/skins';
   import { SOUVENIR_CATALOG, type SouvenirDef, type SouvenirOwned } from '../utils/souvenirs';
+  import DiaryModal from './DiaryModal.svelte';
   import ProfileCard from './ProfileCard.svelte';
   import ShareCardModal from './ShareCardModal.svelte';
   import SkinWorkshopModal from './SkinWorkshopModal.svelte';
@@ -52,6 +53,7 @@
   let shareOpen = $state(false);
   let profileOpen = $state(false);
   let skinOpen = $state(false);
+  let diaryOpen = $state(false);
 
   // 孵蛋: the freshly hatched neighbor's reveal card (session-ephemeral — the dex
   // itself persists in petStore.metNeighbors).
@@ -208,10 +210,14 @@
             <button class="action-btn" onclick={() => (shareOpen = true)}>
               📸 {$_('share.button')}
             </button>
+            <button class="action-btn" onclick={() => (diaryOpen = true)}>
+              📖 {$_('diary.open')}
+            </button>
           </div>
 
           <ShareCardModal open={shareOpen} onclose={() => (shareOpen = false)} />
           <ProfileCard open={profileOpen} onclose={() => (profileOpen = false)} />
+          <DiaryModal open={diaryOpen} onclose={() => (diaryOpen = false)} />
 
           <div class="board-section">
             <div class="board-title">

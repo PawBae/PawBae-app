@@ -26,6 +26,7 @@
       ? (SOUVENIR_CATALOG.find((d) => d.id === celebration.id) ?? null)
       : null,
   );
+  const GREETING_EMOJI = { morning: '🌅', day: '☀️', evening: '🌆', night: '🌙' } as const;
 </script>
 
 {#if stage}
@@ -70,6 +71,16 @@
     <div class="bubble-wrap {placement}">
       <div class="bubble">
         🥚 {$_('egg.foundBubble')}
+      </div>
+    </div>
+  {/key}
+{:else if celebration?.kind === 'greeting'}
+  {#key celebration}
+    <div class="bubble-wrap {placement}">
+      <div class="bubble greeting">
+        {GREETING_EMOJI[celebration.part]}
+        {$_(`greet.${celebration.part}`)}{#if celebration.tasks > 0}
+          {' '}{$_('greet.yesterday', { values: { n: celebration.tasks } })}{/if}
       </div>
     </div>
   {/key}
@@ -131,6 +142,14 @@
     background: linear-gradient(135deg, #f5a623, #f7ce4d);
     color: #1a1a20;
     border: none;
+  }
+
+  /* Greetings run longer than one-liner celebrations — let them wrap instead of
+     ellipsizing mid-sentence. Still a pure decoration layer (no pointer events). */
+  .bubble.greeting {
+    white-space: normal;
+    text-align: center;
+    line-height: 1.5;
   }
 
   @keyframes evoFlash {

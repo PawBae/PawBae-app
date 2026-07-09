@@ -126,13 +126,15 @@ export interface PetData {
 
 // A queued growth moment the mascot celebrates (evolution flash / achievement toast /
 // full task board). Newest-last; MascotView displays the head and shifts it after the
-// show beat.
+// show beat. The daily greeting rides the same queue: `tasks` is yesterday's completed
+// agent tasks (0 suppresses the summary line) so the bubble never reads back into the store.
 export type GrowthCelebration =
   | { kind: 'evolution'; stageIndex: number }
   | { kind: 'achievement'; id: string }
   | { kind: 'perfect_day' }
   | { kind: 'souvenir'; id: string }
-  | { kind: 'egg_found' };
+  | { kind: 'egg_found' }
+  | { kind: 'greeting'; part: import('./utils/circadian').DayPart; tasks: number };
 
 export interface PomodoroState {
   active: boolean;
