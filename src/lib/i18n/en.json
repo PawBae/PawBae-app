@@ -383,5 +383,108 @@
     "species": "Cloud-eared creature · from the cloud where the agents work",
     "short": "Born in the cloud where the agents work. Her cloud ears hear every task finish; the scent of done work is her dinner. Clouds never scold anyone.",
     "tagline": "She slid down from the cloud where the agents work — and landed on your desktop."
+  },
+  "adventure": {
+    "awayNote": "adventuring…",
+    "shelfTitle": "Souvenir Shelf",
+    "shelfHint": "When a task runs long she packs her little bag and heads back up to the cloud — she never comes home empty-pawed."
+  },
+  "souvenir": {
+    "cloud_fluff": {
+      "name": "A pinch of cloud fluff",
+      "flavor": "Great for napping on. Slightly sneezy."
+    },
+    "ding_echo": {
+      "name": "An echo of a ding",
+      "flavor": "Carried home in her ear; shake it for half a ring."
+    },
+    "rounded_pebble": {
+      "name": "A cloud-polished pebble",
+      "flavor": "Rolled around up there for years; round beyond all argument."
+    },
+    "steam_candy": {
+      "name": "A steam gumdrop",
+      "flavor": "Condensed from the scent of finished work; filling to smell, impossible to eat."
+    },
+    "mist_ribbon": {
+      "name": "A ribbon of mist",
+      "flavor": "Refuses to hold a knot. Floats beautifully though."
+    },
+    "star_crumbs": {
+      "name": "Star crumbs",
+      "flavor": "Swept up by the cloud folk, who insisted they were worthless. She took a handful anyway."
+    },
+    "rain_seed": {
+      "name": "A rain seed",
+      "flavor": "Won't actually grow rain in a flowerpot. She wants to try anyway."
+    },
+    "stray_feather": {
+      "name": "Somebody's feather",
+      "flavor": "There are no birds on the cloud, which makes this one highly discussable."
+    },
+    "tiny_ladder": {
+      "name": "A miniature cloud ladder",
+      "flavor": "Three rungs: enough for something very small to climb something very low."
+    },
+    "washed_note": {
+      "name": "An old note",
+      "flavor": "The rain washed the words away. She insists they were kind ones."
+    },
+    "wind_knot": {
+      "name": "A knot tied by the wind",
+      "flavor": "Undo it and it's gone. So it must never be undone."
+    },
+    "warm_button": {
+      "name": "A sun-warmed button",
+      "flavor": "Owner unknown. Stays warm in the paw regardless."
+    },
+    "rain_smell_jar": {
+      "name": "The smell of before-the-rain",
+      "flavor": "Bottled. One sniff, ever — save it for a hard day."
+    },
+    "moon_shaving": {
+      "name": "A moon shaving",
+      "flavor": "The part the moon loses each month. Cost her three dings."
+    },
+    "dud_thunder": {
+      "name": "A little thunder that never went off",
+      "flavor": "A dud. Hums softly when hugged, like a snore."
+    },
+    "cloud_bell": {
+      "name": "A cloud bell",
+      "flavor": "Only rings when nobody's listening — so no one can prove it doesn't."
+    },
+    "fog_marble": {
+      "name": "A fog-core marble",
+      "flavor": "A wisp of fog curled inside; spins on its own before the weather turns."
+    },
+    "sky_postcard": {
+      "name": "A postcard the sky mailed to itself",
+      "flavor": "Sender and recipient: both \"the sky.\" The stamp is a scrap of sunset."
+    },
+    "dream_cotton": {
+      "name": "Dream cotton",
+      "flavor": "Gently picked from a sleeping cloud. One extra dream per pillow, allegedly."
+    },
+    "ding_whistle": {
+      "name": "A whistle that dings",
+      "flavor": "Plays dings instead of whistles. A favorite among the cloud's workaholics."
+    },
+    "whole_kiwi": {
+      "name": "An entire kiwi",
+      "flavor": "The cloud folk agree: the longest-sleeping, best-fuzzed cloud of all. Nobody dared touch it on the way home."
+    },
+    "first_ding": {
+      "name": "The world's first ding",
+      "flavor": "Sealed in a small amber lamp. Every ding since is one of its children."
+    },
+    "cloud_key": {
+      "name": "The key to the cloud",
+      "flavor": "Opens nothing — clouds have no doors. But carry it, and anywhere counts as home."
+    },
+    "bottled_aurora": {
+      "name": "Bottled aurora",
+      "flavor": "A lock left behind when the aurora passed the cloud's roof. Changes color by itself at night."
+    }
   }
 }

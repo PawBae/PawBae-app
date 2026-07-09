@@ -10,6 +10,7 @@
   import { BOARD_TASKS } from '../utils/daily-board';
   import { effectiveName } from '../utils/pet-name';
   import { FEED_COST_COINS } from '../utils/rewards';
+  import { SOUVENIR_CATALOG, type SouvenirDef, type SouvenirOwned } from '../utils/souvenirs';
   import ProfileCard from './ProfileCard.svelte';
   import ShareCardModal from './ShareCardModal.svelte';
 
@@ -29,6 +30,18 @@
   function achievementTitle(id: string, locked: boolean, secret: boolean | undefined): string {
     if (locked && secret) return '???';
     return `${$_(`growth.ach.${id}`)} — ${$_(`growth.achDesc.${id}`)}`;
+  }
+
+  const souvenirCount = $derived(
+    SOUVENIR_CATALOG.filter((d) => petStore.souvenirs[d.id] !== undefined).length,
+  );
+
+  // Unfound souvenirs stay a full mystery (no emoji, no name) — the surprise IS the
+  // collectible, unlike achievements whose goal being visible is the point.
+  function souvenirTitle(def: SouvenirDef, owned: SouvenirOwned | undefined): string {
+    if (!owned) return '???';
+    const base = `${$_(`souvenir.${def.id}.name`)} — ${$_(`souvenir.${def.id}.flavor`)}`;
+    return owned.count > 1 ? `${base} (×${owned.count})` : base;
   }
 
   let shareOpen = $state(false);
@@ -202,6 +215,31 @@
                 </div>
               {/each}
             </div>
+          </div>
+
+          <div class="ach-section">
+            <div class="ach-title">
+              🎒 {$_('adventure.shelfTitle')}
+              <span class="ach-count">{souvenirCount}/{SOUVENIR_CATALOG.length}</span>
+            </div>
+            <div class="ach-grid">
+              {#each SOUVENIR_CATALOG as def (def.id)}
+                {@const owned = petStore.souvenirs[def.id]}
+                <div
+                  class="ach-tile souvenir-tile rarity-{def.rarity}"
+                  class:locked={!owned}
+                  title={souvenirTitle(def, owned)}
+                >
+                  {owned ? def.emoji : '❓'}
+                  {#if owned && owned.count > 1}
+                    <span class="tile-count">×{owned.count}</span>
+                  {/if}
+                </div>
+              {/each}
+            </div>
+            {#if souvenirCount === 0}
+              <p class="shelf-hint">{$_('adventure.shelfHint')}</p>
+            {/if}
           </div>
         </div>
       {/if}
@@ -542,5 +580,43 @@
     border-color: rgba(255, 255, 255, 0.06);
     filter: grayscale(1);
     opacity: 0.45;
+  }
+
+  /* Souvenir shelf: rarity tints the tile; a ×N badge marks repeat finds. */
+  .souvenir-tile {
+    position: relative;
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(255, 255, 255, 0.12);
+  }
+
+  .souvenir-tile.rarity-rare:not(.locked) {
+    background: rgba(100, 149, 237, 0.14);
+    border-color: rgba(100, 149, 237, 0.45);
+  }
+
+  .souvenir-tile.rarity-legendary:not(.locked) {
+    background: rgba(245, 166, 35, 0.16);
+    border-color: rgba(247, 206, 77, 0.6);
+  }
+
+  .tile-count {
+    position: absolute;
+    right: -2px;
+    bottom: -2px;
+    font-size: 8px;
+    font-weight: 700;
+    line-height: 1;
+    color: rgba(255, 255, 255, 0.85);
+    background: rgba(26, 26, 32, 0.9);
+    border-radius: 5px;
+    padding: 1px 3px;
+  }
+
+  .shelf-hint {
+    margin: 8px 0 0;
+    color: rgba(255, 255, 255, 0.35);
+    font-size: 10px;
+    line-height: 1.5;
+    text-align: left;
   }
 </style>

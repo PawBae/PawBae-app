@@ -3,6 +3,7 @@
   import type { GrowthCelebration } from '../types';
   import { ACHIEVEMENTS } from '../utils/achievements';
   import { EVOLUTION_STAGES } from '../utils/evolution';
+  import { SOUVENIR_CATALOG } from '../utils/souvenirs';
 
   interface CelebrationBubbleProps {
     celebration: GrowthCelebration | null;
@@ -18,6 +19,11 @@
   const achievement = $derived(
     celebration?.kind === 'achievement'
       ? (ACHIEVEMENTS.find((d) => d.id === celebration.id) ?? null)
+      : null,
+  );
+  const souvenir = $derived(
+    celebration?.kind === 'souvenir'
+      ? (SOUVENIR_CATALOG.find((d) => d.id === celebration.id) ?? null)
       : null,
   );
 </script>
@@ -47,6 +53,15 @@
     <div class="bubble-wrap {placement}">
       <div class="bubble">
         🎉 {$_('board.perfectDay')}
+      </div>
+    </div>
+  {/key}
+{:else if souvenir}
+  {#key celebration}
+    <div class="bubble-wrap {placement}">
+      <div class="bubble">
+        🎁 {souvenir.emoji}
+        {$_(`souvenir.${souvenir.id}.name`)}
       </div>
     </div>
   {/key}
