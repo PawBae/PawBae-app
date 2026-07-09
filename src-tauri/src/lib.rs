@@ -49,6 +49,16 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build());
+    // Anonymous opt-in telemetry (Aptabase). The app key is baked in at compile
+    // time; keyless builds (local dev) skip registration and the frontend track()
+    // wrapper swallows the missing-plugin error. The plugin never auto-sends —
+    // every event goes through the opt-in gate in utils/telemetry.ts.
+    let builder = match option_env!("APTABASE_APP_KEY") {
+        Some(key) if !key.is_empty() => {
+            builder.plugin(tauri_plugin_aptabase::Builder::new(key).build())
+        }
+        _ => builder,
+    };
     asset::register(builder)
         .setup(setup::init)
         .invoke_handler(tauri::generate_handler![

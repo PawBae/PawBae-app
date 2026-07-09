@@ -37,6 +37,7 @@ import {
   sanitizeStoredCount,
   snapshotRewardState,
 } from '../utils/rewards';
+import { track } from '../utils/telemetry';
 import {
   initialTokenFeedState,
   nutritionOf,
@@ -178,6 +179,7 @@ class PetStore {
    * nibbles).
    */
   applyTokenMeal(meal: TokenMeal) {
+    track('meal_fed', { tier: meal.tier });
     this.consumeMeal(meal.restore);
   }
 
@@ -208,6 +210,7 @@ class PetStore {
     const today = todayStr();
     const count = this.petData.approvalDate === today ? this.petData.approvalToday : 0;
     const award = approvalAwardFor(waitedMs, count);
+    track('approval_response', { awarded: award });
     if (award === 0) return false;
     this.petData = {
       ...this.petData,
@@ -421,7 +424,10 @@ class PetStore {
       }),
     );
     // Token feeding loop: a genuine completion (not a permission wait) may earn a meal.
-    if (!payload.waiting) void this.settleTokenFeed(payload.source);
+    if (!payload.waiting) {
+      track('agent_task_complete', { source: payload.source });
+      void this.settleTokenFeed(payload.source);
+    }
   }
 
   /**

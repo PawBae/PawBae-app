@@ -7,7 +7,7 @@
 
   interface OnboardingProps {
     open?: boolean;
-    onSelect: (mode: AppMode) => void;
+    onSelect: (mode: AppMode, shareTelemetry: boolean) => void;
   }
 
   let {
@@ -16,6 +16,9 @@
   }: OnboardingProps = $props();
 
   let previewPet = $state<CodexPet | null>(null);
+  // Genuine opt-in: starts unchecked. This is the one natural moment to ask —
+  // Settings → Privacy carries the same toggle afterwards.
+  let shareTelemetry = $state(false);
 
   $effect(() => {
     if (open && !previewPet) {
@@ -33,7 +36,7 @@
       <div class="cards">
         <!-- svelte-ignore a11y_click_events_have_key_events -->
         <!-- svelte-ignore a11y_no_static_element_interactions -->
-        <div class="card coding" onclick={() => onSelect('coding')}>
+        <div class="card coding" onclick={() => onSelect('coding', shareTelemetry)}>
           <div class="preview">
             {#if previewPet}
               <SpritePet pet={previewPet} state="running" size={64} />
@@ -46,7 +49,7 @@
 
         <!-- svelte-ignore a11y_click_events_have_key_events -->
         <!-- svelte-ignore a11y_no_static_element_interactions -->
-        <div class="card pet" onclick={() => onSelect('pet')}>
+        <div class="card pet" onclick={() => onSelect('pet', shareTelemetry)}>
           <div class="preview">
             {#if previewPet}
               <SpritePet pet={previewPet} state="idle" size={64} />
@@ -56,6 +59,11 @@
           <p>{$_('onboarding.petModeLongDesc')}</p>
         </div>
       </div>
+
+      <label class="telemetry-optin">
+        <input type="checkbox" bind:checked={shareTelemetry} />
+        <span>{$_('onboarding.telemetryOptIn')}</span>
+      </label>
     </div>
   </div>
 {/if}
@@ -153,5 +161,21 @@
     font-size: 11px;
     margin: 0;
     line-height: 1.4;
+  }
+
+  .telemetry-optin {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    margin-top: 16px;
+    color: rgba(255, 255, 255, 0.45);
+    font-size: 11px;
+    cursor: pointer;
+  }
+
+  .telemetry-optin input {
+    accent-color: #6495ed;
+    cursor: pointer;
   }
 </style>

@@ -26,6 +26,9 @@ class SettingsStore {
   petQueue = $state.raw<string[]>([]);
   skippedVersion = $state('');
   inputTrackingEnabled = $state(true);
+  // Anonymous usage telemetry is OPT-IN: default off, and utils/telemetry.ts
+  // gates every event on this flag.
+  telemetryEnabled = $state(false);
   voiceEnabled = $state(false);
   musicReactionEnabled = $state(true);
   ocConnections = $state.raw<OcConnection[]>([{ id: 'local', type: 'local' }]);
@@ -66,6 +69,7 @@ class SettingsStore {
     this.petQueue = ((await store.get('pet_queue')) as string[]) || [];
     this.skippedVersion = ((await store.get('skipped_version')) as string) || '';
     this.inputTrackingEnabled = ((await store.get('input_tracking_enabled')) as boolean) ?? true;
+    this.telemetryEnabled = ((await store.get('telemetry_enabled')) as boolean) ?? false;
     this.voiceEnabled = ((await store.get('voice_enabled')) as boolean) ?? false;
     this.musicReactionEnabled = ((await store.get('music_reaction_enabled')) as boolean) ?? true;
     this.ocConnections = ((await store.get('oc_connections')) as OcConnection[]) || [
@@ -197,6 +201,11 @@ class SettingsStore {
   async setInputTrackingEnabled(v: boolean) {
     this.inputTrackingEnabled = v;
     await this.saveSetting('input_tracking_enabled', v);
+  }
+
+  async setTelemetryEnabled(v: boolean) {
+    this.telemetryEnabled = v;
+    await this.saveSetting('telemetry_enabled', v);
   }
 
   async setVoiceEnabled(v: boolean) {

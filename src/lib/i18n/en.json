@@ -154,6 +154,8 @@
     "voiceShortcutHint": "Shortcut: Control + Shift + V to start/stop. Chinese recognition is supported first.",
     "musicReaction": "Music Reaction",
     "musicReactionDesc": "When you play music (Spotify, Apple Music, NetEase, QQ Music…), the pet vibes along and says a line. Detection uses the system's now-playing info only — never the audio itself.",
+    "telemetry": "Anonymous Usage Stats",
+    "telemetryDesc": "Share anonymous feature counts (app starts, agent tasks, meals) to help improve PawBae. Never includes prompts, file paths, or anything personal. Off by default.",
     "preparingDownload": "Preparing download...",
     "downloadComplete": "Download complete",
     "exitFailed": "Exit failed: ",
@@ -165,7 +167,8 @@
     "chooseModeSubtitle": "You can switch between modes at any time in Settings.",
     "codingModeLongDesc": "Monitor your AI agents. Hover the mascot to see agent status, sessions, and activity.",
     "petModeLongDesc": "Raise your desktop pet! Feed, play, and build affection with rich animations.",
-    "recommended": "Recommended"
+    "recommended": "Recommended",
+    "telemetryOptIn": "Share anonymous usage stats to help improve PawBae"
   },
   "agentBubble": {
     "waiting": "Needs your eyes",

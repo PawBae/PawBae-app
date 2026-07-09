@@ -15,6 +15,7 @@
     "core:window:allow-outer-position",
     "core:window:allow-scale-factor",
     "store:default",
-    "global-shortcut:default"
+    "global-shortcut:default",
+    "aptabase:allow-track-event"
   ]
 }
