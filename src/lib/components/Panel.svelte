@@ -6,8 +6,11 @@
   import { settingsStore } from '../stores/settings.svelte';
   import { windowStore } from '../stores/window.svelte';
   import { ACHIEVEMENTS } from '../utils/achievements';
+  import { loadCodexPets, loadDefaultCodexPet } from '../utils/codex-pet';
   import { BOARD_TASKS } from '../utils/daily-board';
+  import { effectiveName } from '../utils/pet-name';
   import { FEED_COST_COINS } from '../utils/rewards';
+  import ProfileCard from './ProfileCard.svelte';
   import ShareCardModal from './ShareCardModal.svelte';
 
   let {
@@ -29,6 +32,22 @@
   }
 
   let shareOpen = $state(false);
+  let profileOpen = $state(false);
+
+  // Official name of the active pet (sprite-pack displayName). The async write
+  // lands after the await — untracked, so no effect self-retrigger.
+  let officialName = $state('PawBae');
+  $effect(() => {
+    if (settingsStore.appMode === 'coding') return;
+    const wanted = settingsStore.miniPetId;
+    void loadCodexPets().then(async (pets) => {
+      const p = pets.find((x) => x.id === wanted) ?? (await loadDefaultCodexPet());
+      officialName = p?.displayName ?? 'PawBae';
+    });
+  });
+  const petName = $derived(
+    effectiveName(settingsStore.petNicknames[settingsStore.miniPetId], officialName),
+  );
 </script>
 
 {#if windowStore.expanded}
@@ -80,6 +99,10 @@
         </div>
       {:else}
         <div class="pet-panel">
+          <button class="name-row" onclick={() => (profileOpen = true)}>
+            🐾 <span class="name-text">{petName}</span><span class="name-chev">›</span>
+          </button>
+
           <div class="growth-header">
             <span class="stage-emoji">{evo.stage.emoji}</span>
             <div class="growth-text">
@@ -135,6 +158,7 @@
           </div>
 
           <ShareCardModal open={shareOpen} onclose={() => (shareOpen = false)} />
+          <ProfileCard open={profileOpen} onclose={() => (profileOpen = false)} />
 
           <div class="board-section">
             <div class="board-title">
@@ -298,6 +322,29 @@
     align-items: center;
     gap: 8px;
     text-align: left;
+  }
+
+  .name-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    background: none;
+    border: none;
+    padding: 2px 0 8px;
+    color: #fff;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .name-row:hover .name-text {
+    color: #6495ed;
+  }
+
+  .name-chev {
+    color: rgba(255, 255, 255, 0.35);
+    font-weight: 400;
   }
 
   .stage-emoji {

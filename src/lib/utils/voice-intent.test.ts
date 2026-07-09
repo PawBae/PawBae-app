@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { classifyIntent, type IntentContext } from './voice-intent';
 
-const ctx = (petName = ''): IntentContext => ({ petName });
+const ctx = (...petNames: string[]): IntentContext => ({ petNames });
 
 describe('classifyIntent — intents', () => {
   it('U1 zh greeting → greet/happy, no affection', () => {
@@ -68,6 +68,15 @@ describe('classifyIntent — name calls', () => {
 
   it('empty pet name never matches callName', () => {
     expect(classifyIntent('天气不错', ctx('')).intent).toBe('unknown');
+  });
+
+  it('nickname AND official name both answer (naming+lore)', () => {
+    expect(classifyIntent('团团', ctx('团团', 'Yoonie')).intent).toBe('callName');
+    expect(classifyIntent('yoonie 过来', ctx('团团', 'Yoonie')).intent).toBe('callName');
+  });
+
+  it('blank entries in the name list are ignored', () => {
+    expect(classifyIntent('天气不错', ctx('  ', '')).intent).toBe('unknown');
   });
 });
 

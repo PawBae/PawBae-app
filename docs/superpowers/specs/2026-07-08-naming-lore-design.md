@@ -104,8 +104,8 @@ export function sanitizeNicknames(raw: unknown): Record<string, string>;
 
 ### i18n 新 key（en/zh）
 
-`profile.title`、`profile.nicknameLabel`、`profile.nicknamePlaceholder`、
-`lore.species`、`lore.short`、`lore.tagline`。
+`profile.nicknameLabel`、`lore.species`、`lore.short`、`lore.tagline`
+（档案卡不需要标题——立绘+名字即标题；昵称输入框 placeholder 直接用官方名，不是 i18n key）。
 
 - tagline（zh）：她从 agent 干活的那片云滑下来，落在了你的桌面。
 - tagline（en）：She slid down from the cloud where the agents work, and landed on your desktop.
