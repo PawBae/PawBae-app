@@ -1,8 +1,9 @@
 <script lang="ts">
-  import { untrack } from 'svelte';
+  import { invoke } from '@tauri-apps/api/core';
   import { Image } from '@tauri-apps/api/image';
   import { writeImage } from '@tauri-apps/plugin-clipboard-manager';
   import { save } from '@tauri-apps/plugin-dialog';
+  import { untrack } from 'svelte';
   import { _ } from 'svelte-i18n';
   import { petStore } from '../stores/pet.svelte';
   import { settingsStore } from '../stores/settings.svelte';
@@ -12,7 +13,7 @@
   import { tryInvoke } from '../utils/invoke';
   import { renderShareCard, type SpriteFrame } from '../utils/share-card';
   import { track } from '../utils/telemetry';
-  import { TOKEN_FEED_SOURCES } from '../utils/token-feed';
+  import { STATS_BUCKET_SOURCES } from '../utils/token-feed';
   import { assembleWeeklyReport } from '../utils/weekly-report';
 
   let { open = false, onclose }: { open?: boolean; onclose: () => void } = $props();
@@ -70,7 +71,7 @@
     try {
       const [{ sprite, name }, ...statsList] = await Promise.all([
         loadSprite(),
-        ...TOKEN_FEED_SOURCES.map((source) =>
+        ...STATS_BUCKET_SOURCES.map((source) =>
           tryInvoke<ClaudeStats>('get_claude_stats', { source }),
         ),
       ]);
@@ -134,7 +135,9 @@
       if (!bytes) throw new Error('empty canvas');
       let bin = '';
       for (const b of bytes) bin += String.fromCharCode(b);
-      await tryInvoke('save_png_file', { path, data: btoa(bin) });
+      // Raw invoke, not tryInvoke: a swallowed write failure (permissions, disk
+      // full) would fall through to feedback = 'saved' with no PNG on disk.
+      await invoke('save_png_file', { path, data: btoa(bin) });
       feedback = 'saved';
       track('share_card_export', { method: 'save' });
     } catch (e) {

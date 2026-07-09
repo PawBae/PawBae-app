@@ -19,6 +19,16 @@ export const FEAST_HUNGER = 20;
 /** Every stats source the init-time baseline priming sweeps. */
 export const TOKEN_FEED_SOURCES: readonly ClaudeStatsSource[] = ['cc', 'codex', 'cursor'];
 
+/**
+ * Distinct backend stats buckets. get_claude_stats maps BOTH `cc` and `cursor` to
+ * the same Claude-projects JSONL bucket (claude_sessions.rs), so anything that SUMS
+ * stats across sources (the weekly share card) must sweep these, not
+ * TOKEN_FEED_SOURCES — else the Claude bucket is counted twice. Per-source delta
+ * settling (the feeding loop) is unaffected. Revisit when Cursor gets its own
+ * transcript index.
+ */
+export const STATS_BUCKET_SOURCES: readonly ClaudeStatsSource[] = ['cc', 'codex'];
+
 export type MealTier = 'snack' | 'meal' | 'feast';
 
 export interface TokenMeal {
