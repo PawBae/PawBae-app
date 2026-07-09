@@ -36,6 +36,7 @@
     reactionSpriteFor,
     requestReaction,
   } from '../utils/reaction-machine';
+  import { strollGate } from '../utils/stroll';
   import AgentBubble from './AgentBubble.svelte';
   import ApprovalNote from './ApprovalNote.svelte';
   import CelebrationBubble from './CelebrationBubble.svelte';
@@ -484,13 +485,20 @@
     };
   });
 
-  // Physics loop — torn down while the settings panel is open
+  // Physics loop — torn down while the settings panel is open or while the
+  // user has stroll mode switched off (settings toggle or macOS tray item)
   $effect(() => {
     const currentPet = pet;
-    if (!currentPet?.physics?.enabled) return;
-    if (windowStore.settingsOpen) return;
+    const gate = strollGate({
+      physicsCapable: !!currentPet?.physics?.enabled,
+      settingsOpen: windowStore.settingsOpen,
+      strollEnabled: settingsStore.strollEnabled,
+    });
+    if (gate.pushStrollMode !== null) {
+      tryInvoke('set_stroll_mode', { enabled: gate.pushStrollMode });
+    }
+    if (!gate.runLoop) return;
 
-    tryInvoke('set_stroll_mode', { enabled: true });
     tryInvoke('set_throw_tracking', { enabled: true });
     if (isWindows) {
       tryInvoke('set_pet_passthrough', {

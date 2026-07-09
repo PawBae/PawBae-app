@@ -161,8 +161,11 @@
       }, VOICE_REPLY_MS);
     });
 
+    // macOS tray "Stroll Mode" item. The frontend owns settings.json, so the
+    // toggle is persisted here; MascotView's physics effect reacts to the
+    // setting and flips the loop on/off.
     addListener<boolean>('stroll-mode-changed', (e) => {
-      windowStore.setStrollActive(e.payload);
+      settingsStore.setStrollEnabled(e.payload);
     });
 
     addListener('tray-open-settings', () => {

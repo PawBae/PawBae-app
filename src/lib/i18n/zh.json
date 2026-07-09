@@ -140,6 +140,8 @@
     "petSfx": "角色音效",
     "petSfxDesc": "互动时播放角色音效",
     "petBehavior": "行为",
+    "strollMode": "散步模式",
+    "strollModeDesc": "让宠物在屏幕上自由活动——走动、拖拽和抛掷",
     "petIdleInterval": "随机动作间隔",
     "petIdleIntervalDesc": "空闲时看板娘触发随机动作的频率",
     "minutesShort": "分钟",

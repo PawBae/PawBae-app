@@ -4,7 +4,6 @@ class WindowStore {
   expanded = $state(false);
   mascotHover = $state(false);
   moveMode = $state(false);
-  strollActive = $state(false);
   pinned = $state(false);
   settingsOpen = $state(false);
 
@@ -88,10 +87,6 @@ class WindowStore {
 
   setMoveMode(v: boolean) {
     this.moveMode = v;
-  }
-
-  setStrollActive(v: boolean) {
-    this.strollActive = v;
   }
 
   setPinned(v: boolean) {
