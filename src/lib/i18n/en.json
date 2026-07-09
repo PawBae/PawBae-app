@@ -170,6 +170,9 @@
     "compacting": "Tidying context",
     "working": "On it…"
   },
+  "approvalNote": {
+    "label": "Sign here!"
+  },
   "growth": {
     "evolvedTo": "Evolved into",
     "maxStage": "Max stage",

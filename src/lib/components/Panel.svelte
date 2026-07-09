@@ -41,17 +41,17 @@
               <p class="hint">Start Claude Code, Codex, or Cursor to see sessions here</p>
             </div>
           {:else}
-            {#each sessionStore.claudeSessions as session (session.id)}
+            {#each sessionStore.claudeSessions as session (session.sessionId)}
               <button
                 class="session-card"
                 class:active={session.status === 'active'}
-                onclick={() => sessionStore.selectSession(session.id)}
+                onclick={() => sessionStore.selectSession(session.sessionId)}
               >
                 <div class="session-header">
                   <span class="session-source">{session.source || 'cc'}</span>
                   <span class="dot" class:active={session.status === 'active'}></span>
                 </div>
-                <div class="session-cwd">{session.cwd || session.id}</div>
+                <div class="session-cwd">{session.cwd || session.sessionId}</div>
                 {#if session.model}
                   <div class="session-model">{session.model}</div>
                 {/if}

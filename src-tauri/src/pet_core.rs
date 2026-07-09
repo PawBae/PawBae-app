@@ -122,6 +122,33 @@ pub(crate) fn efficiency_hover_poll(
                 false
             };
 
+            // ── Approval-note hit-test (叼来审批单) ──
+            // The slip floats in the headroom strip above the mascot (below it
+            // when the placement flips at the screen's top edge). Zone mirrors
+            // ApprovalNote.svelte's geometry; the frontend arms it via
+            // set_note_hitbox only while the note is visible. Collapsed-mode
+            // DOM clicks never reach the webview (non-key floating window —
+            // presses land in this machine instead), so the tap is detected
+            // here and forwarded as an event.
+            let over_note = if is_expanded || !ps.note_hitbox_active.load(Ordering::SeqCst) {
+                false
+            } else if let Some((fx, fy, fw, fh)) = frame {
+                let half_w = 90.0_f64.min(fw / 2.0);
+                let zone_h = 52.0; // 48px headroom margin + bubble slack
+                let (zone_bottom, zone_top) = if ps.note_hitbox_above.load(Ordering::SeqCst) {
+                    (fy + fh - zone_h, fy + fh) // NSEvent y grows upward
+                } else {
+                    (fy, fy + zone_h)
+                };
+                let cx = fx + fw / 2.0;
+                cursor.0 >= cx - half_w
+                    && cursor.0 <= cx + half_w
+                    && cursor.1 >= zone_bottom
+                    && cursor.1 <= zone_top
+            } else {
+                false
+            };
+
             // ── Drag state machine ──
             // Only engage in collapsed (mascot) state, never in expanded
             // panel mode (clicks inside the panel must keep their normal
@@ -221,6 +248,16 @@ pub(crate) fn efficiency_hover_poll(
                         throw_samples.clear();
                         let _ = app.emit("mini-mascot-drag-end", ());
                     }
+                } else if over_note && left_pressed && !was_pressed {
+                    // Note tap outranks drag-engage: the slip zone overlaps the
+                    // mascot hitbox's upper band, and answering a waiting agent
+                    // is the rarer, more deliberate intent than a head-grab.
+                    log::info!(
+                        "[approval-note] native tap at ({:.1},{:.1})",
+                        cursor.0,
+                        cursor.1
+                    );
+                    let _ = app.emit("approval-note-click", ());
                 } else if over_mascot && left_pressed && !was_pressed {
                     drag_active = true;
                     last_cursor = cursor;

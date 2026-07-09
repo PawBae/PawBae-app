@@ -45,7 +45,7 @@
     "idle":       "idle",
     "working":    "run-right",
     "compacting": "float",
-    "waiting":    "hide"
+    "waiting":    "asking-user"
   },
   "oneShot": ["done-success", "done-fail"],
   "physics": { "enabled": true },

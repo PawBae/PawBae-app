@@ -204,6 +204,10 @@ pub(crate) struct PetState {
     pub(crate) passthrough_thread_alive: AtomicBool,
     pub(crate) context_menu_open: AtomicBool,
     pub(crate) pomodoro_active: AtomicBool,
+    // Approval-note hitbox: while the note bubble is visible, the passthrough
+    // poll opens the strip it occupies (above or below the mascot) to clicks.
+    pub(crate) note_hitbox_active: AtomicBool,
+    pub(crate) note_hitbox_above: AtomicBool,
     pub(crate) menu_restore_frame: Mutex<Option<(f64, f64, f64, f64)>>,
     pub(crate) stroll_enabled: AtomicBool,
     pub(crate) throw_tracking: AtomicBool,
@@ -232,6 +236,8 @@ impl PetState {
             passthrough_thread_alive: AtomicBool::new(false),
             context_menu_open: AtomicBool::new(false),
             pomodoro_active: AtomicBool::new(false),
+            note_hitbox_active: AtomicBool::new(false),
+            note_hitbox_above: AtomicBool::new(true),
             menu_restore_frame: Mutex::new(None),
             stroll_enabled: AtomicBool::new(true),
             throw_tracking: AtomicBool::new(false),
