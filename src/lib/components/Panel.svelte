@@ -8,6 +8,7 @@
   import { ACHIEVEMENTS } from '../utils/achievements';
   import { loadCodexPets, loadDefaultCodexPet } from '../utils/codex-pet';
   import { BOARD_TASKS } from '../utils/daily-board';
+  import { tryInvoke } from '../utils/invoke';
   import { effectiveName } from '../utils/pet-name';
   import { FEED_COST_COINS } from '../utils/rewards';
   import ProfileCard from './ProfileCard.svelte';
@@ -48,6 +49,14 @@
   const petName = $derived(
     effectiveName(settingsStore.petNicknames[settingsStore.miniPetId], officialName),
   );
+
+  // In-app settings entry: the tray icon can be hidden by the MacBook notch,
+  // so the panel needs its own way in. Mirrors Main.svelte's openSettings().
+  async function openSettings() {
+    if (windowStore.settingsOpen) return;
+    windowStore.setSettingsOpen(true);
+    await tryInvoke('set_mini_size', { restore: false });
+  }
 </script>
 
 {#if windowStore.expanded}
@@ -56,6 +65,16 @@
     style="max-height: {maxHeight}px;"
   >
     <div class="panel-content">
+      <div class="panel-topbar">
+        <button
+          class="settings-btn"
+          title={$_('mini.settings')}
+          aria-label={$_('mini.settings')}
+          onclick={openSettings}
+        >
+          ⚙️
+        </button>
+      </div>
       {#if settingsStore.appMode === 'coding'}
         <div class="session-list">
           {#if sessionStore.claudeSessions.length === 0 && agentStore.agents.length === 0}
@@ -222,6 +241,28 @@
 
   .panel-content {
     padding: 8px;
+  }
+
+  .panel-topbar {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 2px;
+  }
+
+  .settings-btn {
+    background: none;
+    border: none;
+    padding: 1px 3px;
+    font-size: 12px;
+    line-height: 1;
+    color: rgba(255, 255, 255, 0.4);
+    opacity: 0.55;
+    cursor: pointer;
+    transition: opacity 0.15s;
+  }
+
+  .settings-btn:hover {
+    opacity: 1;
   }
 
   .session-list {
