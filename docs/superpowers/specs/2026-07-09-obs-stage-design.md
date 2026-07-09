@@ -13,13 +13,13 @@
 
 ## 1. 玩法规则
 
-- **舞台窗口**：标题 `PawBae Stage`（OBS 窗口列表里好认），label `stage`，加载 `index.html#/stage`。
+- **舞台窗口**：标题 `PawBae Stage`（OBS 窗口列表里好认），label `stage`，加载普通 `index.html`（前端按窗口 label 分流——dev server 会吞掉 URL fragment，hash 路由在 dev 下静默失效并挂出整棵 Main，验收探针抓到过）。
   - 默认 480×270（16:9），可自由拉伸，宠物居中、尺寸随窗口自适应（`min(w,h)` 比例缩放）。
   - **无边框**（`decorations(false)`）——捕获画面即纯色幕布+宠物，OBS 不用裁标题栏；整窗背景是拖拽区，边缘可拉伸（Tauri 无边框窗口原生支持）。
   - **不置顶**（区别于主窗口）、创建时不抢焦点、不跳任务栏（任务栏/Dock 有入口，埋住了也找得回）——刻意可以埋在 IDE/浏览器后面：OBS 的窗口捕获（macOS ScreenCaptureKit / Windows WGC）对被完全遮挡的窗口照样采集，主播单屏也能用。
   - 桌宠照常在桌面活动，舞台只是镜像，互不干扰。开关舞台的唯一入口是设置开关（无边框窗没有关闭按钮）；若窗口被系统途径关掉，设置开关同步回落（防御性同步）。
 - **背景色**：绿 `#00FF00` / 蓝 `#0000FF` / 品红 `#FF00FF` 三选，默认绿。皮肤本体含绿时主播换蓝或品红。背景色随快照下发热更新，不重建窗口。
-- **镜像内容**：皮肤（含自定义皮肤）、基础动画状态（idle/working/走路原地踏步等）、朝向、反应 sprite、当前气泡的**最终渲染文案**（agent 状态、庆祝、早安问候、审批便签提示）。v1 宠物居中不在舞台内漫游（VTuber overlay 常态），舞台内漫游留作后续。
+- **镜像内容**：皮肤（含自定义皮肤）、基础动画状态（idle/working/走路原地踏步等）、反应 sprite、冒险离家状态（⛺ 帐篷同步上台）、庆祝气泡与 agent 状态气泡（waiting/working/compacting）。朝向由 sprite 行自带（flipX 在动画数据里），无需单独镜像。v1 宠物居中不在舞台内漫游（VTuber overlay 常态），舞台内漫游留作后续。
 - **永不打扰红线不破**：舞台窗口纯输出、无任何交互元素；不抢焦点、不置顶、不发通知。
 - **持久化**：settings.json 新增 `stream_stage_enabled`（bool，默认 false）、`stream_stage_bg`（`green|blue|magenta`，默认 green）。开着舞台退出，下次启动自动恢复。
 
@@ -32,9 +32,9 @@
 
 ### 2.2 StageApp（舞台端）
 
-- `main.ts` 按 `location.hash` 以 `#/stage` 分流，挂载极简 `StageApp.svelte`（不挂 Main 树）。
-- 纯色背景铺满 + 居中 `MiniPetMascot`（现成 props 驱动渲染器，`suppressHover`）+ 顶部一条通用气泡（样式沿用 CelebrationBubble 的视觉语言，允许换行）。
-- 文案由主窗口渲染好随快照下发，舞台端零 i18n、零 store 副作用。
+- `main.ts` 按 `getCurrentWebviewWindow().label === 'stage'` 分流（同步 API，dev/prod 一致），挂载极简 `StageApp.svelte`（不挂 Main 树）。
+- 纯色背景铺满 + 居中 `MiniPetMascot`（现成 props 驱动渲染器，禁 hover 交互）+ 上方 CelebrationBubble、下方 AgentBubble（庆祝在场时 agent 气泡让位，与桌面同规则）。
+- 舞台零 store 副作用（只读 skins 解析除外）、零交互（子元素 pointer-events: none，整窗即拖拽区）。
 
 ## 3. 架构
 
@@ -43,7 +43,8 @@
 - 舞台 webview **不跑 petStore、不写任何持久化**——从根上避免双重计数/双重持久化竞态（#48 暖香、#49 日记的同款教训）。
 - **快照下行**：MascotView 在舞台开启时用 `$effect` 构造渲染快照，经 `emit('stage-state', snapshot)` 全窗口广播；快照去重（序列化相等不重发）。
 - **握手上行**：StageApp 挂载后 `emit('stage-ready')`，主窗口收到即推当前快照（覆盖舞台后开/刷新场景）。
-- 快照结构（`utils/stage-bridge.ts` 定义）：`{ petId, baseState, facing, reactionSprite, bubble: { kind, text } | null, bg }`——背景色也随快照走，单通道无独立配置事件。
+- 快照结构（`utils/stage-bridge.ts` 定义）：`{ petId, spriteState, overlaySprite, away, celebration, activity, locale, bg }`——背景色也随快照走，单通道无独立配置事件。
+- **气泡走结构化数据而非预渲染文案**：celebration / activity 原样下发，舞台复用同一批纯 props 气泡组件（CelebrationBubble / AgentBubble）自行渲染——未来新增庆祝类型零协议改动。i18n 由 main.ts 全局初始化，各 webview 都有；但初始 locale 取自 navigator，所以快照带 `locale`，舞台跟随主窗口的应用内语言。
 
 ### 3.2 分层
 

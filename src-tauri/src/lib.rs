@@ -62,6 +62,23 @@ pub fn run() {
     };
     asset::register(builder)
         .setup(setup::init)
+        .on_window_event(|window, event| {
+            // The stage window is borderless (no close button of ours); when the
+            // OS closes it anyway (Cmd+W, app quit ordering, crash recovery),
+            // the settings toggle must fall back in sync in the main webview.
+            if window.label() == "stage" {
+                if let tauri::WindowEvent::Destroyed = event {
+                    use tauri::{Emitter, Manager};
+                    // Emitting inside the window-event callback deadlocks the
+                    // main thread (the emit dispatches into webviews while the
+                    // destroy is still unwinding) — hop off the callback first.
+                    let app = window.app_handle().clone();
+                    tauri::async_runtime::spawn(async move {
+                        let _ = app.emit("stage-closed", ());
+                    });
+                }
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             get_status,
             send_chat,
@@ -122,6 +139,8 @@ pub fn run() {
             discard_staged_skin,
             remove_custom_skin,
             reassert_floating,
+            open_stage_window,
+            close_stage_window,
             spawn_demo_mascot,
             close_demo_mascot,
             close_demo_mascots,

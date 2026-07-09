@@ -1,6 +1,7 @@
 import { load } from '@tauri-apps/plugin-store';
 import type { AppMode, OcConnection } from '../types';
 import { sanitizeNickname, sanitizeNicknames } from '../utils/pet-name';
+import { type StageBg, sanitizeStageBg } from '../utils/stage-bridge';
 
 class SettingsStore {
   appMode = $state<AppMode | null>(null);
@@ -36,6 +37,10 @@ class SettingsStore {
   telemetryEnabled = $state(false);
   voiceEnabled = $state(false);
   musicReactionEnabled = $state(true);
+  // OBS 直播舞台: the store only persists the choice — window open/close and the
+  // snapshot feed react to these in Main/MascotView (stores never invoke here).
+  streamStageEnabled = $state(false);
+  streamStageBg = $state<StageBg>('green');
   ocConnections = $state.raw<OcConnection[]>([{ id: 'local', type: 'local' }]);
 
   private storeInstance: Awaited<ReturnType<typeof load>> | null = null;
@@ -78,6 +83,8 @@ class SettingsStore {
     this.telemetryEnabled = ((await store.get('telemetry_enabled')) as boolean) ?? false;
     this.voiceEnabled = ((await store.get('voice_enabled')) as boolean) ?? false;
     this.musicReactionEnabled = ((await store.get('music_reaction_enabled')) as boolean) ?? true;
+    this.streamStageEnabled = ((await store.get('stream_stage_enabled')) as boolean) ?? false;
+    this.streamStageBg = sanitizeStageBg(await store.get('stream_stage_bg'));
     this.ocConnections = ((await store.get('oc_connections')) as OcConnection[]) || [
       { id: 'local', type: 'local' },
     ];
@@ -238,6 +245,16 @@ class SettingsStore {
   async setMusicReactionEnabled(v: boolean) {
     this.musicReactionEnabled = v;
     await this.saveSetting('music_reaction_enabled', v);
+  }
+
+  async setStreamStageEnabled(v: boolean) {
+    this.streamStageEnabled = v;
+    await this.saveSetting('stream_stage_enabled', v);
+  }
+
+  async setStreamStageBg(v: StageBg) {
+    this.streamStageBg = v;
+    await this.saveSetting('stream_stage_bg', v);
   }
 
   async setOcConnections(v: OcConnection[]) {

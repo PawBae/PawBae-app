@@ -1,7 +1,8 @@
 <script lang="ts">
-  import { listen } from '@tauri-apps/api/event';
+  import { emitTo, listen } from '@tauri-apps/api/event';
+  import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
   import { untrack } from 'svelte';
-  import { _ } from 'svelte-i18n';
+  import { _, locale } from 'svelte-i18n';
   import { agentStore } from '../stores/agents.svelte';
   import { petStore } from '../stores/pet.svelte';
   import { sessionStore } from '../stores/sessions.svelte';
@@ -37,6 +38,7 @@
     reactionSpriteFor,
     requestReaction,
   } from '../utils/reaction-machine';
+  import { buildStageSnapshot, snapshotKey } from '../utils/stage-bridge';
   import { strollGate } from '../utils/stroll';
   import AgentBubble from './AgentBubble.svelte';
   import ApprovalNote from './ApprovalNote.svelte';
@@ -337,6 +339,44 @@
   const agentBubbleSuppressed = $derived(
     celebration !== null || voiceRecording || !!voiceText || windowStore.expanded
   );
+
+  // OBS 直播舞台 feed (spec 2026-07-09-obs-stage-design.md): the stage window is a
+  // dumb mirror in a second webview — it runs no stores, so everything it renders
+  // rides this snapshot. Emit only on change. Window-targeted events (emitTo /
+  // window-scoped listen) — a plain JS emit() does not reach other webviews.
+  let lastStageKey = '';
+  $effect(() => {
+    if (!settingsStore.streamStageEnabled) {
+      lastStageKey = ''; // force a fresh push on re-enable
+      return;
+    }
+    const snap = buildStageSnapshot({
+      petId: pet?.id ?? settingsStore.miniPetId,
+      spriteState,
+      overlaySprite,
+      away: tripPhase === 'away',
+      celebration,
+      activity,
+      locale: $locale ?? 'en',
+      bg: settingsStore.streamStageBg,
+    });
+    const key = snapshotKey(snap);
+    if (key === lastStageKey) return;
+    lastStageKey = key;
+    void emitTo('stage', 'stage-state', snap);
+  });
+  // The stage webview mounts AFTER the toggle effect's first emit, so it asks:
+  // replay the latest snapshot on its stage-ready handshake.
+  $effect(() => {
+    const un = getCurrentWebviewWindow().listen('stage-ready', () => {
+      if (settingsStore.streamStageEnabled && lastStageKey) {
+        void emitTo('stage', 'stage-state', JSON.parse(lastStageKey));
+      }
+    });
+    return () => {
+      void un.then((f) => f());
+    };
+  });
 
   // Approval note (叼来审批单): sessions blocked on the user get a clickable slip.
   // The machine owns first-seen timestamps (plain state like the reaction machine);
