@@ -20,6 +20,8 @@ export interface CustomSkinMeta {
   displayName: string;
   description: string;
   spritesheetUrl: string;
+  /** Folder-root pet.json URL (staged imports live under .staging/<id>). */
+  petJsonUrl?: string;
 }
 
 async function loadCustomSkins(): Promise<CodexPet[]> {
@@ -28,7 +30,7 @@ async function loadCustomSkins(): Promise<CodexPet[]> {
   const out = await Promise.all(
     metas.map(async (m): Promise<CodexPet | null> => {
       try {
-        const url = petJsonUrlFromSheetUrl(m.spritesheetUrl);
+        const url = m.petJsonUrl ?? petJsonUrlFromSheetUrl(m.spritesheetUrl);
         if (!url) return null;
         const res = await fetch(url);
         if (!res.ok) return null;

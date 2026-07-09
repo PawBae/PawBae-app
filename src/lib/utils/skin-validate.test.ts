@@ -119,6 +119,19 @@ describe('validateSkin', () => {
     );
   });
 
+  it('rejects invalid offsetCol shapes instead of skipping the overflow check', () => {
+    for (const bad of [-1, 1.5, '1', Number.NaN]) {
+      const v = validateSkin(
+        {
+          atlas: { cellW: 10, cellH: 10, cols: 4, rows: 2 },
+          animations: { idle: { row: 0, frames: 2, offsetCol: bad } },
+        },
+        { width: 40, height: 20 },
+      );
+      expect(keys(v.errors)).toContain('badOffsetCol');
+    }
+  });
+
   it('warns on typo-looking names, high fps, and dangling stateMap targets', () => {
     const v = validateSkin(
       {

@@ -513,6 +513,7 @@
       "badAnimation": "Animation {name} is not an object",
       "rowOutOfRange": "{name}: row {row} is outside the atlas ({rows} rows)",
       "badFrames": "{name}: frames must be a positive integer (got {frames})",
+      "badOffsetCol": "{name}: offsetCol must be a non-negative integer (got {offsetCol})",
       "framesOverflow": "{name}: needs {need} columns but the atlas has {cols}",
       "highFps": "{name}: {fps} fps is unusually high",
       "unknownAnimation": "Unknown animation name: {name} (typo?)",

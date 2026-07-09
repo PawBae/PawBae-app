@@ -56,7 +56,7 @@
   /** null = manifest/sheet unreadable (treated as fatal by the caller). */
   async function validateImported(meta: CustomSkinMeta): Promise<SkinValidation | null> {
     try {
-      const url = petJsonUrlFromSheetUrl(meta.spritesheetUrl);
+      const url = meta.petJsonUrl ?? petJsonUrlFromSheetUrl(meta.spritesheetUrl);
       if (!url) return null;
       const res = await fetch(url);
       if (!res.ok) return null;
@@ -69,16 +69,19 @@
     }
   }
 
-  // 严出: the folder is already copied when we validate (the webview can't read
-  // arbitrary paths pre-copy), so a fatal report rolls the copy back.
+  // 严出: imports land in ~/.codex/pets/.staging/<id> (the webview can't read
+  // arbitrary paths pre-copy). Only a PASSED report commits over the installed
+  // copy; a failed one discards the staging — a broken upgrade can never
+  // destroy the working skin.
   async function finishImport(meta: CustomSkinMeta, kind: 'folder' | 'image') {
     const report = await validateImported(meta);
     if (!report || report.errors.length > 0) {
-      await tryInvoke('remove_custom_skin', { id: meta.id });
+      await tryInvoke('discard_staged_skin', { id: meta.id });
       issues = report ?? { errors: [{ key: 'unreadable' }], warnings: [] };
       track('skin_imported', { kind, result: 'invalid' });
       return;
     }
+    await invoke('commit_staged_skin', { id: meta.id });
     issues = report.warnings.length > 0 ? report : null;
     importedOk = true;
     skinsStore.noteImportWarnings(meta.id, report.warnings.length);

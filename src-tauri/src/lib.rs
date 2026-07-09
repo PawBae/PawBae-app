@@ -118,6 +118,8 @@ pub fn run() {
             pick_codex_pet_folder,
             pick_skin_image,
             import_skin_image,
+            commit_staged_skin,
+            discard_staged_skin,
             remove_custom_skin,
             reassert_floating,
             spawn_demo_mascot,

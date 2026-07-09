@@ -40,10 +40,13 @@
 
 ### 2.2 Rust 命令（增补）
 
-- `import_codex_pet`：**加固 id 净化**（见 §4 安全），其余复用；
-- `import_skin_image(path)`（新）：`imagesize` crate 读尺寸 → 生成 `<slug>/pet.json`（`atlas = {cellW: imgW, cellH: imgH, cols: 1, rows: 1}`，`animations: {idle: {row: 0, frames: 1}}`）+ 复制图片。id/displayName 取文件名 stem（slug 化）；同名覆盖（与文件夹导入一致，规范文档写明）。改名走现有昵称功能；
+- `import_codex_pet`：**加固 id 净化**（见 §4 安全）+ **暂存化**：复制进 `~/.codex/pets/.staging/<id>`（`.staging` 与真皮肤永不冲突——前导点 id 被拒），已安装皮肤在 commit 前分毫不动；**拒绝源在皮肤目录内**（从「打开皮肤文件夹」里选中已安装皮肤再导入，会在复制前先删掉源，Codex review P2）；
+- `import_skin_image(path)`（新）：`imagesize` crate 读尺寸 → 在暂存区生成 `<slug>/pet.json`（`atlas = {cellW: imgW, cellH: imgH, cols: 1, rows: 1}`，`animations: {idle: {row: 0, frames: 1}}`）+ 复制图片。id/displayName 取文件名 stem（slug 化）；同名覆盖（与文件夹导入一致，规范文档写明）。改名走现有昵称功能；
+- `commit_staged_skin(id)`（新）：校验通过后把 `.staging/<id>` 原子替换到 `~/.codex/pets/<id>`——旧版只在此刻被替换；
+- `discard_staged_skin(id)`（新）：校验失败时丢弃暂存，已安装皮肤无损；
 - `pick_skin_image`（新）：native 文件选择器，过滤 png/webp/jpg/jpeg/gif，复用 `pick_codex_pet_folder` 的 set_parent + reassert_mini_floating 模式；
-- `remove_custom_skin(id)`（新）：净化 id 后删除 `~/.codex/pets/<id>`；仅对自定义皮肤暴露 UI。
+- `remove_custom_skin(id)`（新）：净化 id 后删除 `~/.codex/pets/<id>`；仅对自定义皮肤的画廊删除暴露 UI。
+- `CodexPetMeta` 增加 `petJsonUrl` 字段（list + 两个 import 都返回）——暂存路径下前端无法从 sheet URL 推导 pet.json 位置。
 
 ### 2.3 CSP（tauri.conf.json）
 
@@ -52,13 +55,13 @@
 ## 3. 导入流程（宽进严出）
 
 ```
-选文件夹/图片 → Rust 复制进 ~/.codex/pets（同 id 覆盖升级）
-→ 前端 fetch 导入结果的 pet.json + 图集尺寸 → skin-validate 校验
-→ 致命错误：remove_custom_skin 回滚 + 双语报错列表
-→ 通过：refresh() + 自动切换到新皮肤 + （有警告则 tile 角标提示）
+选文件夹/图片 → Rust 复制进 ~/.codex/pets/.staging/<id>（已安装皮肤不动；源在皮肤目录内直接拒绝）
+→ 前端 fetch 暂存区的 pet.json + 图集尺寸 → skin-validate 校验
+→ 致命错误：discard_staged_skin 丢弃暂存 + 双语报错列表（同 id 旧版完好无损）
+→ 通过：commit_staged_skin 原子替换 → refresh() + 自动切换到新皮肤 + （有警告则 tile 角标提示）
 ```
 
-校验放在复制之后（而非之前）是因为前端无法直接读任意本地路径；回滚保证失败不留脏数据。
+校验放在复制之后（而非之前）是因为前端无法直接读任意本地路径；暂存-提交两段式保证坏升级永远毁不掉能用的旧皮肤（对文件也「永不惩罚」）。
 
 ## 4. 安全（UGC 威胁模型）
 

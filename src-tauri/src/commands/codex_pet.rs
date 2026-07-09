@@ -12,6 +12,8 @@ pub struct CodexPetMeta {
     pub description: String,
     #[serde(rename = "spritesheetUrl")]
     pub spritesheet_url: String,
+    #[serde(rename = "petJsonUrl")]
+    pub pet_json_url: String,
 }
 
 /// Path to the user's codex CLI pets directory (`~/.codex/pets`). Mirrors
@@ -33,6 +35,28 @@ pub(crate) fn is_safe_skin_id(id: &str) -> bool {
         && !id
             .chars()
             .any(|c| c == '/' || c == '\\' || c == ':' || c.is_control())
+}
+
+/// Staging area for imports awaiting frontend validation. Lives under the pets
+/// root so `codexpet://` can serve staged files for the validator; `.staging`
+/// can never collide with a real skin because leading-dot ids are rejected.
+pub(crate) fn staging_dir() -> Option<PathBuf> {
+    codex_pets_dir().map(|r| r.join(".staging"))
+}
+
+/// A source inside the pets root would be destroyed by the overwrite dance —
+/// e.g. re-importing an installed skin straight out of "Open skins folder".
+fn reject_src_inside_pets_root(src: &std::path::Path) -> Result<(), String> {
+    let Some(root) = codex_pets_dir() else {
+        return Ok(());
+    };
+    let (Ok(src_c), Ok(root_c)) = (src.canonicalize(), root.canonicalize()) else {
+        return Ok(()); // pets root may not exist yet — nothing to protect
+    };
+    if src_c.starts_with(&root_c) {
+        return Err("source is inside the skins directory (already installed)".into());
+    }
+    Ok(())
 }
 
 /// Fold an image filename stem into a safe skin id: separators/whitespace
@@ -130,11 +154,13 @@ pub async fn list_custom_codex_pets() -> Result<Vec<CodexPetMeta>, String> {
             continue;
         }
         let url = codex_asset_url(&abs);
+        let pet_json_url = codex_asset_url(&pet_json);
         out.push(CodexPetMeta {
             id,
             display_name,
             description,
             spritesheet_url: url,
+            pet_json_url,
         });
     }
     out.sort_by(|a, b| {
@@ -212,16 +238,19 @@ pub async fn open_codex_pets_dir() -> Result<String, String> {
     }
     Ok(path)
 }
-/// Import a dropped pet folder into `~/.codex/pets`. The source must be a
-/// directory containing at minimum a `pet.json` and a spritesheet image.
-/// Existing folders with the same id are overwritten so re-dropping a
-/// pet upgrades it in place.
+/// Stage a dropped pet folder into `~/.codex/pets/.staging/<id>` for the
+/// frontend validator. The source must be a directory containing at minimum a
+/// `pet.json` and a spritesheet image. Nothing under the installed skins is
+/// touched until `commit_staged_skin` — a failed upgrade must never destroy
+/// the working copy (and a source picked from inside the skins dir is
+/// rejected outright, or the overwrite would delete it before the copy).
 #[tauri::command]
 pub async fn import_codex_pet(src_path: String) -> Result<CodexPetMeta, String> {
     let src = PathBuf::from(&src_path);
     if !src.is_dir() {
         return Err(format!("not a directory: {}", src_path));
     }
+    reject_src_inside_pets_root(&src)?;
     let pet_json = src.join("pet.json");
     if !pet_json.is_file() {
         return Err("missing pet.json in dropped folder".into());
@@ -240,11 +269,11 @@ pub async fn import_codex_pet(src_path: String) -> Result<CodexPetMeta, String> 
     if !is_safe_skin_id(&id) {
         return Err(format!("unsafe pet id: {id:?}"));
     }
-    let Some(root) = codex_pets_dir() else {
+    let Some(staging_root) = staging_dir() else {
         return Err("home directory not found".into());
     };
-    std::fs::create_dir_all(&root).map_err(|e| e.to_string())?;
-    let dst = root.join(&id);
+    std::fs::create_dir_all(&staging_root).map_err(|e| e.to_string())?;
+    let dst = staging_root.join(&id);
     if dst.exists() {
         let _ = std::fs::remove_dir_all(&dst);
     }
@@ -265,12 +294,52 @@ pub async fn import_codex_pet(src_path: String) -> Result<CodexPetMeta, String> 
         .map(String::from)
         .unwrap_or_else(|| "spritesheet.webp".into());
     let url = codex_asset_url(&dst.join(&sheet_path));
+    let pet_json_url = codex_asset_url(&dst.join("pet.json"));
     Ok(CodexPetMeta {
         id,
         display_name,
         description,
         spritesheet_url: url,
+        pet_json_url,
     })
+}
+
+/// Promote a staged skin into the installed set: only now is a previous copy
+/// of the same id replaced (the validator has already passed the staged one).
+#[tauri::command]
+pub async fn commit_staged_skin(id: String) -> Result<(), String> {
+    if !is_safe_skin_id(&id) {
+        return Err(format!("unsafe skin id: {id:?}"));
+    }
+    let (Some(root), Some(staging_root)) = (codex_pets_dir(), staging_dir()) else {
+        return Err("home directory not found".into());
+    };
+    let staged = staging_root.join(&id);
+    if !staged.is_dir() {
+        return Err(format!("no staged skin: {id}"));
+    }
+    let dst = root.join(&id);
+    if dst.exists() {
+        std::fs::remove_dir_all(&dst).map_err(|e| e.to_string())?;
+    }
+    std::fs::rename(&staged, &dst).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Drop a staged skin that failed validation. Installed skins are untouched.
+#[tauri::command]
+pub async fn discard_staged_skin(id: String) -> Result<(), String> {
+    if !is_safe_skin_id(&id) {
+        return Err(format!("unsafe skin id: {id:?}"));
+    }
+    let Some(staging_root) = staging_dir() else {
+        return Err("home directory not found".into());
+    };
+    let staged = staging_root.join(&id);
+    if staged.exists() {
+        std::fs::remove_dir_all(&staged).map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 /// Build a Tauri custom-protocol URL the webview can fetch. The path is
 /// resolved relative to `~/.codex/pets/` by the `codexpet://` scheme
@@ -333,13 +402,15 @@ pub async fn pick_skin_image(app: tauri::AppHandle) -> Result<Option<String>, St
 
 /// Wrap a single still image into a full skin folder: whole image = a 1×1 atlas
 /// with a 1-frame `idle` row; every other animation falls back gracefully at
-/// runtime. This is the lowest rung of the "宽进严出" creator funnel.
+/// runtime. This is the lowest rung of the "宽进严出" creator funnel. Staged
+/// like folder imports — installed skins are only touched on commit.
 #[tauri::command]
 pub async fn import_skin_image(src_path: String) -> Result<CodexPetMeta, String> {
     let src = PathBuf::from(&src_path);
     if !src.is_file() {
         return Err(format!("not a file: {}", src_path));
     }
+    reject_src_inside_pets_root(&src)?;
     let ext = src
         .extension()
         .and_then(|e| e.to_str())
@@ -354,10 +425,10 @@ pub async fn import_skin_image(src_path: String) -> Result<CodexPetMeta, String>
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_else(|| "skin".into());
     let id = slug_skin_id(&stem);
-    let Some(root) = codex_pets_dir() else {
+    let Some(staging_root) = staging_dir() else {
         return Err("home directory not found".into());
     };
-    let dst = root.join(&id);
+    let dst = staging_root.join(&id);
     if dst.exists() {
         let _ = std::fs::remove_dir_all(&dst);
     }
@@ -379,6 +450,7 @@ pub async fn import_skin_image(src_path: String) -> Result<CodexPetMeta, String>
         display_name: stem,
         description: String::new(),
         spritesheet_url: codex_asset_url(&dst.join(&sheet_name)),
+        pet_json_url: codex_asset_url(&dst.join("pet.json")),
     })
 }
 

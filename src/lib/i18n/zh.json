@@ -513,6 +513,7 @@
       "badAnimation": "动画 {name} 不是对象",
       "rowOutOfRange": "{name}：行号 {row} 超出图集（共 {rows} 行）",
       "badFrames": "{name}：帧数必须为正整数（当前 {frames}）",
+      "badOffsetCol": "{name}：offsetCol 必须是非负整数（当前 {offsetCol}）",
       "framesOverflow": "{name}：需要 {need} 列，图集只有 {cols} 列",
       "highFps": "{name}：{fps} fps 过高",
       "unknownAnimation": "未知动画名：{name}（可能拼写有误）",

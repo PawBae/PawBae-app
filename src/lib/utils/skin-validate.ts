@@ -161,14 +161,15 @@ export function validateSkin(raw: unknown, img: ImageDims): SkinValidation {
         if (typeof row !== 'number' || !Number.isInteger(row) || row < 0 || row >= rows) {
           errors.push({ key: 'rowOutOfRange', params: { name, row: String(row), rows } });
         }
-        if (typeof frames !== 'number' || !Number.isInteger(frames) || frames < 1) {
+        const framesOk = typeof frames === 'number' && Number.isInteger(frames) && frames >= 1;
+        if (!framesOk) {
           errors.push({ key: 'badFrames', params: { name, frames: String(frames) } });
-        } else if (
-          typeof offsetCol === 'number' &&
-          Number.isInteger(offsetCol) &&
-          offsetCol >= 0 &&
-          offsetCol + frames > cols
-        ) {
+        }
+        // A bad offsetCol must be its own error, not a silently skipped overflow
+        // check — SpritePet feeds offsetCol + frame straight into background-position.
+        if (typeof offsetCol !== 'number' || !Number.isInteger(offsetCol) || offsetCol < 0) {
+          errors.push({ key: 'badOffsetCol', params: { name, offsetCol: String(offsetCol) } });
+        } else if (framesOk && offsetCol + frames > cols) {
           errors.push({ key: 'framesOverflow', params: { name, need: offsetCol + frames, cols } });
         }
         if (typeof a.fps === 'number' && a.fps > 60) {
