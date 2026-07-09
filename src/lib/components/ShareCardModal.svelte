@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import { Image } from '@tauri-apps/api/image';
   import { writeImage } from '@tauri-apps/plugin-clipboard-manager';
   import { save } from '@tauri-apps/plugin-dialog';
@@ -20,11 +21,18 @@
   let building = $state(false);
   let feedback = $state<'' | 'copied' | 'saved' | 'error'>('');
 
+  // Rebuild exactly once per open (PrivacySection's prevOpen pattern). buildCard
+  // reads AND writes `building` synchronously — calling it tracked would make the
+  // effect retrigger itself forever (buttons stuck disabled, stats refetched in a
+  // loop). untrack() confines the effect's dependencies to open/canvasEl.
+  let prevOpen = false;
   $effect(() => {
-    if (open && canvasEl) {
+    const ready = open && canvasEl !== undefined;
+    if (ready && !prevOpen) {
       feedback = '';
-      void buildCard();
+      untrack(() => void buildCard());
     }
+    prevOpen = ready;
   });
 
   async function loadSprite(): Promise<{ sprite: SpriteFrame | null; name: string }> {
