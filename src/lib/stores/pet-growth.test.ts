@@ -26,12 +26,8 @@ vi.mock('@tauri-apps/api/core', () => ({
 }));
 
 import { EVOLUTION_STAGES } from '../utils/evolution';
-import { dailyGiftAmount, initialRewardState } from '../utils/rewards';
+import { initialRewardState } from '../utils/rewards';
 import { petStore } from './pet.svelte';
-
-function yesterdayUtc(): string {
-  return new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
-}
 
 beforeEach(() => {
   // The store is a module singleton — reset every public slice the growth loop touches.
@@ -42,38 +38,16 @@ beforeEach(() => {
   petStore.loadPetData(petStore.defaultPetData());
 });
 
-describe('daily gift streak', () => {
-  it('extends a yesterday-claimed streak and pays the bonus', () => {
-    petStore.loadPetData({
-      ...petStore.defaultPetData(),
-      coins: 0,
-      lastDailyGift: yesterdayUtc(),
-      giftStreak: 2,
-    });
-    expect(petStore.canClaimDailyGift).toBe(true);
-    expect(petStore.nextGiftAmount).toBe(dailyGiftAmount(3));
+// Gift-streak behavior lives in pet-board.test.ts since the daily task board
+// absorbed the streak (unified check-in streak).
 
+describe('daily gift double-claim gate', () => {
+  it('refuses a same-day second claim', () => {
     expect(petStore.claimDailyGift()).toBe(true);
-    expect(petStore.petData.giftStreak).toBe(3);
-    expect(petStore.petData.coins).toBe(dailyGiftAmount(3));
-    expect(petStore.giftStreakLive).toBe(3);
-
-    // Same-day double claim is refused and pays nothing.
+    const coins = petStore.petData.coins;
     expect(petStore.canClaimDailyGift).toBe(false);
     expect(petStore.claimDailyGift()).toBe(false);
-    expect(petStore.petData.coins).toBe(dailyGiftAmount(3));
-  });
-
-  it('restarts a broken streak at 1', () => {
-    petStore.loadPetData({
-      ...petStore.defaultPetData(),
-      lastDailyGift: '2020-01-01',
-      giftStreak: 30,
-    });
-    expect(petStore.giftStreakLive).toBe(0); // broken → display 0
-    expect(petStore.claimDailyGift()).toBe(true);
-    expect(petStore.petData.giftStreak).toBe(1);
-    expect(petStore.petData.coins).toBe(dailyGiftAmount(1));
+    expect(petStore.petData.coins).toBe(coins);
   });
 });
 

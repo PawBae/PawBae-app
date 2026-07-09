@@ -110,17 +110,27 @@ export interface PetData {
   approvalToday: number;
   approvalDate: string;
   pomodoroCoins: number;
-  // Phase 6 growth: consecutive daily-gift days (persisted) and the adoption moment
+  // Phase 6 growth: consecutive daily-gift days (FROZEN since the daily task board
+  // absorbed it — kept for old-build rollback safety) and the adoption moment
   // (persisted once, drives "days together" memories + achievements).
   giftStreak: number;
   firstMeetAt: number;
+  // Daily task board + forgiving streak (utils/daily-board.ts BoardState, flattened).
+  // `streak` is THE app-wide streak; boardDone holds today's ticked task ids.
+  boardDate: string;
+  boardDone: import('./utils/daily-board').BoardTaskId[];
+  streak: number;
+  streakDate: string;
+  shields: number;
 }
 
-// A queued growth moment the mascot celebrates (evolution flash / achievement toast).
-// Newest-last; MascotView displays the head and shifts it after the show beat.
+// A queued growth moment the mascot celebrates (evolution flash / achievement toast /
+// full task board). Newest-last; MascotView displays the head and shifts it after the
+// show beat.
 export type GrowthCelebration =
   | { kind: 'evolution'; stageIndex: number }
-  | { kind: 'achievement'; id: string };
+  | { kind: 'achievement'; id: string }
+  | { kind: 'perfect_day' };
 
 export interface PomodoroState {
   active: boolean;
@@ -176,6 +186,7 @@ export type CoinSource =
   | 'input_milestone'
   | 'pomodoro'
   | 'daily_gift'
+  | 'task_board'
   | 'feed';
 
 // One reward-ledger entry. `amount` is the EFFECTIVE delta after the clamp-at-zero

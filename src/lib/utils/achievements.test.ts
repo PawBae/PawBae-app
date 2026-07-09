@@ -12,7 +12,7 @@ function ctxWith(overrides: Partial<AchievementContext> = {}): AchievementContex
   return {
     totals: initialRewardState().totals,
     lifetimeInputCount: 0,
-    giftStreak: 0,
+    streak: 0,
     daysTogether: 0,
     stageIndex: 0,
     ...overrides,
@@ -59,7 +59,7 @@ describe('evaluateAchievements', () => {
 
   it('covers streak, time-together and evolution predicates', () => {
     const ids = evaluateAchievements(
-      ctxWith({ giftStreak: 7, daysTogether: 30, stageIndex: 3 }),
+      ctxWith({ streak: 7, daysTogether: 30, stageIndex: 3 }),
       {},
     ).map((d) => d.id);
     expect(ids).toEqual(

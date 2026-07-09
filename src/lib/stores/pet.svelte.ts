@@ -19,6 +19,16 @@ import {
   sanitizeUnlockMap,
 } from '../utils/achievements';
 import { approvalAwardFor } from '../utils/approval-note';
+import {
+  type BoardState,
+  type BoardTaskId,
+  displayStreak,
+  markTask,
+  PERFECT_DAY_COINS,
+  SHIELD_CAP,
+  sanitizeBoardDone,
+  streakBucket,
+} from '../utils/daily-board';
 import { type EvolutionInfo, evolutionInfo } from '../utils/evolution';
 import { tryInvoke } from '../utils/invoke';
 import {
@@ -32,7 +42,6 @@ import {
   FEED_COST_COINS,
   initialRewardState,
   type MutableRewardState,
-  nextGiftStreak,
   restoreRewardState,
   sanitizeStoredCount,
   snapshotRewardState,
@@ -73,7 +82,14 @@ const PET_PERSIST_FLUSH_MS = 60_000;
 const PET_STATE_SCHEMA_VERSION = 1;
 
 function todayStr(): string {
-  return new Date().toISOString().slice(0, 10);
+  // LOCAL calendar date on purpose: the UTC version made "a new day" start at
+  // 4-5pm for US-Pacific users, visibly wrong once the task board showed it.
+  // Comparisons/arithmetic on these strings are abstract-date operations
+  // (yesterdayOf, daysApart), so the switch is safe beyond a one-time reset shift.
+  const d = new Date();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${mm}-${dd}`;
 }
 
 function defaultPetData(): PetData {
@@ -90,6 +106,11 @@ function defaultPetData(): PetData {
     pomodoroCoins: 0,
     giftStreak: 0,
     firstMeetAt: Date.now(),
+    boardDate: '',
+    boardDone: [],
+    streak: 0,
+    streakDate: '',
+    shields: 0,
   };
 }
 
@@ -148,6 +169,7 @@ class PetStore {
    * and the eat beat with its revert timer.
    */
   private consumeMeal(restore: number) {
+    this.markBoardTask('meal'); // both meal paths (manual feed + agent meal) land here
     const wasHungry = this.petData.hunger < 30;
     const affectionBonus = wasHungry ? AFFECTION_FEED_HUNGRY : 0;
     this.petData = {
@@ -185,6 +207,9 @@ class PetStore {
 
   applyHeadpat() {
     const today = todayStr();
+    // Board tick before the affection cap: the cap limits affection farming, not
+    // the "petted today" fact (dedupe makes repeats free anyway).
+    this.markBoardTask('headpat');
     let count = this.petData.headpatDate === today ? this.petData.headpatToday : 0;
     if (count >= AFFECTION_HEADPAT_DAILY_LIMIT) return;
     count++;
@@ -241,16 +266,19 @@ class PetStore {
     return this.petData.lastDailyGift !== todayStr();
   }
 
-  /** Live streak for display: stored value while alive (claimed today/yesterday), else 0. */
-  get giftStreakLive(): number {
-    return currentGiftStreak(this.petData.lastDailyGift, todayStr(), this.petData.giftStreak);
+  /** The unified streak for display: stored value while alive or shield-savable, else 0. */
+  get streakLive(): number {
+    return displayStreak(this.boardState, todayStr());
   }
 
-  /** What the next claim pays, including the streak bonus it would reach. */
+  /** Today's ticked board tasks — [] when the stored board belongs to a previous day. */
+  get boardDoneToday(): BoardTaskId[] {
+    return this.petData.boardDate === todayStr() ? this.petData.boardDone : [];
+  }
+
+  /** What the next claim pays: probe the pure reducer for the streak a claim would reach. */
   get nextGiftAmount(): number {
-    return dailyGiftAmount(
-      nextGiftStreak(this.petData.lastDailyGift, todayStr(), this.petData.giftStreak),
-    );
+    return dailyGiftAmount(Math.max(1, markTask(this.boardState, 'gift', todayStr()).state.streak));
   }
 
   /** Whole days since the pet was adopted (firstMeetAt). */
@@ -263,14 +291,46 @@ class PetStore {
     return evolutionInfo(this.rewards.totals);
   }
 
+  /** The daily-board slice of petData, in the pure reducer's shape. */
+  private get boardState(): BoardState {
+    const { boardDate, boardDone, streak, streakDate, shields } = this.petData;
+    return { boardDate, boardDone, streak, streakDate, shields };
+  }
+
+  /**
+   * Tick a daily-board task (utils/daily-board.ts owns every rule). The day's first
+   * task checks in and advances the unified streak; completing all four pays the
+   * perfect-day bonus and queues a celebration. Duplicate marks are free no-ops,
+   * so call sites don't need their own gating.
+   */
+  markBoardTask(task: BoardTaskId) {
+    const result = markTask(this.boardState, task, todayStr());
+    if (!result.taskCompleted) return;
+    this.petData = { ...this.petData, ...result.state };
+    if (result.checkedIn) {
+      track('board_checkin', { streak_bucket: streakBucket(result.state.streak) });
+    }
+    if (result.perfectDay) {
+      this.celebrations = [...this.celebrations, { kind: 'perfect_day' }];
+      track('board_perfect_day');
+      // awardCoins → commitCoins persists, carrying the board slice with the coins.
+      this.awardCoins('task_board', PERFECT_DAY_COINS, { reason: result.state.boardDate });
+    } else {
+      this.persistRewards();
+    }
+  }
+
   claimDailyGift() {
     const today = todayStr();
     if (this.petData.lastDailyGift === today) return false;
-    const streak = nextGiftStreak(this.petData.lastDailyGift, today, this.petData.giftStreak);
-    // Both mutations complete synchronously before awardCoins' async persist runs, so
-    // the saved snapshot always carries the claimed date, the streak AND the coins together.
-    this.petData = { ...this.petData, lastDailyGift: today, giftStreak: streak };
-    this.awardCoins('daily_gift', dailyGiftAmount(streak), { reason: today });
+    // Date first (the double-claim gate), then the board tick — the day's first task
+    // advances the unified streak, so the payout below reads the streak this claim
+    // just earned. petData.giftStreak is frozen (absorbed by the board streak).
+    this.petData = { ...this.petData, lastDailyGift: today };
+    this.markBoardTask('gift');
+    this.awardCoins('daily_gift', dailyGiftAmount(Math.max(1, this.petData.streak)), {
+      reason: today,
+    });
     return true;
   }
 
@@ -390,7 +450,7 @@ class PetStore {
     const ctx: AchievementContext = {
       totals: this.rewards.totals,
       lifetimeInputCount: this.rewards.lifetimeInputCount,
-      giftStreak: this.giftStreakLive,
+      streak: this.streakLive,
       daysTogether: this.daysTogether,
       stageIndex: info.stageIndex,
     };
@@ -426,6 +486,7 @@ class PetStore {
     // Token feeding loop: a genuine completion (not a permission wait) may earn a meal.
     if (!payload.waiting) {
       track('agent_task_complete', { source: payload.source });
+      this.markBoardTask('agent');
       void this.settleTokenFeed(payload.source);
     }
   }
@@ -542,9 +603,34 @@ class PetStore {
         : Date.now();
     this.achievements = sanitizeUnlockMap(await store.get('achievements'));
     this.evolutionStageSeen = sanitizeStoredCount(await store.get('evolution_stage_seen'));
+    // Daily task board. Migration: an install that predates the board (no streak_date
+    // key ever written) seeds the unified streak from the legacy gift streak, so a
+    // live 30-day streak survives the upgrade instead of silently restarting.
+    const rawStreakDate = await store.get('streak_date');
+    const rawBoardDate = await store.get('board_date');
+    let streak = sanitizeStoredCount(await store.get('streak'));
+    let streakDate = typeof rawStreakDate === 'string' ? rawStreakDate : '';
+    if (rawStreakDate === undefined) {
+      streak = currentGiftStreak(lastDailyGift, todayStr(), giftStreak);
+      streakDate = streak > 0 ? lastDailyGift : '';
+    }
+    const boardDate = typeof rawBoardDate === 'string' ? rawBoardDate : '';
+    const boardDone = sanitizeBoardDone(await store.get('board_done'));
+    const shields = Math.min(SHIELD_CAP, sanitizeStoredCount(await store.get('shields')));
     // Hunger/affection/headpat stay session-ephemeral (no pet-behavior change in P1-C);
     // only the coin slice persists. restoreRewardState() backfills anything missing.
-    this.loadPetData({ ...defaultPetData(), coins, lastDailyGift, giftStreak, firstMeetAt });
+    this.loadPetData({
+      ...defaultPetData(),
+      coins,
+      lastDailyGift,
+      giftStreak,
+      firstMeetAt,
+      boardDate,
+      boardDone,
+      streak,
+      streakDate,
+      shields,
+    });
     this.rewards = restoreRewardState({
       totals,
       recent,
@@ -586,6 +672,11 @@ class PetStore {
     await store.set('lifetime_input_count', snap.lifetimeInputCount);
     await store.set('last_input_milestone', snap.lastAwardedMilestone);
     await store.set('gift_streak', this.petData.giftStreak);
+    await store.set('board_date', this.petData.boardDate);
+    await store.set('board_done', [...this.petData.boardDone]);
+    await store.set('streak', this.petData.streak);
+    await store.set('streak_date', this.petData.streakDate);
+    await store.set('shields', this.petData.shields);
     await store.set('first_meet_at', this.petData.firstMeetAt);
     await store.set('achievements', { ...this.achievements });
     await store.set('evolution_stage_seen', this.evolutionStageSeen);

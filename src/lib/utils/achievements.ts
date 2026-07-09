@@ -7,8 +7,8 @@ import type { CoinSource, CoinSourceTotals } from '../types';
 export interface AchievementContext {
   totals: Record<CoinSource, CoinSourceTotals>;
   lifetimeInputCount: number;
-  /** Validated consecutive-day gift streak (0 when broken). */
-  giftStreak: number;
+  /** The unified daily-board streak, display-validated (0 when broken). */
+  streak: number;
   /** Whole days since firstMeetAt. */
   daysTogether: number;
   /** Current evolution stage index. */
@@ -56,9 +56,9 @@ export const ACHIEVEMENTS: readonly AchievementDef[] = [
   { id: 'feed_first', emoji: '🍖', check: (c) => count(c, 'feed') >= 1 },
   { id: 'feed_50', emoji: '🍱', check: (c) => count(c, 'feed') >= 50 },
   { id: 'gift_first', emoji: '🎁', check: (c) => count(c, 'daily_gift') >= 1 },
-  { id: 'streak_3', emoji: '📅', check: (c) => c.giftStreak >= 3 },
-  { id: 'streak_7', emoji: '🗓️', check: (c) => c.giftStreak >= 7 },
-  { id: 'streak_30', emoji: '💎', check: (c) => c.giftStreak >= 30 },
+  { id: 'streak_3', emoji: '📅', check: (c) => c.streak >= 3 },
+  { id: 'streak_7', emoji: '🗓️', check: (c) => c.streak >= 7 },
+  { id: 'streak_30', emoji: '💎', check: (c) => c.streak >= 30 },
   // Time together.
   { id: 'week_together', emoji: '💛', check: (c) => c.daysTogether >= 7 },
   { id: 'month_together', emoji: '🧡', check: (c) => c.daysTogether >= 30 },
