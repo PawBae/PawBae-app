@@ -82,8 +82,10 @@
 export const ADVENTURE_MIN_MS = 180_000; // 3 分钟
 export interface AdventureState { pending: Map<string, number>; } // sessionId → 首见忙碌 epoch ms
 export function initialAdventureState(): AdventureState;
-/** busyIds = processing|tool_running|compacting；aliveIds = 会话列表全量。
- *  新忙碌会话打点；从列表消失的删除（waiting 保留——等审批是同一个任务的一部分）。
+/** busyIds = processing|tool_running|compacting；aliveIds = 非终态会话
+ *  （busy ∪ waiting——轮询对被杀/ESC 的会话不删行只改 stopped/idle，全量当 alive
+ *  会让旧时间戳被同 sessionId 的下一次运行继承，Codex review #45 抓到）。
+ *  新忙碌会话打点；不再存活的删除（waiting 保留——等审批是同一个任务的一部分）。
  *  返回 away：是否存在当前忙碌且已跑满 minMs 的行程。 */
 export function stepAdventure(s, busyIds, aliveIds, now): { away: boolean };
 /** 真完成时消费该会话的行程；返回耗时（clamp ≥0）或 null（没有行程记录）。 */

@@ -414,6 +414,11 @@
   // set, so a slow interval re-steps between poll changes.
   const ADVENTURE_TICK_MS = 10_000;
   const BUSY_STATUSES = new Set(['processing', 'tool_running', 'compacting']);
+  // "Alive" means non-terminal, NOT merely present: the poll keeps killed/ESC'd rows
+  // around with status stopped/idle, so an interrupted trip must be dropped here or a
+  // later run of the SAME sessionId would inherit the stale timestamp — instant away,
+  // and a souvenir-sized elapsed the resumed task never earned (Codex review, PR #45).
+  const LIVE_STATUSES = new Set(['processing', 'tool_running', 'compacting', 'waiting']);
   const adventureBusyKey = $derived(
     settingsStore.appMode === 'coding'
       ? sessionStore.claudeSessions
@@ -424,7 +429,10 @@
   );
   const adventureAliveKey = $derived(
     settingsStore.appMode === 'coding'
-      ? sessionStore.claudeSessions.map((s) => s.sessionId).join('\n')
+      ? sessionStore.claudeSessions
+          .filter((s) => s.status !== undefined && LIVE_STATUSES.has(s.status))
+          .map((s) => s.sessionId)
+          .join('\n')
       : ''
   );
   $effect(() => {

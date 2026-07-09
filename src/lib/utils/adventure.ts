@@ -26,10 +26,12 @@ export function initialAdventureState(): AdventureState {
 
 /**
  * Reconcile the trip timestamps against the current poll. `busyIds` are sessions in
- * an active status (processing/tool_running/compacting); `aliveIds` is every session
- * the poll returned. New busy sessions are timestamped with `now`; sessions gone
- * from the list entirely are dropped (killed / ESC'd — silently, never a drop);
- * sessions merely not busy (waiting on the user) keep their timestamp. The caller
+ * an active status (processing/tool_running/compacting); `aliveIds` are sessions in
+ * any NON-TERMINAL status (busy or waiting) — not merely present, because the poll
+ * keeps killed/ESC'd rows around as stopped/idle, and a stale timestamp surviving
+ * there would be inherited by a later run of the same sessionId. New busy sessions
+ * are timestamped with `now`; sessions no longer alive are dropped (silently, never
+ * a drop); sessions merely waiting on the user keep their timestamp. The caller
  * owns the clock so the machine stays deterministic under test.
  *
  * Returns `away`: whether some CURRENTLY busy session has been on a trip long
