@@ -51,7 +51,7 @@ jobs:
 
       - uses: pnpm/action-setup@v4
         with:
-          version: 9
+          version: 9.15.9
 
       - uses: actions/setup-node@v4
         with:
@@ -64,7 +64,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri
+          workspaces: apps/desktop/src-tauri
           save-if: false # reuse the cache built by ci.yml on main; don't evict it
 
       - run: pnpm install --frozen-lockfile
@@ -76,7 +76,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Aptabase telemetry app key, baked in at compile time. Missing secret
           # (e.g. forks) resolves to "" and the app builds with telemetry
-          # disabled entirely — see src-tauri/src/lib.rs.
+          # disabled entirely — see apps/desktop/src-tauri/src/lib.rs.
           APTABASE_APP_KEY: ${{ secrets.APTABASE_APP_KEY }}
           # macOS signing + notarization — uncomment once the Apple Developer
           # secrets exist (and add the keychain import step; docs/RELEASING.md):
@@ -87,6 +87,7 @@ jobs:
           # APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           # APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
+          projectPath: apps/desktop
           # On tag pushes: create/update a draft release. On manual runs the
           # empty tagName skips the release and we keep workflow artifacts.
           tagName: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}

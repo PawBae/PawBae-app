@@ -12,15 +12,17 @@ openspec
 
 # IDE / editor
 .vscode/
+.idea/
 
 # Claude Code local config
 .claude/
 
 # Build output
 dist/
+.pnpm-store/
 
 # Tauri auto-generated schemas
-src-tauri/gen/
+apps/desktop/src-tauri/gen/
 
 # OMX local runtime state (never commit)
 .omx/

@@ -1,0 +1,31 @@
+name: cloud
+
+on:
+  pull_request:
+    paths:
+      - packages/shared/**
+      - supabase/**
+      - .github/workflows/cloud.yml
+  push:
+    branches: [main]
+    paths:
+      - packages/shared/**
+      - supabase/**
+      - .github/workflows/cloud.yml
+
+jobs:
+  shared:
+    name: shared
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Shared package placeholder
+        run: test -f packages/shared/README.md
+
+  migrations:
+    name: migrations
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Supabase migration placeholder
+        run: test -d supabase

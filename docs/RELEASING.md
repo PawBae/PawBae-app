@@ -6,9 +6,9 @@ The version lives in three files — keep them in sync:
 
 | File | Field |
 | --- | --- |
-| `src-tauri/tauri.conf.json` | `version` (canonical — bundler + updater read this) |
-| `package.json` | `version` |
-| `src-tauri/Cargo.toml` | `version` |
+| `apps/desktop/src-tauri/tauri.conf.json` | `version` (canonical — bundler + updater read this) |
+| `apps/desktop/package.json` | `version` |
+| `apps/desktop/src-tauri/Cargo.toml` | `version` |
 
 Update `CHANGELOG.md` with the changes, then land the bump via a PR (never
 push to `main` directly).
@@ -41,7 +41,7 @@ To verify the pipeline without cutting a release, run the workflow manually
 ## 4. Update the in-app updater manifest
 
 The app checks `https://pawbae.ai/update/latest.json` (not GitHub) — see
-`src-tauri/src/commands/update.rs`. After publishing, update that file in the
+`apps/desktop/src-tauri/src/commands/update.rs`. After publishing, update that file in the
 website repo with the new version and the GitHub asset URLs:
 
 ```json

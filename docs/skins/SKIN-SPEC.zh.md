@@ -69,7 +69,7 @@ my-skin/
 - **语音情绪**：`happy`、`sleep`、`eat`、`angry`
 - **任务结果**（单次）：`done-success`、`done-fail`
 
-满配参考：内置 Yoonie（`public/assets/builtin/yoonie/`，31 行）。
+满配参考：内置 Yoonie（`apps/desktop/public/assets/builtin/yoonie/`，31 行）。
 
 ## 导入校验（宽进严出）
 

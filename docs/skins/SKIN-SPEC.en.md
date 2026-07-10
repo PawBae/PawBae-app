@@ -69,7 +69,7 @@ The engine looks rows up by name and falls back when missing — **it never erro
 - **Voice emotions**: `happy`, `sleep`, `eat`, `angry`
 - **Task outcomes** (one-shot): `done-success`, `done-fail`
 
-Full-featured reference: the builtin Yoonie (`public/assets/builtin/yoonie/`, 31 rows).
+Full-featured reference: the builtin Yoonie (`apps/desktop/public/assets/builtin/yoonie/`, 31 rows).
 
 ## Import validation (generous in, strict out)
 
