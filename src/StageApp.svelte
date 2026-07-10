@@ -19,19 +19,31 @@
 
   $effect(() => {
     void skinsStore.ensureLoaded();
-    const un = getCurrentWebviewWindow().listen<StageSnapshot>('stage-state', (e) => {
-      snap = e.payload;
-    });
-    // Handshake: this webview mounts after the main window's last emit, so ask
-    // for a replay of the latest snapshot.
-    void emitTo('main', 'stage-ready');
+    let unlisten: (() => void) | null = null;
+    let cancelled = false;
+    void (async () => {
+      const stop = await getCurrentWebviewWindow().listen<StageSnapshot>('stage-state', (e) => {
+        snap = e.payload;
+      });
+      if (cancelled) {
+        stop();
+        return;
+      }
+      unlisten = stop;
+      // Handshake: this webview mounts after the main window's last emit, so ask
+      // for a replay — but only once the listener registration above has landed,
+      // or the reply races the subscription and the stage stays blank until the
+      // next snapshot change (Codex review).
+      void emitTo('main', 'stage-ready');
+    })();
     const onResize = () => {
       vw = window.innerWidth;
       vh = window.innerHeight;
     };
     window.addEventListener('resize', onResize);
     return () => {
-      void un.then((f) => f());
+      cancelled = true;
+      unlisten?.();
       window.removeEventListener('resize', onResize);
     };
   });
