@@ -4,11 +4,13 @@ C 舞台线领地（见 `docs/team/line-c-stage.md`）。SvelteKit + adapter-sta
 
 ## 命令
 
+本目录是 pnpm workspace 成员（依赖装在仓库根，无独立 lockfile）：
+
 ```bash
-pnpm install
-pnpm dev        # 本地开发
-pnpm build      # 静态导出到 build/
-pnpm check      # svelte-check
+pnpm install                  # 在仓库根执行
+pnpm --dir apps/website dev   # 本地开发（或在本目录内直接 pnpm dev）
+pnpm --dir apps/website build # 静态导出到 build/
+pnpm --dir apps/website check # svelte-check
 ```
 
 ## 环境变量
@@ -17,11 +19,11 @@ pnpm check      # svelte-check
 
 ## 更新清单红线
 
-`static/update/latest.json` 是桌面 App 更新器硬编码的检查地址（`https://pawbae.ai/update/latest.json`，见 `src-tauri/src/commands/update.rs`）。**任何部署切换前，必须先验证新部署上该文件可达且内容正确**，否则老用户的更新检查全部 404。当前内容与线上（PawBae/website 仓库托管版）一致；Vercel 切到本目录部署时此文件自动接管。
+`static/update/latest.json` 是桌面 App 更新器硬编码的检查地址（`https://pawbae.ai/update/latest.json`，见 `apps/desktop/src-tauri/src/commands/update.rs`）。**任何部署切换前，必须先验证新部署上该文件可达且内容正确**，否则老用户的更新检查全部 404。当前内容与线上（PawBae/website 仓库托管版）一致；Vercel 切到本目录部署时此文件自动接管。
 
 ## 部署（cutover 清单）
 
-1. Vercel 项目（现指向 PawBae/website 仓库）→ Settings 改为从本 monorepo 构建：Root Directory = `apps/website`，Framework = SvelteKit；
+1. Vercel 项目（现指向 PawBae/website 仓库）→ Settings 改为从本 monorepo 构建：Root Directory = `apps/website`，Framework = SvelteKit，保持默认开启 "Include source files outside of the Root Directory"（pnpm lockfile 在仓库根）；
 2. 部署预览环境，验证 `/update/latest.json` 与首页；
 3. 配置 `PUBLIC_SUPABASE_*` 环境变量（候补名单真实收集）；
 4. Promote 到生产，再次验证清单可达；
