@@ -1,0 +1,42 @@
+# website.yml —— pawbae.ai 官网 CI（C 线领地）。
+# keyless 静态校验：build + svelte-check；部署走 Vercel（cutover 见 apps/website/README.md）。
+name: website
+
+on:
+  pull_request:
+    paths:
+      - apps/website/**
+      - package.json
+      - pnpm-lock.yaml
+      - pnpm-workspace.yaml
+      - .github/workflows/website.yml
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: build & check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm --dir apps/website build
+
+      - run: pnpm --dir apps/website check
+
+      # 更新清单红线：构建产物必须原样带出 /update/latest.json（桌面更新器硬编码地址）
+      - name: verify update manifest survives build
+        run: cmp apps/website/build/update/latest.json apps/website/static/update/latest.json
