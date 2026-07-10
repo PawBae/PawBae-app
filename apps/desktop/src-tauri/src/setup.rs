@@ -52,6 +52,9 @@ pub(crate) fn init(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error
             .build(),
     )?;
 
+    // Panic hook 落盘崩溃报告（脱敏），在日志插件就绪后立刻装上
+    crate::commands::crash::install(app.handle());
+
     // Run the WKWebView swizzle AFTER the log plugin is initialized so
     // its [first-mouse] / IME log lines are actually visible in the
     // tauri-plugin-log stream. Order vs window creation is fine —

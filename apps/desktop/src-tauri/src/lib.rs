@@ -80,6 +80,8 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            report_frontend_error,
+            take_unseen_crashes,
             get_status,
             send_chat,
             open_detail_panel,

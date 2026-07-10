@@ -80,6 +80,29 @@
     return fallbackMessage || '';
   }
 
+  // 上次运行留下的崩溃报告：读一次未读计数（Rust 侧推进 marker），若有且用户
+  // 开了遥测，发匿名聚合事件 —— 只有计数，无堆栈无路径（隐私红线见 crash.rs）。
+  let crashCheckStarted = false;
+  async function reportUnseenCrashes() {
+    if (crashCheckStarted) return;
+    crashCheckStarted = true;
+    try {
+      const res = (await invoke('take_unseen_crashes')) as {
+        total: number;
+        kinds: Record<string, number>;
+      };
+      if (res.total > 0) {
+        track('app_crash_detected', {
+          total: res.total,
+          rust_panic: res.kinds['rust-panic'] ?? 0,
+          webview: (res.kinds['webview-error'] ?? 0) + (res.kinds['webview-rejection'] ?? 0),
+        });
+      }
+    } catch {
+      // 命令缺失（旧构建）或读盘失败——静默，崩溃上报不能自己成为崩溃源
+    }
+  }
+
   async function checkUpdateOnStartup() {
     try {
       const info = (await invoke('check_for_update', { lang: settingsStore.language })) as {
@@ -125,6 +148,7 @@
 
   $effect(() => {
     init();
+    void reportUnseenCrashes();
 
     let disposed = false;
     const cleanups: (() => void)[] = [];
