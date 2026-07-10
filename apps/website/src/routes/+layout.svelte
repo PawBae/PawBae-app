@@ -5,58 +5,76 @@
 </script>
 
 <svelte:head>
-  <title>PawBae — The desktop pet that watches your AI agents</title>
+  <title>PawBae | The desktop pet for your AI agents</title>
   <meta
     name="description"
-    content="PawBae is a tiny desktop companion that lives beside your coding agent — it works when Claude Code works, waits when it waits, and celebrates when you ship."
+    content="PawBae is a tiny desktop companion that works with Claude Code, Codex, and Cursor. See what your agent is doing at a glance."
   />
 </svelte:head>
 
-<nav>
-  <div class="wrap nav-in">
-    <a class="logo" href="/">
-      <svg width="26" height="26" viewBox="0 0 26 26" aria-hidden="true">
-        <ellipse cx="13" cy="16" rx="8.5" ry="6.5" fill="#7dd3fc" />
-        <circle cx="6" cy="9" r="3" fill="#c4b5fd" /><circle cx="13" cy="7" r="3.2" fill="#7dd3fc" /><circle
-          cx="20"
-          cy="9"
-          r="3"
-          fill="#fdba74"
+<a class="skip-link" href="#download">Skip to content</a>
+
+<nav class="site-nav" aria-label="Primary navigation">
+  <div class="wrap nav-inner">
+    <a class="logo" href="/" aria-label="PawBae home">
+      <svg class="brand-mark" viewBox="0 0 36 36" aria-hidden="true">
+        <rect x="2" y="2" width="32" height="32" rx="10" fill="#0a0a08" />
+        <path d="M10 16 9 8l7 5m10 3 1-8-7 5" fill="#7dd3fc" />
+        <ellipse cx="18" cy="21" rx="11" ry="9" fill="#ffe3c2" />
+        <path
+          d="M27 24c5 0 5-4 3-6"
+          fill="none"
+          stroke="#fb923c"
+          stroke-width="3"
+          stroke-linecap="round"
         />
+        <circle cx="14" cy="20" r="1.4" fill="#734b2e" />
+        <circle cx="22" cy="20" r="1.4" fill="#734b2e" />
       </svg>
-      PawBae
+      <span>PawBae</span>
     </a>
+
     <div class="nav-links">
-      <a href="/#features">Features</a><a href="/#visits">Visits</a><a href="/#privacy">Privacy</a><a
-        href="/#faq">FAQ</a
-      >
+      <a href="/#features">Features</a>
+      <a href="/#visits">Visits</a>
+      <a href="/#privacy">Privacy</a>
+      <a href="/#faq">FAQ</a>
     </div>
-    <a class="btn btn-yellow nav-cta" href="/#download">Download</a>
+
+    <a class="btn btn-primary nav-cta" href="/#download">Download Free</a>
   </div>
 </nav>
 
-{@render children()}
+<main>
+  {@render children()}
+</main>
 
 <footer>
   <div class="wrap">
-    <div class="foot-grid">
-      <div>
-        <a class="logo foot-logo" href="/">
-          <svg width="24" height="24" viewBox="0 0 26 26" aria-hidden="true">
-            <ellipse cx="13" cy="16" rx="8.5" ry="6.5" fill="#7dd3fc" />
-            <circle cx="6" cy="9" r="3" fill="#c4b5fd" /><circle cx="13" cy="7" r="3.2" fill="#7dd3fc" /><circle
-              cx="20"
-              cy="9"
-              r="3"
-              fill="#fdba74"
+    <div class="footer-grid">
+      <div class="brand-col">
+        <a class="logo footer-logo" href="/" aria-label="PawBae home">
+          <svg class="brand-mark" viewBox="0 0 36 36" aria-hidden="true">
+            <rect x="2" y="2" width="32" height="32" rx="10" fill="#0a0a08" />
+            <path d="M10 16 9 8l7 5m10 3 1-8-7 5" fill="#7dd3fc" />
+            <ellipse cx="18" cy="21" rx="11" ry="9" fill="#ffe3c2" />
+            <path
+              d="M27 24c5 0 5-4 3-6"
+              fill="none"
+              stroke="#fb923c"
+              stroke-width="3"
+              stroke-linecap="round"
             />
+            <circle cx="14" cy="20" r="1.4" fill="#734b2e" />
+            <circle cx="22" cy="20" r="1.4" fill="#734b2e" />
           </svg>
-          PawBae
+          <span>PawBae</span>
         </a>
-        <p class="foot-blurb">A desktop companion for humans who work with AI agents.</p>
+        <p class="footer-blurb">A desktop companion for humans who build with AI agents.</p>
       </div>
+
       <div>
-        <h3>Features</h3>
+        <h2>Features</h2>
         <ul>
           <li><a href="/#features">Agent monitoring</a></li>
           <li><a href="/#visits">Pet visits</a></li>
@@ -66,8 +84,9 @@
           <li><a href="/#details">Skin workshop</a></li>
         </ul>
       </div>
+
       <div>
-        <h3>Use Cases</h3>
+        <h2>Use Cases</h2>
         <ul>
           <li><a href="/#features">Long-running agent tasks</a></li>
           <li><a href="/#details">Pair-streaming</a></li>
@@ -75,8 +94,9 @@
           <li><a href="/#features">Missed-approval rescue</a></li>
         </ul>
       </div>
+
       <div>
-        <h3>Setup Guides</h3>
+        <h2>Setup Guides</h2>
         <ul>
           <li><a href="/#faq">PawBae + Claude Code</a></li>
           <li><a href="/#faq">PawBae + Cursor</a></li>
@@ -84,16 +104,18 @@
           <li><a href="/#features">Reading pet moods</a></li>
         </ul>
       </div>
+
       <div>
-        <h3>Compare</h3>
+        <h2>Compare</h2>
         <ul>
-          <li><a href="/#features">vs. menu-bar monitors</a></li>
-          <li><a href="/#features">vs. desktop widgets</a></li>
-          <li><a href="/#details">vs. stream overlays</a></li>
+          <li><a href="/#features">Menu-bar monitors</a></li>
+          <li><a href="/#features">Desktop widgets</a></li>
+          <li><a href="/#details">Stream overlays</a></li>
         </ul>
       </div>
+
       <div>
-        <h3>About</h3>
+        <h2>About</h2>
         <ul>
           <li><a href="https://github.com/PawBae/PawBae-app/blob/main/CHANGELOG.md">Changelog</a></li>
           <li><a href="https://github.com/PawBae">GitHub</a></li>
@@ -101,7 +123,8 @@
         </ul>
       </div>
     </div>
-    <div class="foot-legal">
+
+    <div class="footer-legal">
       <span>© 2026 PawBae. All rights reserved.</span>
       <span>pawbae.ai · pawbae.app</span>
     </div>
@@ -109,115 +132,205 @@
 </footer>
 
 <style>
-  nav {
-    background: var(--hero-bg);
-  }
-  .nav-in {
-    display: flex;
-    align-items: center;
-    gap: 28px;
-    height: 64px;
-  }
-  .logo {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-weight: 700;
-    font-size: 18px;
+  .skip-link {
+    position: fixed;
+    top: 0.75rem;
+    left: 0.75rem;
+    z-index: 40;
+    border-radius: 0.6rem;
+    padding: 0.65rem 0.9rem;
+    background: var(--primary);
     color: #fff;
-    letter-spacing: -0.02em;
+    font-size: 0.875rem;
+    font-weight: 700;
+    text-decoration: none;
+    transform: translateY(-160%);
+    transition: transform 160ms ease;
+  }
+
+  .skip-link:focus {
+    transform: translateY(0);
+  }
+
+  .site-nav {
+    position: relative;
+    z-index: 20;
+    border-bottom: 1px solid rgba(226, 232, 240, 0.7);
+    background: rgba(255, 255, 255, 0.9);
+    -webkit-backdrop-filter: blur(18px) saturate(150%);
+    backdrop-filter: blur(18px) saturate(150%);
+  }
+
+  .nav-inner {
+    display: flex;
+    height: 71px;
+    align-items: center;
+    gap: 1.75rem;
+  }
+
+  .logo {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    gap: 0.65rem;
+    color: var(--ink-950);
+    font-size: 1.125rem;
+    font-weight: 760;
+    letter-spacing: -0.03em;
     text-decoration: none;
   }
+
+  .brand-mark {
+    width: 2rem;
+    height: 2rem;
+  }
+
   .nav-links {
     display: flex;
-    gap: 24px;
+    align-items: center;
+    gap: 1.6rem;
     margin-left: auto;
-    font-size: 14.5px;
-    font-weight: 500;
-    color: rgba(255, 255, 255, 0.7);
+    color: var(--ink-600);
+    font-size: 0.9rem;
+    font-weight: 600;
   }
+
   .nav-links a {
     text-decoration: none;
-    color: inherit;
+    transition: color 160ms ease;
   }
+
   .nav-links a:hover,
   .nav-links a:focus-visible {
-    color: #fff;
+    color: var(--ink-950);
   }
+
   .nav-cta {
-    font-size: 14px;
-    padding: 8px 18px;
+    min-height: 2.75rem;
+    padding: 0.6rem 1.2rem;
+    font-size: 0.9rem;
   }
-  @media (max-width: 640px) {
+
+  footer {
+    border-top: 1px solid #f1f5f9;
+    background: #fff;
+    padding: clamp(4.5rem, 8vw, 6rem) 0 2.75rem;
+  }
+
+  .footer-grid {
+    display: grid;
+    grid-template-columns: minmax(180px, 1.4fr) repeat(5, minmax(0, 1fr));
+    gap: 2.5rem 1.5rem;
+  }
+
+  .footer-logo {
+    width: fit-content;
+  }
+
+  .footer-blurb {
+    max-width: 19rem;
+    margin: 0.9rem 0 0;
+    color: var(--ink-500);
+    font-size: 0.875rem;
+    line-height: 1.65;
+  }
+
+  footer h2 {
+    margin: 0 0 1rem;
+    color: var(--ink-900);
+    font-size: 0.875rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+  }
+
+  footer ul {
+    display: grid;
+    gap: 0.65rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  footer li a {
+    color: var(--ink-600);
+    font-size: 0.84rem;
+    line-height: 1.45;
+    text-decoration: none;
+    transition: color 160ms ease;
+  }
+
+  footer li a:hover,
+  footer li a:focus-visible {
+    color: var(--ink-950);
+  }
+
+  .footer-legal {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 0.75rem 1.5rem;
+    margin-top: 3.75rem;
+    border-top: 1px solid #f1f5f9;
+    padding-top: 1.5rem;
+    color: var(--ink-500);
+    font-size: 0.78rem;
+  }
+
+  @media (max-width: 980px) {
+    .footer-grid {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+  }
+
+  @media (max-width: 680px) {
     .nav-links {
       display: none;
     }
+
     .nav-cta {
       margin-left: auto;
     }
   }
 
-  footer {
-    background: #fff;
-    border-top: 1px solid #f3f4f6;
-    padding: 72px 0 44px;
-  }
-  .foot-grid {
-    display: grid;
-    grid-template-columns: repeat(6, 1fr);
-    gap: 32px 24px;
-  }
-  @media (max-width: 980px) {
-    .foot-grid {
-      grid-template-columns: repeat(3, 1fr);
-    }
-  }
   @media (max-width: 620px) {
-    .foot-grid {
-      grid-template-columns: 1fr 1fr;
+    .nav-inner {
+      height: 63px;
+      gap: 1rem;
+    }
+
+    .logo {
+      font-size: 1.05rem;
+    }
+
+    .brand-mark {
+      width: 1.85rem;
+      height: 1.85rem;
+    }
+
+    .nav-cta {
+      min-height: 2.5rem;
+      padding-inline: 0.9rem;
+      font-size: 0.84rem;
+    }
+
+    .footer-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .brand-col {
+      grid-column: 1 / -1;
+    }
+
+    .footer-legal {
+      flex-direction: column;
     }
   }
-  .foot-logo {
-    color: var(--ink-900);
-  }
-  .foot-blurb {
-    font-size: 13px;
-    color: var(--ink-400);
-    max-width: 20em;
-    margin: 10px 0 0;
-  }
-  footer h3 {
-    font-size: 13.5px;
-    font-weight: 600;
-    line-height: 1.5;
-    color: var(--ink-900);
-    margin: 0 0 16px;
-  }
-  footer ul {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    display: grid;
-    gap: 10px;
-  }
-  footer li a {
-    font-size: 13.5px;
-    line-height: 1.5;
-    color: var(--ink-600);
-    text-decoration: none;
-  }
-  footer li a:hover {
-    color: var(--ink-900);
-  }
-  .foot-legal {
-    margin-top: 52px;
-    padding-top: 24px;
-    border-top: 1px solid #f3f4f6;
-    font-size: 12.5px;
-    color: var(--ink-400);
-    display: flex;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 10px;
+
+  @media (prefers-reduced-transparency: reduce) {
+    .site-nav {
+      background: #fff;
+      -webkit-backdrop-filter: none;
+      backdrop-filter: none;
+    }
   }
 </style>
