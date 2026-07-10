@@ -113,7 +113,15 @@ jobs:
         run: |
           mkdir -p .tmp
           supabase gen types --local --lang typescript --schema public > .tmp/database.types.ts
-          diff --unified packages/shared/src/database.types.ts .tmp/database.types.ts
+          node <<'NODE'
+          const fs = require('node:fs')
+          const normalize = (value) => value.replace(/\r\n/g, '\n').trimEnd() + '\n'
+          const expected = normalize(fs.readFileSync('packages/shared/src/database.types.ts', 'utf8'))
+          const actual = normalize(fs.readFileSync('.tmp/database.types.ts', 'utf8'))
+          fs.writeFileSync('.tmp/expected.database.types.ts', expected)
+          fs.writeFileSync('.tmp/database.types.ts', actual)
+          NODE
+          diff --unified .tmp/expected.database.types.ts .tmp/database.types.ts
 
       - name: Stop local database
         if: always()
