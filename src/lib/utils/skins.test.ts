@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import type { CodexPet } from './codex-pet';
-import { mergeSkins, petJsonUrlFromSheetUrl, tileFrameStyle } from './skins';
+import { type CodexPet, DEFAULT_PET_ID } from './codex-pet';
+import {
+  mergeSkins,
+  migrateMiniPetId,
+  petJsonUrlFromSheetUrl,
+  REMOVED_BUILTIN_PET_IDS,
+  tileFrameStyle,
+} from './skins';
 
 function fakePet(id: string, overrides: Partial<CodexPet> = {}): CodexPet {
   return {
@@ -47,7 +53,7 @@ describe('mergeSkins', () => {
   it('lets a custom skin override a builtin with the same id', () => {
     const builtin = fakePet('yoonie');
     const custom = fakePet('yoonie', { displayName: 'Custom Yoonie' });
-    const merged = mergeSkins([builtin, fakePet('homie')], [custom]);
+    const merged = mergeSkins([builtin, fakePet('wukong')], [custom]);
     expect(merged).toHaveLength(2);
     expect(merged.find((p) => p.id === 'yoonie')?.displayName).toBe('Custom Yoonie');
   });
@@ -55,6 +61,26 @@ describe('mergeSkins', () => {
   it('appends non-colliding customs after builtins', () => {
     const merged = mergeSkins([fakePet('a')], [fakePet('b')]);
     expect(merged.map((p) => p.id)).toEqual(['a', 'b']);
+  });
+});
+
+describe('migrateMiniPetId', () => {
+  it('maps every removed builtin id to the default pet', () => {
+    for (const id of REMOVED_BUILTIN_PET_IDS) {
+      expect(migrateMiniPetId(id)).toBe(DEFAULT_PET_ID);
+    }
+  });
+
+  it('passes surviving builtins and custom skin ids through', () => {
+    expect(migrateMiniPetId('shimeji-bola')).toBe('shimeji-bola');
+    expect(migrateMiniPetId('wukong')).toBe('wukong');
+    expect(migrateMiniPetId('my-custom.codex-pet')).toBe('my-custom.codex-pet');
+  });
+
+  it('falls back to the default pet on empty input', () => {
+    expect(migrateMiniPetId(null)).toBe(DEFAULT_PET_ID);
+    expect(migrateMiniPetId(undefined)).toBe(DEFAULT_PET_ID);
+    expect(migrateMiniPetId('')).toBe(DEFAULT_PET_ID);
   });
 });
 

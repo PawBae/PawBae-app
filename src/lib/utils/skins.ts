@@ -3,7 +3,35 @@
 // (~/.codex/pets via the codexpet:// protocol) into the gallery UI.
 // See docs/superpowers/specs/2026-07-09-skin-workshop-design.md.
 
-import type { CodexPet } from './codex-pet';
+import { type CodexPet, DEFAULT_PET_ID } from './codex-pet';
+
+/**
+ * Builtin skins pulled from the bundle before closed beta — copyrighted character
+ * sprites (see docs/superpowers/specs/2026-07-10-pet-interaction-creation-design.md §7).
+ * The ids stay listed here so installs that persisted one migrate to the default pet.
+ */
+export const REMOVED_BUILTIN_PET_IDS: ReadonlySet<string> = new Set([
+  'doro.codex-pet',
+  'elaina-2',
+  'homie',
+  'linnea-2',
+  'mambo',
+  'naruto',
+  'nezuko',
+  'phoebe.codex-pet',
+  'skirk-2',
+  'taffy',
+]);
+
+/**
+ * Map a persisted mini_pet_id to a shippable one: removed builtins fall back to the
+ * default pet (Yoonie — original character, no IP risk). Custom skin ids pass through
+ * untouched — customs are user content and never in the removed set.
+ */
+export function migrateMiniPetId(id: string | null | undefined): string {
+  if (!id) return DEFAULT_PET_ID;
+  return REMOVED_BUILTIN_PET_IDS.has(id) ? DEFAULT_PET_ID : id;
+}
 
 /**
  * Derive the pet.json URL from the platform-correct spritesheet URL Rust returns
