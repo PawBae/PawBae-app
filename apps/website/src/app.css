@@ -1,0 +1,165 @@
+@import 'tailwindcss';
+
+/* ============ PawBae website tokens ============
+   骨架严格对照 moneycoach.ai 实站解码（见 docs/team/line-c-stage.md 与设计稿 v2）。
+   视觉层后续由 Yining 重新设计——改这里的 token 与各组件 <style>，结构不动。 */
+:root {
+  --hero-bg: #0a0a08;
+  --band-950: #030712;
+  --band-900: #111827;
+  --primary: #0562c0;
+  --primary-hover: #3b82f6;
+  --yellow: #facc15;
+  --ink-900: #111827;
+  --ink-600: #4b5563;
+  --ink-400: #9ca3af;
+  --dark-body: #d1d5db;
+  --sky-band: linear-gradient(160deg, #e0f2fe 0%, #ede9fe 55%, #fff7ed 100%);
+  --mint: #34d399;
+  --peach: #fb923c;
+  --lav: #a78bfa;
+  --card-shadow: 0 18px 40px -32px rgba(15, 23, 42, 0.5);
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', 'PingFang SC',
+    'Hiragino Sans GB', sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+html,
+body {
+  background: #ffffff;
+}
+body {
+  font-family: var(--font-sans);
+  color: var(--ink-600);
+  line-height: 1.65;
+  margin: 0;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ---- 共享排版原语（实站模式） ---- */
+.wrap {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 0 28px;
+}
+.kicker {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--primary);
+}
+.h2 {
+  margin-top: 8px;
+  font-size: clamp(30px, 4vw, 36px);
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  line-height: 1.15;
+  color: var(--ink-900);
+  text-wrap: balance;
+}
+.h2.on-dark {
+  color: #ffffff;
+}
+.lede {
+  margin-top: 20px;
+  font-size: 17px;
+  max-width: 38em;
+}
+
+/* ---- 按钮（全站 rounded-xl；黄=最高转化位，蓝=区块内） ---- */
+.btn {
+  display: inline-block;
+  border-radius: 12px;
+  text-decoration: none;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+  font-family: inherit;
+  transition:
+    background 0.25s,
+    box-shadow 0.25s;
+}
+.btn:focus-visible {
+  outline: 3px solid var(--primary);
+  outline-offset: 2px;
+}
+.btn-yellow {
+  background: var(--yellow);
+  color: #000;
+  font-weight: 700;
+  font-size: 16px;
+  padding: 12px 28px;
+}
+.btn-yellow:hover {
+  background: #fde047;
+  box-shadow: 0 8px 28px rgba(250, 204, 21, 0.35);
+}
+.btn-ghost-dark {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 16px;
+  padding: 12px 24px;
+}
+.btn-ghost-dark:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+.btn-primary {
+  background: var(--primary);
+  color: #fff;
+  font-size: 16px;
+  padding: 10px 24px;
+  line-height: 1.75;
+}
+.btn-primary:hover {
+  background: var(--primary-hover);
+  box-shadow: 0 6px 20px rgba(5, 98, 192, 0.3);
+}
+
+/* ---- 行内加粗 pl-9 功能列表（实站 dt/dd 模式） ---- */
+.dl {
+  margin-top: 32px;
+  display: grid;
+  gap: 22px;
+  max-width: 36em;
+}
+.dl .row {
+  position: relative;
+  padding-left: 36px;
+  font-size: 15.5px;
+}
+.dl .row .ic {
+  position: absolute;
+  left: 0;
+  top: 3px;
+  width: 22px;
+  height: 22px;
+  border-radius: 7px;
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+}
+.dl .row b {
+  font-weight: 600;
+  color: var(--ink-900);
+}
+.on-dark-sec .dl .row b {
+  color: #fff;
+}
+.on-dark-sec .dl .row {
+  color: var(--dark-body);
+}
+
+/* ---- 玻璃卡片（实站 testimonial 卡配方） ---- */
+.glass-card {
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid rgba(226, 232, 240, 0.8);
+  border-radius: 16px;
+  box-shadow: var(--card-shadow);
+}
+.sdot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+}
