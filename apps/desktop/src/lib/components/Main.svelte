@@ -88,6 +88,7 @@
         hasUpdate: boolean;
         url: string;
         notes: string;
+        signature?: string;
       };
       if (!info.hasUpdate || !info.url) return;
       if (info.latest === settingsStore.skippedVersion) return;
@@ -107,7 +108,7 @@
     updateProgress = 0;
     updateProgressStage = resolveProgressText('preparing', '');
     try {
-      await invoke('run_update', { dmgUrl: updateInfo.url });
+      await invoke('run_update', { dmgUrl: updateInfo.url, signature: updateInfo.signature ?? null });
       // The installer helper is spawned and waiting — don't rely solely on the
       // ready_to_restart progress event racing the invoke resolution.
       updatePhase = 'ready_to_restart';

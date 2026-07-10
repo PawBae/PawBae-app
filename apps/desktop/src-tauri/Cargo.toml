@@ -31,6 +31,7 @@ chrono = "0.4"
 dirs = "5"
 percent-encoding = "2"
 imagesize = "0.14.0"
+minisign-verify = "0.2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 tauri = { version = "2", features = ["macos-private-api", "tray-icon", "image-png"] }
@@ -54,3 +55,5 @@ notify = { version = "6" }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt", "macros"] }
+# 测试用签名端（生成临时密钥对、内存签名）；发布签名只在 CI 用 minisign CLI
+minisign = "0.7"

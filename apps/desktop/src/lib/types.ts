@@ -255,4 +255,6 @@ export interface UpdateModalInfo {
   hasUpdate: boolean;
   url?: string;
   notes?: string;
+  /** minisign .minisig 全文，随清单下发；run_update 安装前验签 */
+  signature?: string;
 }

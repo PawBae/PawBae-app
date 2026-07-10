@@ -291,6 +291,7 @@
     "progress": {
       "preparing": "准备更新...",
       "downloading": "下载更新中...",
+      "verifying": "校验签名中...",
       "downloaded": "下载完成，准备安装...",
       "ready_to_restart": "更新已准备完成"
     }

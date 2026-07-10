@@ -1,0 +1,32 @@
+export const manifest = (() => {
+function __memo(fn) {
+	let value;
+	return () => value ??= (value = fn());
+}
+
+return {
+	appDir: "_app",
+	appPath: "_app",
+	assets: new Set(["favicon.svg","update/latest.json"]),
+	mimeTypes: {".svg":"image/svg+xml",".json":"application/json"},
+	_: {
+		client: {start:"_app/immutable/entry/start.CztTpIqL.js",app:"_app/immutable/entry/app.C-WVMR3d.js",imports:["_app/immutable/entry/start.CztTpIqL.js","_app/immutable/chunks/D4vnLz7f.js","_app/immutable/chunks/DFankRK6.js","_app/immutable/chunks/5Q8dfOM1.js","_app/immutable/entry/app.C-WVMR3d.js","_app/immutable/chunks/DFankRK6.js","_app/immutable/chunks/DLbT7826.js","_app/immutable/chunks/DjpNGO0z.js","_app/immutable/chunks/5Q8dfOM1.js","_app/immutable/chunks/DTQEIVOB.js","_app/immutable/chunks/BGT-1hdp.js"],stylesheets:[],fonts:[],uses_env_dynamic_public:true},
+		nodes: [
+			__memo(() => import('./nodes/0.js')),
+			__memo(() => import('./nodes/1.js'))
+		],
+		remotes: {
+			
+		},
+		routes: [
+			
+		],
+		prerendered_routes: new Set(["/"]),
+		matchers: async () => {
+			
+			return {  };
+		},
+		server_assets: {}
+	}
+}
+})();
