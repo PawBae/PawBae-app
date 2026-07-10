@@ -22,7 +22,7 @@ supabase/            ← PR-B 落地（migrations + config）
 ```
 
 - 根 `pnpm-workspace.yaml`；根 package.json scripts 转发到 apps/desktop（`pnpm tauri dev` 手感不变）。
-- CI 全量更新：ci.yml / release.yml / CodeQL 的路径过滤与 working-directory；tauri.conf.json 内相对路径核对（icon、frontendDist、beforeDevCommand）。
+- CI 全量更新：ci.yml 的 PR 路径过滤（移动后不更新会**静默停跑 CI**）与各 job 的 manifest 路径 / `rust-cache workspaces`；release.yml 的 tauri-action `projectPath`；`biome.json` includes 与 vitest/vite/tsconfig 三处 `$lib` 路径；tauri.conf.json 内相对路径核对（icon、frontendDist、beforeDevCommand）。仓库当前没有 CodeQL workflow，无需迁移。
 - 验收标准：`pnpm tauri dev`、vitest（360 基线）、svelte-check（13 warnings/0 errors 基线）、biome、clippy、rustfmt 全部照常通过；`git log --follow` 能追到平移前历史。
 - **排他窗口**：本 PR 移动所有文件，落地前不得有其他开着的 PR（当前无）。
 
@@ -35,9 +35,9 @@ supabase/            ← PR-B 落地（migrations + config）
 
 ### 2.2 数据模型（v1 最小）
 
-- `profiles`：id（uuid = auth.users.id）、handle（唯一，初值取 GitHub login，可改）、avatar_url、created_at。
-- `pets`：user_id（pk）、snapshot jsonb、updated_at。snapshot 是手机镜像的唯一数据源，字段白名单：petId、spriteState/mood 枚举、hunger、level、streak、away 等**数值/枚举**（思路镜像 stage-bridge 的 sanitize + 固定键序）。
-- `events`：id、user_id、kind（枚举）、params jsonb、occurred_at。append-only；之后喂好友时间线与投喂记录。
+- `profiles`：id（uuid = auth.users.id）、handle（唯一，初值取 GitHub login，可改）、display_name（可选公开展示名；与 handle 同为用户明确填写并选择公开的社交资料，走独立的长度/字符集/举报校验——本地宠物昵称永不自动上传）、avatar_url、created_at。
+- `pets`：user_id（pk）、snapshot jsonb、connector_seen_at（心跳时间戳：仅证明 Connector 存活，不携带任何会话内容；用于区分「电脑离线」与「在线空闲」，串门 spec §5.4 的硬性要求）、updated_at。snapshot 是手机镜像的唯一数据源，字段白名单：petId、spriteState/mood 枚举、hunger、level、streak、away 等**数值/枚举**（思路镜像 stage-bridge 的 sanitize + 固定键序）。
+- `events`：id、user_id、kind（枚举）、params jsonb、occurred_at。append-only；之后喂好友时间线与投喂记录。**任何面向好友的时间线/投影必须剥离 `source` 等 agent 厂商信息**（好友永远看不到主人用哪家 agent），且好友可见数据一律走独立的 public projection（P4 实施 spec 定义），绝不通过放宽 `pets.snapshot` 的 SELECT RLS 实现。
 - `friendships` / 投喂表**留到 P4 spec**，本期不建。
 
 ### 2.3 隐私门（双层）

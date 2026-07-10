@@ -49,8 +49,8 @@
 - **P1** 服务端地基：单仓库改造（先行、零行为变化）+ Supabase 账号 / 宠物状态存储 / 事件接收 / 隐私门 → spec: [2026-07-09-platform-foundation-design.md](../superpowers/specs/2026-07-09-platform-foundation-design.md)
 - **P2** 桌面 Connector：设置页「账号」区，GitHub 登录 + opt-in 上传衍生事件（默认关）
 - **P3** 手机 App v1：登录即看到自己的宠物**活着**（aha moment：电脑在干活，人在咖啡店看宠物替自己盯着）
-- **P4** 社交三件套：好友列表、互相看宠物、投喂
-- **之后（按反馈排队）**：串门、宠物信件（BYOA 生成）、挂机社交、PK（回合制、招式由真实工作衍生、输不掉东西）、世界 Boss、小队周任务、排行榜、广场/自习室、README 活体宠物牌（SVG）、宠物主页 pawbae.app/@handle、合孵/串种、观众领养主播后代蛋、conference 模式
+- **P4** 异步串门与共同记忆（原「三件套」升级，投喂融入待客点心）：P4-A 关系入口 / P4-B 串门纵向切片 / P4-C 共同记忆 → spec: [2026-07-09-social-visiting-design.md](../superpowers/specs/2026-07-09-social-visiting-design.md)
+- **之后（按反馈排队）**：宠物信件（BYOA 生成）、挂机社交、PK（回合制、招式由真实工作衍生、输不掉东西）、世界 Boss、小队周任务、排行榜、广场/自习室、README 活体宠物牌（SVG）、宠物主页 pawbae.app/@handle、合孵/串种、观众领养主播后代蛋、conference 模式
 
 ## 6. 与现有战略的关系
 
