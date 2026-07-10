@@ -2,7 +2,11 @@ import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { mount } from 'svelte';
 import './lib/i18n';
 import App from './App.svelte';
+import { installGlobalErrorReporting } from './lib/utils/crash-report';
 import StageApp from './StageApp.svelte';
+
+// 在 mount 之前装上，挂载期的错误也要落盘（两个窗口共用本入口）
+installGlobalErrorReporting();
 
 const target = document.getElementById('app');
 if (!target) throw new Error('Missing #app mount element');

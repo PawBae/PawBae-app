@@ -2,6 +2,7 @@
 
 pub mod agent;
 pub mod codex_pet;
+pub mod crash;
 pub mod hook;
 pub mod media;
 pub mod misc;
@@ -13,6 +14,7 @@ pub mod window;
 
 pub use agent::*;
 pub use codex_pet::*;
+pub use crash::*;
 pub use hook::*;
 pub use media::*;
 pub use misc::*;
