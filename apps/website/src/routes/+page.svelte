@@ -2,6 +2,7 @@
   import Waitlist from '$lib/Waitlist.svelte';
 
   function handleSummaryKeydown(event: KeyboardEvent) {
+    if (event.repeat) return;
     if (event.key !== 'Enter' && event.key !== ' ') return;
 
     const details = (event.currentTarget as HTMLElement).closest('details');
@@ -926,6 +927,26 @@
   .sdot.lavender { background: var(--lavender); }
   .sdot.offline { background: #94a3b8; }
 
+  .state-row .sdot,
+  .friend-state .sdot {
+    border: 1px solid rgba(15, 23, 42, 0.34);
+  }
+
+  .status-dot.working {
+    position: relative;
+  }
+
+  .status-dot.working::after {
+    position: absolute;
+    inset: -0.3rem;
+    border: 1px solid rgba(52, 211, 153, 0.65);
+    border-radius: 999px;
+    content: '';
+    opacity: 0;
+    pointer-events: none;
+    transform: scale(0.72);
+  }
+
   .state-scene {
     padding: 0.25rem 1.2rem 0.9rem;
   }
@@ -1590,7 +1611,7 @@
       animation: tail-wag 3.8s ease-in-out infinite;
     }
 
-    .status-dot.working {
+    .status-dot.working::after {
       animation: status-pulse 2.8s ease-out infinite;
     }
 
@@ -1615,8 +1636,9 @@
   }
 
   @keyframes status-pulse {
-    0%, 55%, 100% { box-shadow: 0 0 0 4px rgba(52, 211, 153, 0.12); }
-    75% { box-shadow: 0 0 0 7px rgba(52, 211, 153, 0); }
+    0%, 55% { opacity: 0; transform: scale(0.72); }
+    68% { opacity: 0.72; }
+    100% { opacity: 0; transform: scale(1.45); }
   }
 
   @keyframes cursor-blink {
@@ -1812,12 +1834,16 @@
     }
 
     .friend-state {
-      font-size: 0;
+      font-size: 0.66rem;
     }
 
     .friend-state .sdot {
       width: 0.6rem;
       height: 0.6rem;
+    }
+
+    .friend-meta span {
+      max-width: 6.5rem;
     }
 
     .egg-visual {

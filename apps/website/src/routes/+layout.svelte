@@ -170,6 +170,7 @@
 
   .logo {
     display: inline-flex;
+    min-height: 2.75rem;
     flex: none;
     align-items: center;
     gap: 0.65rem;
@@ -308,7 +309,7 @@
     }
 
     .nav-cta {
-      min-height: 2.5rem;
+      min-height: 2.75rem;
       padding-inline: 0.9rem;
       font-size: 0.84rem;
     }
