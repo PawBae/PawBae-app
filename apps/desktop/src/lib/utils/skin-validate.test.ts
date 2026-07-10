@@ -10,7 +10,7 @@ function keys(issues: { key: string }[]): string[] {
 describe('isSafeSkinId', () => {
   it('accepts plain and unicode ids', () => {
     expect(isSafeSkinId('mimi-2')).toBe(true);
-    expect(isSafeSkinId('doro.codex-pet')).toBe(true);
+    expect(isSafeSkinId('muru.codex-pet')).toBe(true);
     expect(isSafeSkinId('云朵小猫')).toBe(true);
   });
 

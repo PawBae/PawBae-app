@@ -493,7 +493,7 @@ mod tests {
     #[test]
     fn safe_ids_accept_plain_and_unicode() {
         assert!(is_safe_skin_id("mimi-2"));
-        assert!(is_safe_skin_id("doro.codex-pet"));
+        assert!(is_safe_skin_id("muru.codex-pet"));
         assert!(is_safe_skin_id("云朵小猫"));
     }
 

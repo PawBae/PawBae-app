@@ -14,16 +14,16 @@ import {
   unmetNeighbors,
 } from './eggs';
 
-const BUILTINS = [DEFAULT_PET_ID, 'mambo', 'taffy', 'homie'];
+const BUILTINS = [DEFAULT_PET_ID, 'solu', 'muru', 'riffi'];
 
 describe('hatchablePool / unmetNeighbors', () => {
   it('excludes Yoonie from the pool — she is never a hatch target', () => {
-    expect(hatchablePool(BUILTINS)).toEqual(['mambo', 'taffy', 'homie']);
+    expect(hatchablePool(BUILTINS)).toEqual(['solu', 'muru', 'riffi']);
   });
 
   it('filters met ids and leaves order intact', () => {
-    expect(unmetNeighbors(['mambo', 'taffy', 'homie'], ['taffy'])).toEqual(['mambo', 'homie']);
-    expect(unmetNeighbors(['mambo'], ['mambo'])).toEqual([]);
+    expect(unmetNeighbors(['solu', 'muru', 'riffi'], ['muru'])).toEqual(['solu', 'riffi']);
+    expect(unmetNeighbors(['solu'], ['solu'])).toEqual([]);
   });
 });
 

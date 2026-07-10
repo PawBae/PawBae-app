@@ -1,6 +1,7 @@
 import { load } from '@tauri-apps/plugin-store';
 import type { AppMode, OcConnection } from '../types';
 import { sanitizeNickname, sanitizeNicknames } from '../utils/pet-name';
+import { migrateMiniPetId } from '../utils/skins';
 import { type StageBg, sanitizeStageBg } from '../utils/stage-bridge';
 
 class SettingsStore {
@@ -75,7 +76,14 @@ class SettingsStore {
     this.hoverDelay = ((await store.get('hover_delay')) as number) ?? 0.3;
     this.petSfxEnabled = ((await store.get('pet_sfx_enabled')) as boolean) ?? true;
     this.petIdleIntervalMin = ((await store.get('pet_idle_interval_min')) as number) ?? 2;
-    this.miniPetId = ((await store.get('mini_pet_id')) as string) || 'yoonie';
+    // Copyright cleanup migration: a persisted id of a removed builtin skin falls
+    // back to the default pet (skinsStore.resolve also guards at render time, but
+    // rewriting here keeps nickname lookups and the gallery active-tile in sync).
+    const storedPetId = (await store.get('mini_pet_id')) as string | undefined;
+    this.miniPetId = migrateMiniPetId(storedPetId);
+    if (storedPetId && storedPetId !== this.miniPetId) {
+      await store.set('mini_pet_id', this.miniPetId);
+    }
     this.petNicknames = sanitizeNicknames(await store.get('pet_nicknames'));
     this.petQueue = ((await store.get('pet_queue')) as string[]) || [];
     this.skippedVersion = ((await store.get('skipped_version')) as string) || '';

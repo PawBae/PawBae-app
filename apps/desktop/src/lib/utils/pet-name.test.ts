@@ -36,9 +36,9 @@ describe('sanitizeNicknames', () => {
   it('keeps only non-empty string entries, sanitized', () => {
     const out = sanitizeNicknames({
       yoonie: '  团团 ',
-      mambo: '',
-      naruto: 42,
-      taffy: '   ',
+      solu: '',
+      muru: 42,
+      luma: '   ',
     });
     expect(out).toEqual({ yoonie: '团团' });
   });

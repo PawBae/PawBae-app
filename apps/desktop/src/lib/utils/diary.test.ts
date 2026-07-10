@@ -133,7 +133,7 @@ describe('sanitizeDiary', () => {
   it('keeps valid entries and drops structural garbage', () => {
     const raw = [
       summary('2026-07-08'),
-      { kind: 'egg_hatched', day: '2026-07-09', at: 2, ref: 'phoebe' },
+      { kind: 'egg_hatched', day: '2026-07-09', at: 2, ref: 'riffi' },
       { kind: 'evolution', day: 'not-a-day', at: 3 }, // bad day
       { kind: '', day: '2026-07-09', at: 4 }, // empty kind
       { kind: 'adopted', day: '2026-07-09' }, // missing at
@@ -142,7 +142,7 @@ describe('sanitizeDiary', () => {
     ];
     const out = sanitizeDiary(raw);
     expect(out).toHaveLength(2);
-    expect((out[1] as { ref?: string }).ref).toBe('phoebe');
+    expect((out[1] as { ref?: string }).ref).toBe('riffi');
   });
 
   it('keeps unknown moment kinds (a newer build wrote them; UI skips them)', () => {
