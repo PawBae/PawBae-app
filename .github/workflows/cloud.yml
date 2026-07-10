@@ -1,0 +1,208 @@
+name: Cloud
+
+on:
+  pull_request:
+    paths:
+      - packages/shared/**
+      - supabase/**
+      - .github/workflows/cloud.yml
+  push:
+    branches: [main]
+    paths:
+      - packages/shared/**
+      - supabase/**
+      - .github/workflows/cloud.yml
+  workflow_dispatch:
+    inputs:
+      deploy_database:
+        description: Apply reviewed migrations to the PawBae production project
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cloud-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+
+env:
+  SUPABASE_CLI_VERSION: 2.109.1
+
+jobs:
+  shared-contracts:
+    name: Shared contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10.33.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: packages/shared/pnpm-lock.yaml
+
+      - name: Install shared dependencies
+        run: pnpm --dir packages/shared install --frozen-lockfile
+
+      - name: Typecheck and test shared contracts
+        run: |
+          pnpm --dir packages/shared typecheck
+          pnpm --dir packages/shared test:coverage
+
+      - name: Audit shared dependencies
+        run: pnpm --dir packages/shared audit --registry=https://registry.npmjs.org --audit-level high
+
+  database:
+    name: Database migrations and security
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Set up Node.js for Supabase CLI
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+
+      - name: Set up Supabase CLI
+        uses: supabase/setup-cli@46f7f98c7f948ad727d22c1e67fab04c223a0520 # v3.0.0
+        with:
+          version: ${{ env.SUPABASE_CLI_VERSION }}
+
+      - name: Start local services and replay migrations
+        run: |
+          supabase start --exclude studio,storage-api,imgproxy,mailpit,edge-runtime,logflare,vector,supavisor,postgres-meta
+          supabase db reset
+
+      - name: Run pgTAP security suite
+        run: supabase test db
+
+      - name: Run local Data API and Realtime end-to-end flows
+        shell: bash
+        run: |
+          set -euo pipefail
+          status_json="$(supabase status -o json)"
+          export SUPABASE_URL="$(jq -r '.API_URL' <<<"$status_json")"
+          export SUPABASE_PUBLISHABLE_KEY="$(jq -r '.PUBLISHABLE_KEY' <<<"$status_json")"
+          node supabase/tests/api-e2e.mjs
+          node supabase/tests/realtime-e2e.mjs
+
+      - name: Lint database objects
+        run: supabase db lint --local --schema public,private --level warning --fail-on warning
+
+      - name: Run security and performance advisors
+        run: |
+          supabase db advisors --local --type security --level info --fail-on info
+          supabase db advisors --local --type performance --level info --fail-on warn
+
+      - name: Verify migration ordering
+        run: supabase migration list --local
+
+      - name: Verify generated database types
+        run: |
+          mkdir -p .tmp
+          supabase gen types --local --lang typescript --schema public > .tmp/database.types.ts
+          diff --unified packages/shared/src/database.types.ts .tmp/database.types.ts
+
+      - name: Stop local database
+        if: always()
+        run: supabase stop --no-backup
+
+  preview-production:
+    name: Preview reviewed migrations
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      inputs.deploy_database &&
+      github.ref == 'refs/heads/main'
+    needs: [shared-contracts, database]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+      SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Set up Node.js for Supabase CLI
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+
+      - name: Set up Supabase CLI
+        uses: supabase/setup-cli@46f7f98c7f948ad727d22c1e67fab04c223a0520 # v3.0.0
+        with:
+          version: ${{ env.SUPABASE_CLI_VERSION }}
+
+      - name: Verify production target
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$SUPABASE_PROJECT_ID" = "etqrnvhxvptnyhcdxgtb" || {
+            echo "Refusing to deploy to an unexpected Supabase project." >&2
+            exit 1
+          }
+
+      - name: Link and preview reviewed migrations
+        run: |
+          supabase link --project-ref "$SUPABASE_PROJECT_ID" --password "$SUPABASE_DB_PASSWORD"
+          supabase db push --linked --include-all --dry-run --password "$SUPABASE_DB_PASSWORD"
+
+  apply-production:
+    name: Apply reviewed migrations
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      inputs.deploy_database &&
+      github.ref == 'refs/heads/main'
+    needs: [shared-contracts, database, preview-production]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    concurrency:
+      group: production-database
+      cancel-in-progress: false
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+      SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Set up Node.js for Supabase CLI
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+
+      - name: Set up Supabase CLI
+        uses: supabase/setup-cli@46f7f98c7f948ad727d22c1e67fab04c223a0520 # v3.0.0
+        with:
+          version: ${{ env.SUPABASE_CLI_VERSION }}
+
+      - name: Verify production target again
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$SUPABASE_PROJECT_ID" = "etqrnvhxvptnyhcdxgtb" || {
+            echo "Refusing to deploy to an unexpected Supabase project." >&2
+            exit 1
+          }
+
+      - name: Relink approved production target
+        run: supabase link --project-ref "$SUPABASE_PROJECT_ID" --password "$SUPABASE_DB_PASSWORD"
+
+      - name: Apply reviewed migrations
+        run: supabase db push --linked --include-all --password "$SUPABASE_DB_PASSWORD" --yes
