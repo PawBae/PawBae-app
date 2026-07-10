@@ -94,7 +94,7 @@
 - friendship 单行表：`CHECK (user_a < user_b)` + 复合主键，重复/反向请求结构上不可能；拒绝/解除 = 直接 DELETE（不留 declined 墓碑，避免泄露与卡死重加）。
 - blocks 方向性独立表，只有 blocker 可见；`is_blocked(a,b)` SECURITY DEFINER 双向检查，**每条社交策略都调它**（好友请求、邀请、Realtime、投影读取）；拉黑 RPC 内同事务删好友行。
 - 状态转换全走 SECURITY DEFINER RPC（`REVOKE UPDATE`），转换校验 + 拉黑检查 + 限速在同一事务；所有 definer 函数钉死 `search_path`。
-- 唯一活动访问：`unique index ... on visits (visitor_id) where status='active'`（谓词必须 immutable——用 status 列，不能用 `now()`）；host 侧同理。RLS 读路径额外查 `now() < ends_at`，正确性不依赖 cron 准时。
+- 唯一活动访问：部分唯一索引 `on visits (visitor_id) where status in ('requested','accepted','traveling','visiting','returning')`——谓词必须覆盖 SV 状态机**全部未结束态**（状态机里没有 `active` 这个状态），且必须 immutable（用 status 列，不能用 `now()`）；host 侧同理（各状态是否计入 host 占用由 P4 实施 spec 精确定义）。pg_cron 把过期租约翻转到 `expired` 等终止态，RLS 读路径额外查 `now() < ends_at`，正确性不依赖 cron 准时。
 - 幂等：`unique (actor_id, idempotency_key)` **按用户限定作用域**，insert-on-conflict 后回读旧结果。
 - Realtime：投影走**私有 Broadcast 频道**、租约限定 topic `pet:{owner_id}:{lease_id}`，`realtime.messages` 上写 SELECT 策略（EXISTS 活跃租约 + 非拉黑）；**只允许数据库触发器发布**（客户端不可信）。关键认知：策略在订阅和 JWT 刷新时评估并缓存，删行不会踢人——**真正的撤销点在发送端**（发布触发器先查活跃租约，租约结束即静默），配短 JWT（5-10 分钟）兜底 + 礼貌性 `visit_ended` 广播。
 - 限速：`rate_limits` 固定窗口计数表放在同一 definer RPC 里（换客户端绕不过）；pg_cron 每 30-60 秒翻转过期租约、每日清理旧窗口和陈旧 pending 请求（幂等键保留 ≥24h）。
