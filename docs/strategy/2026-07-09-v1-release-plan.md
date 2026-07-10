@@ -32,7 +32,7 @@
 
 ## 2. 三条开发线
 
-三人都偏全栈 → 按功能垂直切，每人端到端负责一条线（前端 + Rust + SQL 都碰），线间只通过契约（SQL 迁移 + RPC 签名 + `packages/shared` 的 TS 类型）交互。**建议创始人拿 C 舞台线**——官网文案、品牌气质、串门体验打磨都是产品品味活；另两位谁后端手感更好谁拿 A。
+三人都偏全栈 → 按功能垂直切，每人端到端负责一条线（前端 + Rust + SQL 都碰），线间只通过契约（SQL 迁移 + RPC 签名 + `packages/shared` 的 TS 类型）交互。分配（2026-07-09 定）：**A = @zhihao-acc，B = @miaomeng1，C = Yining**。各线自包含交接文档：[A 云端线](../team/line-a-cloud.md) · [B 连接线](../team/line-b-connector.md) · [C 舞台线](../team/line-c-stage.md)。
 
 ### A · 云端线：Supabase 服务端 + shared 契约
 
