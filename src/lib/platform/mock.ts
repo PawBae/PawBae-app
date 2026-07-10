@@ -304,6 +304,24 @@ export class MockPlatformClient implements PlatformClient {
     if (pending) void this.respondVisit(pending.id, 'decline', newIdempotencyKey());
   }
 
+  /** 剧本注入：模拟好友发来的串门邀请（我是接待方）。接受/婉拒走正常 respondVisit。 */
+  simulateIncomingVisit(fromUserId: string): VisitLease {
+    const me = this.currentSession;
+    if (!me) throw new Error('NOT_AUTHENTICATED');
+    const lease: VisitLease = {
+      id: `lease-${++this.leaseCounter}`,
+      visitorUserId: fromUserId,
+      hostUserId: me.userId,
+      status: 'requested',
+      startedAt: null,
+      endsAt: null,
+    };
+    this.leases.set(lease.id, lease);
+    this.emitLease(lease);
+    this.at(this.inviteExpiryMs, () => this.transition(lease.id, ['requested'], 'expired'));
+    return { ...lease };
+  }
+
   /** 模拟主人 agent 断线/恢复等：手动覆盖访客投影状态并暂停剧本。 */
   setGuestProjectionStatus(leaseId: string, status: ProjectionStatus): void {
     this.projectionPaused.add(leaseId);
