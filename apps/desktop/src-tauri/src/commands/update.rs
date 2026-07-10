@@ -6,22 +6,61 @@ use tauri::Emitter;
 #[cfg(target_os = "windows")]
 use crate::platform::windows::hide_window_cmd;
 
-/// Check for updates by fetching the version manifest from the official website.
-/// The manifest is a static JSON file hosted on Vercel at /update/latest.json,
-/// which is manually updated on each release — giving us full control over
-/// when users see an update prompt (independent of GitHub Releases).
-///
-/// Expected manifest format:
-///   {
-///     "version": "1.6.0",
-///     "notes": "...",
-///     "platforms": {
-///       "macos":   { "url": "https://github.com/.../PawBae_0.1.0_aarch64.dmg" },
-///       "windows": { "url": "https://github.com/.../PawBae_0.1.0_x64-setup.exe" }
-///     }
-///   }
-///
-/// Legacy format (single "url" field) is still supported for backward compatibility.
+// Check for updates by fetching the version manifest from the official website.
+// The manifest is a static JSON file hosted on Vercel at /update/latest.json,
+// which is manually updated on each release — giving us full control over
+// when users see an update prompt (independent of GitHub Releases).
+//
+// Expected manifest format:
+//   {
+//     "version": "1.6.0",
+//     "notes": "...",
+//     "platforms": {
+//       "macos":     { "url": "https://github.com/.../PawBae_0.1.0_aarch64.dmg",
+//                      "signature": "untrusted comment: ...\nRWQ...\ntrusted comment: ...\n..." },
+//       "macos-x64": { "url": "https://github.com/.../PawBae_0.1.0_x64.dmg", "signature": "..." },
+//       "windows":   { "url": "https://github.com/.../PawBae_0.1.0_x64-setup.exe", "signature": "..." }
+//     }
+//   }
+//
+// `signature` is the full minisign `.minisig` file content for that asset,
+// produced by the release workflow (see docs/RELEASING.md). Release builds
+// refuse to install an asset without a valid signature.
+//
+// Legacy format (single "url" field) is still supported for backward compatibility.
+
+/// Embedded minisign public key (verification only — the secret key exists
+/// exclusively in GitHub Actions secrets; see docs/RELEASING.md). While this
+/// file still holds the PLACEHOLDER marker, release builds refuse every
+/// install and the release workflow refuses to cut a version.
+const UPDATER_PUBKEY: &str = include_str!("../../updater-pubkey.pub");
+
+fn decode_public_key(pubkey_text: &str) -> Result<minisign_verify::PublicKey, String> {
+    if pubkey_text.contains("PLACEHOLDER") {
+        return Err(
+            "updater public key not provisioned — see docs/RELEASING.md (updater signing)"
+                .to_string(),
+        );
+    }
+    minisign_verify::PublicKey::decode(pubkey_text.trim())
+        .map_err(|e| format!("embedded updater public key invalid: {e}"))
+}
+
+/// Verify `data` against a minisign signature (`.minisig` file content).
+/// Returns Err with a human-readable reason on any failure — the caller must
+/// treat every Err as "do not install".
+fn verify_with_key(pubkey_text: &str, data: &[u8], signature_text: &str) -> Result<(), String> {
+    let pk = decode_public_key(pubkey_text)?;
+    let sig = minisign_verify::Signature::decode(signature_text.trim())
+        .map_err(|e| format!("update signature malformed: {e}"))?;
+    pk.verify(data, &sig, false)
+        .map_err(|e| format!("update signature verification failed: {e}"))
+}
+
+fn verify_update_artifact(data: &[u8], signature_text: &str) -> Result<(), String> {
+    verify_with_key(UPDATER_PUBKEY, data, signature_text)
+}
+
 fn normalize_lang_tag(lang: &str) -> String {
     lang.trim().to_lowercase().replace('_', "-")
 }
@@ -100,12 +139,32 @@ pub async fn check_for_update(
     // Falls back to legacy top-level json["version"] / json["url"] for compatibility.
     #[cfg(windows)]
     let platform_key = "windows";
-    #[cfg(target_os = "macos")]
+    // Apple Silicon keeps the historical "macos" slot; Intel Macs read a
+    // dedicated "macos-x64" slot so they never receive the arm64 DMG.
+    #[cfg(all(target_os = "macos", not(target_arch = "x86_64")))]
     let platform_key = "macos";
+    #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
+    let platform_key = "macos-x64";
     #[cfg(not(any(windows, target_os = "macos")))]
     let platform_key = "linux";
 
     let platform = &json["platforms"][platform_key];
+
+    // Intel Macs must not fall through to the legacy top-level url (arm64):
+    // a manifest without a macos-x64 slot simply means no update for them.
+    #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
+    if platform.is_null() {
+        log::info!("[update] manifest has no macos-x64 slot; reporting up-to-date on Intel");
+        return Ok(serde_json::json!({
+            "current": current,
+            "latest": current,
+            "hasUpdate": false,
+            "url": "",
+            "notes": "",
+            "signature": "",
+            "ui": json.get("ui").cloned().unwrap_or(serde_json::Value::Null),
+        }));
+    }
     let latest = platform["version"]
         .as_str()
         .or_else(|| json["version"].as_str())
@@ -113,6 +172,12 @@ pub async fn check_for_update(
     let url = platform["url"]
         .as_str()
         .or_else(|| json["url"].as_str())
+        .unwrap_or("");
+    // Full minisign .minisig content for the asset; run_update refuses to
+    // install without it in release builds.
+    let signature = platform["signature"]
+        .as_str()
+        .or_else(|| json["signature"].as_str())
         .unwrap_or("");
     let notes = pick_localized_notes(&platform["notes_i18n"], lang.as_deref())
         .or_else(|| pick_localized_notes(&json["notes_i18n"], lang.as_deref()))
@@ -150,6 +215,7 @@ pub async fn check_for_update(
         "hasUpdate": has_update,
         "url": url,
         "notes": notes,
+        "signature": signature,
         "ui": ui,
     }))
 }
@@ -206,12 +272,19 @@ fn emit_update_progress(
     );
 }
 
-/// Run the actual update: download the installer package, install, and relaunch.
+/// Run the actual update: download the installer package, verify its minisign
+/// signature, install, and relaunch.
 /// On macOS: downloads DMG, runs a bash helper script to swap the .app bundle.
 /// On Windows: downloads MSI/EXE, runs the installer silently.
-/// The `dmg_url` is passed from the frontend (originally from the website manifest).
+/// `dmg_url` and `signature` are passed from the frontend (originally from the
+/// website manifest). Release builds abort when `signature` is missing or does
+/// not verify against the embedded public key — HTTPS alone is not trusted.
 #[tauri::command]
-pub async fn run_update(app: tauri::AppHandle, dmg_url: String) -> Result<(), String> {
+pub async fn run_update(
+    app: tauri::AppHandle,
+    dmg_url: String,
+    signature: Option<String>,
+) -> Result<(), String> {
     if dmg_url.is_empty() {
         return Err("No download URL provided".to_string());
     }
@@ -300,6 +373,42 @@ pub async fn run_update(app: tauri::AppHandle, dmg_url: String) -> Result<(), St
     tokio::io::AsyncWriteExt::flush(&mut file)
         .await
         .map_err(|e| format!("failed to flush temp file: {e}"))?;
+    drop(file);
+
+    // Signature gate — nothing gets installed past this point unverified.
+    // Dev builds tolerate a missing signature (local manifests have none);
+    // release builds hard-abort so a stripped signature can't downgrade us
+    // back to blind HTTPS trust.
+    let signature = signature.unwrap_or_default();
+    if signature.trim().is_empty() {
+        if cfg!(debug_assertions) {
+            log::warn!("[update] manifest carries no signature — allowed in dev builds only");
+        } else {
+            let _ = std::fs::remove_file(&dmg_path);
+            return Err("update rejected: no signature for this asset in the manifest".into());
+        }
+    } else {
+        emit_update_progress(
+            &app,
+            "verifying",
+            Some(100),
+            downloaded_bytes,
+            total_bytes,
+            "Verifying signature...",
+        );
+        let data = tokio::fs::read(&dmg_path)
+            .await
+            .map_err(|e| format!("failed to read downloaded file for verification: {e}"))?;
+        if let Err(e) = verify_update_artifact(&data, &signature) {
+            let _ = std::fs::remove_file(&dmg_path);
+            log::error!("[update] {e}");
+            return Err(e);
+        }
+        log::info!(
+            "[update] minisign signature verified ({} bytes)",
+            data.len()
+        );
+    }
 
     emit_update_progress(
         &app,
@@ -534,4 +643,67 @@ if ($appPath) {{
         "Update ready — restart to install",
     );
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_keypair_and_signature(data: &[u8]) -> (String, String) {
+        let kp = minisign::KeyPair::generate_unencrypted_keypair().expect("keygen");
+        let sig = minisign::sign(
+            Some(&kp.pk),
+            &kp.sk,
+            std::io::Cursor::new(data),
+            Some("PawBae test signature"),
+            Some("test untrusted comment"),
+        )
+        .expect("sign")
+        .into_string();
+        let pubkey = kp.pk.to_box().expect("pubkey box").into_string();
+        (pubkey, sig)
+    }
+
+    #[test]
+    fn verify_accepts_valid_signature() {
+        let data = b"fake dmg payload";
+        let (pubkey, sig) = test_keypair_and_signature(data);
+        assert!(verify_with_key(&pubkey, data, &sig).is_ok());
+    }
+
+    #[test]
+    fn verify_rejects_tampered_payload() {
+        let data = b"fake dmg payload";
+        let (pubkey, sig) = test_keypair_and_signature(data);
+        let err = verify_with_key(&pubkey, b"fake dmg payloaD", &sig).unwrap_err();
+        assert!(
+            err.contains("verification failed"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn verify_rejects_wrong_key() {
+        let data = b"fake dmg payload";
+        let (_, sig) = test_keypair_and_signature(data);
+        let (other_pubkey, _) = test_keypair_and_signature(data);
+        assert!(verify_with_key(&other_pubkey, data, &sig).is_err());
+    }
+
+    #[test]
+    fn verify_rejects_malformed_signature() {
+        let data = b"fake dmg payload";
+        let (pubkey, _) = test_keypair_and_signature(data);
+        let err = verify_with_key(&pubkey, data, "not a minisig").unwrap_err();
+        assert!(err.contains("malformed"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn placeholder_pubkey_never_verifies() {
+        let data = b"fake dmg payload";
+        let (_, sig) = test_keypair_and_signature(data);
+        let placeholder = "untrusted comment: PLACEHOLDER\nRWTPLACEHOLDER=";
+        let err = verify_with_key(placeholder, data, &sig).unwrap_err();
+        assert!(err.contains("not provisioned"), "unexpected error: {err}");
+    }
 }

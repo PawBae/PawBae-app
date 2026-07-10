@@ -58,6 +58,23 @@ jobs:
           node-version: 20
           cache: pnpm
 
+      # 更新器验签红线：占位公钥/缺失签名密钥的状态下拒绝出正式版本，
+      # 否则会发出一个永远无法通过验签的更新器（docs/RELEASING.md「更新器签名」）。
+      - name: updater signing preflight
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        env:
+          HAS_MINISIGN_KEY: ${{ secrets.MINISIGN_SECRET_KEY != '' }}
+        run: |
+          if grep -q PLACEHOLDER apps/desktop/src-tauri/updater-pubkey.pub; then
+            echo "::error::updater-pubkey.pub 仍是占位符 — 先按 docs/RELEASING.md 生成密钥对"
+            exit 1
+          fi
+          if [ "$HAS_MINISIGN_KEY" != "true" ]; then
+            echo "::error::MINISIGN_SECRET_KEY secret 缺失 — 无法为发布资产签名"
+            exit 1
+          fi
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
@@ -97,3 +114,96 @@ jobs:
           uploadUpdaterJson: false # custom updater reads pawbae.ai, not GitHub latest.json
           uploadWorkflowArtifacts: ${{ github.event_name == 'workflow_dispatch' }}
           args: ${{ matrix.args }}
+
+  # 给发布资产做 minisign 签名（更新器安装前验签的另一半）。
+  # 产出：每个 dmg/exe/msi 一个 .minisig 上传回 release + Step Summary 里
+  # 给出 latest.json 直接粘贴用的 "signature" 字段值。
+  sign:
+    name: minisign release assets
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: install minisign
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq minisign
+
+      - name: download draft release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # 草稿 release 不出现在 releases/tags/<tag> 端点，走列表按 tag_name 匹配
+          rel_id=$(gh api "repos/$REPO/releases?per_page=30" \
+            --jq ".[] | select(.tag_name==\"$TAG\") | .id" | head -1)
+          if [ -z "$rel_id" ]; then
+            echo "::error::找不到 tag=$TAG 对应的 release（草稿也没有）"
+            exit 1
+          fi
+          echo "RELEASE_ID=$rel_id" >> "$GITHUB_ENV"
+          mkdir -p assets
+          gh api "repos/$REPO/releases/$rel_id/assets?per_page=100" \
+            --jq '.[] | select(.name | test("\\.(dmg|exe|msi)$")) | "\(.id)\t\(.name)"' |
+          while IFS=$'\t' read -r id name; do
+            echo "downloading $name"
+            gh api -H "Accept: application/octet-stream" \
+              "repos/$REPO/releases/assets/$id" > "assets/$name"
+          done
+          if [ -z "$(ls -A assets)" ]; then
+            echo "::error::release 里没有 dmg/exe/msi 资产可签名"
+            exit 1
+          fi
+          ls -la assets
+
+      - name: sign assets
+        env:
+          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          umask 077
+          printf '%s\n' "$MINISIGN_SECRET_KEY" > minisign.key
+          for f in assets/*; do
+            name=$(basename "$f")
+            # -W：密钥按 docs/RELEASING.md 用 -W 生成（无口令，只存于 GitHub secrets）
+            minisign -S -W -s minisign.key -x "$f.minisig" \
+              -t "PawBae $TAG $name" -m "$f"
+          done
+          rm -f minisign.key
+          ls -la assets
+
+      - name: upload signatures to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # 幂等：重跑时先删掉已存在的 .minisig 资产
+          gh api "repos/$REPO/releases/$RELEASE_ID/assets?per_page=100" \
+            --jq '.[] | select(.name | endswith(".minisig")) | .id' |
+          while read -r id; do
+            gh api --method DELETE "repos/$REPO/releases/assets/$id"
+          done
+          for f in assets/*.minisig; do
+            name=$(basename "$f")
+            echo "uploading $name"
+            gh api --method POST \
+              -H "Content-Type: application/octet-stream" \
+              "https://uploads.github.com/repos/$REPO/releases/$RELEASE_ID/assets?name=$name" \
+              --input "$f" > /dev/null
+          done
+
+      - name: signature blocks for latest.json
+        run: |
+          {
+            echo "## latest.json 的 signature 字段（逐资产复制粘贴）"
+            for f in assets/*.minisig; do
+              name=$(basename "$f" .minisig)
+              echo
+              echo "**$name**:"
+              echo '```json'
+              printf '"signature": %s\n' "$(jq -Rs . < "$f")"
+              echo '```'
+            done
+          } >> "$GITHUB_STEP_SUMMARY"

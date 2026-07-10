@@ -15,7 +15,7 @@
     message?: string;
   };
 
-  let updateInfo = $state<{ current: string; latest: string; hasUpdate: boolean; url: string } | null>(null);
+  let updateInfo = $state<{ current: string; latest: string; hasUpdate: boolean; url: string; signature?: string } | null>(null);
   let updateChecking = $state(false);
   let updateCheckResult = $state<'success' | 'error' | null>(null);
   let updateCheckMsg = $state('');
@@ -42,7 +42,7 @@
     }
     try {
       const info = await invoke('check_for_update', { lang: settingsStore.language }) as {
-        current: string; latest: string; hasUpdate: boolean; url: string;
+        current: string; latest: string; hasUpdate: boolean; url: string; signature?: string;
       };
       updateInfo = info;
       if (showFeedback) {
@@ -69,7 +69,7 @@
     updateRunResult = null;
     updateRunMsg = '';
     try {
-      await invoke('run_update', { dmgUrl: updateInfo.url });
+      await invoke('run_update', { dmgUrl: updateInfo.url, signature: updateInfo.signature ?? null });
       updateRunResult = 'success';
       updateRunMsg = $_('settings.downloadComplete');
       setTimeout(() => {
