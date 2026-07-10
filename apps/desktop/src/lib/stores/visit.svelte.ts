@@ -10,7 +10,6 @@
 
 import {
   deriveLocalPhase,
-  isActive,
   isEnded,
   newIdempotencyKey,
   reconcileLease,
