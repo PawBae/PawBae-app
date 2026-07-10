@@ -157,7 +157,23 @@
     "downloadComplete": "下载完成",
     "exitFailed": "退出失败：",
     "updateFailed": "更新失败：",
-    "updating": "更新中..."
+    "updating": "更新中...",
+    "account": {
+      "title": "账号",
+      "unconfigured": "云端未配置",
+      "unconfiguredDesc": "此构建没有内置平台凭据，登录暂不可用",
+      "signInLabel": "GitHub 账号",
+      "signInDesc": "登录后解锁好友与串门（封闭内测）",
+      "signIn": "用 GitHub 登录",
+      "signingIn": "等待浏览器授权…",
+      "signOut": "登出",
+      "connect": "连接你的 agent",
+      "connectDesc": "向好友展示宠物的 5 状态投影；关闭后任何数据不出本机",
+      "uploadRewards": "分享奖励时刻",
+      "uploadEggs": "分享孵蛋时刻",
+      "uploadSouvenirs": "分享冒险纪念品",
+      "uploadStreaks": "分享连胜里程碑"
+    }
   },
   "onboarding": {
     "chooseModeTitle": "选择你的模式",

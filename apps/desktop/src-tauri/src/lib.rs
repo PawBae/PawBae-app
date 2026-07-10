@@ -80,6 +80,7 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            await_oauth_callback,
             report_frontend_error,
             take_unseen_crashes,
             get_status,

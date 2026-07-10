@@ -2,6 +2,7 @@
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import { _ } from 'svelte-i18n';
+  import { accountStore } from '../stores/account.svelte';
   import { agentStore } from '../stores/agents.svelte';
   import { petStore } from '../stores/pet.svelte';
   import { sessionStore } from '../stores/sessions.svelte';
@@ -149,6 +150,8 @@
   $effect(() => {
     init();
     void reportUnseenCrashes();
+    // 恢复持久化登录会话（未配置云端凭据时内部直接 no-op）
+    void accountStore.init();
 
     let disposed = false;
     const cleanups: (() => void)[] = [];
