@@ -64,7 +64,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri
+          workspaces: apps/desktop/src-tauri
           save-if: false # reuse the cache built by ci.yml on main; don't evict it
 
       - run: pnpm install --frozen-lockfile
@@ -87,6 +87,7 @@ jobs:
           # APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           # APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
+          projectPath: apps/desktop
           # On tag pushes: create/update a draft release. On manual runs the
           # empty tagName skips the release and we keep workflow artifacts.
           tagName: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
