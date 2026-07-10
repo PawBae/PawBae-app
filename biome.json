@@ -9,7 +9,7 @@
     "experimentalFullSupportEnabled": true
   },
   "files": {
-    "includes": ["src/**"]
+    "includes": ["apps/desktop/src/**"]
   },
   "formatter": {
     "enabled": true,

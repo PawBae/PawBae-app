@@ -1,0 +1,51 @@
+# cloud.yml —— 云端线 CI 骨架（A 线领地，PR-A 预创建避免 A 在 CI 大改期间动 ci.yml）。
+# keyless：只做无凭据的静态校验；需要密钥的部署流程 A 线后续单独加。
+name: cloud
+
+on:
+  pull_request:
+    paths:
+      - packages/shared/**
+      - supabase/**
+      - .github/workflows/cloud.yml
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  shared:
+    name: shared contracts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # @pawbae/shared 有测试脚本后自动跑；占位阶段静默通过
+      - run: pnpm --dir packages/shared test --if-present
+
+  migrations:
+    name: supabase migrations dry-run
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # 占位：supabase/ 出现迁移后，A 线在此接 supabase CLI 的
+      # `db lint` / `db diff` dry-run（keyless，本地栈校验，不连云端）
+      - name: placeholder
+        run: |
+          if [ -d supabase/migrations ]; then
+            echo "TODO(A线): 接 supabase CLI dry-run"
+          else
+            echo "supabase/ 还没有迁移，跳过"
+          fi
