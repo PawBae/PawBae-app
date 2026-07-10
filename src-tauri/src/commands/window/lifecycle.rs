@@ -269,3 +269,41 @@ pub async fn reassert_floating(app: tauri::AppHandle) -> Result<(), String> {
     reassert_mini_floating(&app);
     Ok(())
 }
+
+/// Open the OBS stage window: a borderless, non-topmost mirror the streamer
+/// window-captures and chroma-keys into their scene. Deliberately NOT
+/// always-on-top — OBS (ScreenCaptureKit / WGC) captures fully occluded
+/// windows, so on a single monitor the stage can sit buried behind the IDE.
+/// It never takes focus: the pet must not interrupt a live stream.
+#[tauri::command]
+pub async fn open_stage_window(app: tauri::AppHandle) -> Result<(), String> {
+    if let Some(win) = app.get_webview_window("stage") {
+        win.show().map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+
+    // Plain index.html — the frontend routes to StageApp by window LABEL (the
+    // dev server drops URL fragments, so a #/stage hash never arrives in dev).
+    WebviewWindowBuilder::new(&app, "stage", WebviewUrl::App("index.html".into()))
+        .title("PawBae Stage")
+        .inner_size(480.0, 270.0)
+        .min_inner_size(160.0, 120.0)
+        .resizable(true)
+        .decorations(false)
+        .shadow(false)
+        .always_on_top(false)
+        .skip_taskbar(false)
+        .focused(false)
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn close_stage_window(app: tauri::AppHandle) -> Result<(), String> {
+    if let Some(win) = app.get_webview_window("stage") {
+        win.close().map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}

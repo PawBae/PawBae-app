@@ -21,3 +21,6 @@ dist/
 
 # Tauri auto-generated schemas
 src-tauri/gen/
+
+# OMX local runtime state (never commit)
+.omx/

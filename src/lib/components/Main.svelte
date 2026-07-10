@@ -28,6 +28,13 @@
     const next = skinsStore.resolve(settingsStore.miniPetId);
     if (next) pet = next;
   });
+
+  // OBS 直播舞台: settings own the choice, this effect owns the window — including
+  // the startup restore when loadSettings flips the flag. Closing a window that
+  // never opened is a no-op, so the pre-load `false` pass is harmless.
+  $effect(() => {
+    void tryInvoke(settingsStore.streamStageEnabled ? 'open_stage_window' : 'close_stage_window');
+  });
   let showOnboarding = $state(false);
 
   let voiceRecording = $state(false);
@@ -182,6 +189,14 @@
 
     addListener('tray-open-settings', () => {
       openSettings();
+    });
+
+    // The stage window is borderless — no close button of ours — but the OS can
+    // still kill it (Cmd+W, forced close). Fall the settings toggle back so the
+    // UI reflects reality; the lifecycle effect's close on the already-dead
+    // window is a no-op.
+    addListener('stage-closed', () => {
+      if (settingsStore.streamStageEnabled) void settingsStore.setStreamStageEnabled(false);
     });
 
     addListener<UpdateProgressPayload>('update-progress', (e) => {
