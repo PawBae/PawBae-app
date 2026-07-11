@@ -2,6 +2,132 @@
   "petDescriptions": {
     "wukong": "公版西游记，神话齐天大圣小 chibi"
   },
+  "home": {
+    "title": "PawBae 小家",
+    "nav": {
+      "friends": "好友",
+      "plaza": "广场",
+      "album": "相册",
+      "soon": "即将开放"
+    },
+    "status": {
+      "idle": "正在陪着你",
+      "working": "正在陪你写代码",
+      "waiting": "正在等你回复",
+      "compacting": "正在整理记忆",
+      "offline": "你的 Agent 正在休息"
+    },
+    "actions": {
+      "feed": "喂食",
+      "gift": "送礼",
+      "diary": "日记",
+      "sendDesktop": "把{pet}放到桌面",
+      "play": "一起玩",
+      "snack": "请吃点心",
+      "photo": "拍合照",
+      "endVisit": "结束串门",
+      "recall": "召回",
+      "viewVisit": "查看串门"
+    },
+    "away": "{pet}去{friend}家玩了",
+    "empty": {
+      "title": "邀请好友来认识{pet}",
+      "body": "连接账号后即可体验好友测试版。"
+    },
+    "friends": {
+      "title": "好友",
+      "subtitle": "串门邀请与共同好友",
+      "findTitle": "查找好友",
+      "searchLabel": "PawBae 用户名",
+      "searchPlaceholder": "@用户名",
+      "inviteLink": "邀请链接",
+      "betaNote": "账号功能开放后即可搜索用户名和创建邀请链接。",
+      "mutualTitle": "共同好友",
+      "emptyTitle": "还没有共同好友",
+      "emptyBody": "好友内测开放后，连接账号即可添加好友。",
+      "inviteOver": "邀请串门",
+      "actions": {
+        "visit": "去 TA 家玩",
+        "invite": "邀请来玩",
+        "recall": "召回"
+      },
+      "disabled": {
+        "hosting": "你的小家已经有访客了。",
+        "away-elsewhere": "你的宠物正在另一位好友家。",
+        "friend-offline": "这位好友目前离线。",
+        "friend-busy": "这位好友的宠物正在串门。",
+        "already-requested": "请先回应上方的串门邀请。",
+        "unavailable": "这个操作尚未连接。"
+      },
+      "availability": {
+        "available": "现在可以串门",
+        "visiting": "正在接待访客",
+        "away": "正在好友家串门",
+        "offline": "离线"
+      },
+      "publicStatus": {
+        "idle": "Agent 空闲",
+        "working": "Agent 工作中",
+        "waiting": "Agent 等待中",
+        "compacting": "Agent 整理中",
+        "offline": "Agent 离线"
+      }
+    },
+    "album": {
+      "title": "相册",
+      "privacy": "共同记忆只属于你、你的好友和你们的宠物，绝不会自动发布或分享。",
+      "emptyTitle": "还没有共同记忆",
+      "emptyBody": "第一次和共同好友串门后，你们一起留下的记忆会出现在这里。",
+      "openMemory": "打开{title}，{date}，参与宠物：{pets}",
+      "participants": "参与的宠物"
+    },
+    "memory": {
+      "readyTitle": "共同记忆已整理好",
+      "readyBody": "{title} · {date}",
+      "open": "打开记忆",
+      "templates": {
+        "rainy-tea": "雨天的下午茶",
+        "shoulder-nap": "肩并肩打了个盹",
+        "shared-photo": "一起拍了 {photoCount} 张照片"
+      }
+    },
+    "plaza": {
+      "title": "广场",
+      "soon": "即将开放",
+      "comingLater": "稍后开放",
+      "body": "我们仍在认真设计安全、安心的宠物小家发现方式。"
+    },
+    "visit": {
+      "requestsTitle": "串门邀请",
+      "requestedBy": "和{owner}一起来",
+      "cardTitle": "{owner}家的{pet}想来串门",
+      "cardBody": "每次串门会持续 30 分钟。",
+      "accept": "欢迎进来",
+      "later": "暂时不行",
+      "remaining": "串门 {minutes} 分钟 · 至 {time}",
+      "visitorOffline": "主人的 Agent 在休息。"
+    },
+    "realtime": {
+      "degraded": "动态更新可能稍有延迟。",
+      "reconnecting": "正在重新连接串门动态…"
+    },
+    "care": {
+      "togetherDays": "相伴第 {days} 天",
+      "growthProgress": "成长进度：{current} / {target}"
+    },
+    "guestTag": "{owner}家的宠物",
+    "privacy": "共同记忆只属于你们两位。",
+    "settings": "设置",
+    "metrics": {
+      "affection": "亲密度",
+      "coins": "金币"
+    },
+    "theme": {
+      "system": "跟随系统",
+      "light": "浅色",
+      "dark": "深色"
+    }
+  },
   "common": {
     "back": "返回",
     "cancel": "取消",
@@ -181,7 +307,71 @@
     "codingModeLongDesc": "监控你的 AI Agent。悬停看板娘可查看状态、会话和活动。",
     "petModeLongDesc": "养成你的桌面宠物！喂食、互动，并通过丰富动画提升好感。",
     "recommended": "推荐",
-    "telemetryOptIn": "分享匿名使用统计，帮助改进 PawBae"
+    "telemetryOptIn": "分享匿名使用统计，帮助改进 PawBae",
+    "progress": {
+      "welcome": "欢迎",
+      "github": "GitHub",
+      "agents": "Agent",
+      "adopt": "领养",
+      "current": "第 {current} 步，共 {total} 步：{name}"
+    },
+    "common": {
+      "setupLater": "稍后设置",
+      "back": "返回",
+      "continue": "继续",
+      "aboutMinute": "大约 1 分钟"
+    },
+    "theme": {
+      "label": "外观",
+      "system": "跟随系统",
+      "light": "白色",
+      "dark": "黑色"
+    },
+    "welcome": {
+      "title": "让 AI Agent 更亲近一点",
+      "body": "当 Claude Code、Codex 或 Cursor 工作时，宠物会回应你。",
+      "local": "Agent 活动只在本机处理。",
+      "telemetry": "分享匿名功能使用次数，帮助改进 PawBae。绝不包含提示词、文件路径或个人内容。"
+    },
+    "github": {
+      "title": "连接身份，不读取你的代码",
+      "body": "GitHub 将用于好友与共同记忆，不会读取你的代码仓库。",
+      "action": "使用 GitHub 登录",
+      "unavailable": "GitHub 登录将在好友内测开放。",
+      "skip": "暂不登录"
+    },
+    "agents": {
+      "title": "让宠物听见哪个 Agent？",
+      "body": "可选择一个或多个。PawBae 会为每个连接安装一个小型本地 Hook。",
+      "claudeDesc": "监控本地 Claude Code 会话",
+      "codexDesc": "监控本地 Codex 会话",
+      "cursorDesc": "监控 Cursor Agent 会话",
+      "installing": "正在安装本地 Hook…",
+      "connected": "已连接",
+      "failed": "连接失败",
+      "unsupportedWindows": "Windows 暂不可用",
+      "petOnly": "先让它陪陪我"
+    },
+    "adopt": {
+      "title": "选择第一位桌面伙伴",
+      "body": "它们性格不同，但都会用温柔的方式陪着你和 Agent。",
+      "soluName": "小煦",
+      "soluTrait": "温暖又开朗",
+      "muruName": "雾露",
+      "muruTrait": "安静又治愈",
+      "riffiName": "雷栗",
+      "riffiTrait": "热情但有点笨拙",
+      "lumaName": "星沫",
+      "lumaTrait": "慵懒的幻想家",
+      "changeLater": "以后可以随时更换",
+      "spriteNotice": "你的选择会被保存；动态桌面形态将在舞台更新中加入。",
+      "action": "领养{name}",
+      "selected": "已选择{name}"
+    },
+    "errors": {
+      "complete": "未能保存设置，请重试。",
+      "poster": "宠物预览暂不可用"
+    }
   },
   "agentBubble": {
     "waiting": "需要你看一眼",

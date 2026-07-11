@@ -2,6 +2,132 @@
   "petDescriptions": {
     "wukong": "A tiny mythic Monkey King pet inspired by the public-domain Journey to the West figure."
   },
+  "home": {
+    "title": "PawBae Home",
+    "nav": {
+      "friends": "Friends",
+      "plaza": "Plaza",
+      "album": "Album",
+      "soon": "Soon"
+    },
+    "status": {
+      "idle": "Keeping you company",
+      "working": "Keeping you company while you code",
+      "waiting": "Waiting for your reply",
+      "compacting": "Tidying memories",
+      "offline": "Your agent is resting"
+    },
+    "actions": {
+      "feed": "Feed",
+      "gift": "Gift",
+      "diary": "Diary",
+      "sendDesktop": "Send {pet} to desktop",
+      "play": "Play together",
+      "snack": "Offer a snack",
+      "photo": "Take a photo",
+      "endVisit": "End visit",
+      "recall": "Recall",
+      "viewVisit": "View visit"
+    },
+    "away": "{pet} is visiting {friend}",
+    "empty": {
+      "title": "Invite a friend to meet {pet}",
+      "body": "Friends beta opens after account connection."
+    },
+    "friends": {
+      "title": "Friends",
+      "subtitle": "Visits and mutual friends",
+      "findTitle": "Find a friend",
+      "searchLabel": "PawBae handle",
+      "searchPlaceholder": "@handle",
+      "inviteLink": "Invite link",
+      "betaNote": "Handle search and invite links open with account support.",
+      "mutualTitle": "Mutual friends",
+      "emptyTitle": "No mutual friends yet",
+      "emptyBody": "Connect an account when Friends beta becomes available.",
+      "inviteOver": "Invite over",
+      "actions": {
+        "visit": "Visit",
+        "invite": "Invite",
+        "recall": "Recall"
+      },
+      "disabled": {
+        "hosting": "Your home is already hosting a visitor.",
+        "away-elsewhere": "Your pet is visiting someone else.",
+        "friend-offline": "This friend is offline.",
+        "friend-busy": "This friend's pet is busy visiting.",
+        "already-requested": "Respond to the visit request above.",
+        "unavailable": "This action is not connected yet."
+      },
+      "availability": {
+        "available": "Available to visit",
+        "visiting": "Hosting a visitor",
+        "away": "Visiting a friend",
+        "offline": "Offline"
+      },
+      "publicStatus": {
+        "idle": "Agent idle",
+        "working": "Agent working",
+        "waiting": "Agent waiting",
+        "compacting": "Agent organizing",
+        "offline": "Agent offline"
+      }
+    },
+    "album": {
+      "title": "Album",
+      "privacy": "Shared memories stay between you, your friend, and your pets. They're never published or shared automatically.",
+      "emptyTitle": "No shared memories yet",
+      "emptyBody": "After your first mutual-friend visit, memories you make together will appear here.",
+      "openMemory": "Open {title}, {date}, with {pets}",
+      "participants": "Participating pets"
+    },
+    "memory": {
+      "readyTitle": "A shared memory is ready",
+      "readyBody": "{title} · {date}",
+      "open": "Open memory",
+      "templates": {
+        "rainy-tea": "Rainy tea",
+        "shoulder-nap": "A shoulder-to-shoulder nap",
+        "shared-photo": "{photoCount} photos together"
+      }
+    },
+    "plaza": {
+      "title": "Plaza",
+      "soon": "Soon",
+      "comingLater": "Coming later",
+      "body": "We're still designing a safe, thoughtful way to discover other pet homes."
+    },
+    "visit": {
+      "requestsTitle": "Visit request",
+      "requestedBy": "With {owner}",
+      "cardTitle": "{pet} from {owner} wants to visit",
+      "cardBody": "Visits last 30 minutes.",
+      "accept": "Welcome in",
+      "later": "Not now",
+      "remaining": "{minutes} min visit · until {time}",
+      "visitorOffline": "Their owner's agent is resting."
+    },
+    "realtime": {
+      "degraded": "Updates may be delayed.",
+      "reconnecting": "Reconnecting to visit updates…"
+    },
+    "care": {
+      "togetherDays": "{days} days together",
+      "growthProgress": "Growth progress: {current} of {target}"
+    },
+    "guestTag": "{owner}'s pet",
+    "privacy": "Shared memories stay between the two of you.",
+    "settings": "Settings",
+    "metrics": {
+      "affection": "Affection",
+      "coins": "Coins"
+    },
+    "theme": {
+      "system": "System",
+      "light": "Light",
+      "dark": "Dark"
+    }
+  },
   "common": {
     "back": "Back",
     "cancel": "Cancel",
@@ -181,7 +307,71 @@
     "codingModeLongDesc": "Monitor your AI agents. Hover the mascot to see agent status, sessions, and activity.",
     "petModeLongDesc": "Raise your desktop pet! Feed, play, and build affection with rich animations.",
     "recommended": "Recommended",
-    "telemetryOptIn": "Share anonymous usage stats to help improve PawBae"
+    "telemetryOptIn": "Share anonymous usage stats to help improve PawBae",
+    "progress": {
+      "welcome": "Welcome",
+      "github": "GitHub",
+      "agents": "Agent",
+      "adopt": "Adopt",
+      "current": "Step {current} of {total}: {name}"
+    },
+    "common": {
+      "setupLater": "Set up later",
+      "back": "Back",
+      "continue": "Continue",
+      "aboutMinute": "About 1 minute"
+    },
+    "theme": {
+      "label": "Appearance",
+      "system": "System",
+      "light": "Light",
+      "dark": "Dark"
+    },
+    "welcome": {
+      "title": "Meet the gentler side of AI agents",
+      "body": "Your pet reacts when Claude Code, Codex, or Cursor works.",
+      "local": "Agent activity is processed locally.",
+      "telemetry": "Share anonymous feature counts to help improve PawBae. Never includes prompts, file paths, or personal content."
+    },
+    "github": {
+      "title": "Connect your identity—not your code",
+      "body": "GitHub will power friends and shared memories without reading your repositories.",
+      "action": "Continue with GitHub",
+      "unavailable": "GitHub sign-in opens with the Friends beta.",
+      "skip": "Skip for now"
+    },
+    "agents": {
+      "title": "Which agent should your pet listen to?",
+      "body": "Choose one or more. PawBae installs a small local Hook for each connection.",
+      "claudeDesc": "Monitor local Claude Code sessions",
+      "codexDesc": "Monitor local Codex sessions",
+      "cursorDesc": "Monitor Cursor agent sessions",
+      "installing": "Installing local Hook…",
+      "connected": "Connected",
+      "failed": "Connection failed",
+      "unsupportedWindows": "Not available on Windows yet",
+      "petOnly": "Just keep me company"
+    },
+    "adopt": {
+      "title": "Choose your first desktop companion",
+      "body": "Different personalities, one gentle way to stay close to your agents.",
+      "soluName": "Solu",
+      "soluTrait": "Warm & sunny",
+      "muruName": "Muru",
+      "muruTrait": "Shy & soothing",
+      "riffiName": "Riffi",
+      "riffiTrait": "Energetic & clumsy",
+      "lumaName": "Luma",
+      "lumaTrait": "Sleepy & dreamy",
+      "changeLater": "You can change pets anytime",
+      "spriteNotice": "Your choice will be saved; animated desktop forms arrive with the Stage update.",
+      "action": "Adopt {name}",
+      "selected": "{name} selected"
+    },
+    "errors": {
+      "complete": "Couldn’t save your setup. Try again.",
+      "poster": "Pet preview unavailable"
+    }
   },
   "agentBubble": {
     "waiting": "Needs your eyes",
