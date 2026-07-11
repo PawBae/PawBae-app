@@ -3,14 +3,17 @@
   import { listen } from '@tauri-apps/api/event';
   import { _ } from 'svelte-i18n';
   import { connector } from '../platform/connector';
+  import { projectionPublisher } from '../platform/projection-publisher';
   import { accountStore } from '../stores/account.svelte';
   import { agentStore } from '../stores/agents.svelte';
   import { petStore } from '../stores/pet.svelte';
   import { sessionStore } from '../stores/sessions.svelte';
   import { settingsStore } from '../stores/settings.svelte';
   import { skinsStore } from '../stores/skins.svelte';
+  import { visitStore } from '../stores/visit.svelte';
   import { windowStore } from '../stores/window.svelte';
   import type { AppMode, UpdateModalInfo } from '../types';
+  import { aggregateSessions, mascotStateFor } from '../utils/agent-activity';
   import type { CodexPet } from '../utils/codex-pet';
   import { loadDefaultCodexPet } from '../utils/codex-pet';
   import { tryInvoke } from '../utils/invoke';
@@ -44,6 +47,30 @@
         streak_milestone: settingsStore.uploadStreaksEnabled,
       },
     });
+  });
+
+  // 投影发布（W5）：与 mascot 同源的 4 状态信号（offline 由服务端 staleness
+  // 推导，客户端不发）。发送端守门：只在出访租约的活跃窗口内发布——
+  // 门关（租约结束/召回/总闸关/登出）即断流，publisher 内部同时清去重记忆。
+  const projectionStatus = $derived(
+    settingsStore.appMode === 'coding'
+      ? mascotStateFor(aggregateSessions(sessionStore.claudeSessions), agentStore.anySessionActive)
+      : 'idle'
+  );
+  const projectionGateOpen = $derived(
+    accountStore.session !== null &&
+      settingsStore.platformConnectEnabled &&
+      (visitStore.outboundPhase === 'traveling' ||
+        visitStore.outboundPhase === 'visiting' ||
+        visitStore.outboundPhase === 'returning')
+  );
+  $effect(() => {
+    projectionPublisher.setEnabled(projectionGateOpen);
+  });
+  $effect(() => {
+    if (!pet) return;
+    // petId/skinId 都是当前宠物 id；自定义皮肤由服务端回落默认皮（D2）
+    projectionPublisher.publish({ petId: pet.id, skinId: pet.id, status: projectionStatus });
   });
 
   // OBS 直播舞台: settings own the choice, this effect owns the window — including
