@@ -67,6 +67,32 @@ describe('outbound（我的宠物出门）', () => {
   });
 });
 
+describe('reset（登出清场）', () => {
+  it('clears both slots and the projection but keeps the store usable', async () => {
+    const { mock, store, advance } = setup({
+      autoRespond: 'manual',
+      projectionScript: [{ status: 'working', ms: 5_000 }],
+    });
+    await store.requestVisit('user-sarahk');
+    mock.simulateIncomingVisit('user-keyu');
+    await store.respondInbound('accept');
+    advance(3_600);
+    expect(store.outbound).not.toBeNull();
+    expect(store.guestProjection).not.toBeNull();
+
+    // 登出：租约属于会话，双槽/投影/幂等键全清——但 client 订阅与时钟保留
+    store.reset();
+    expect(store.outbound).toBeNull();
+    expect(store.inbound).toBeNull();
+    expect(store.guestProjection).toBeNull();
+    expect(store.outboundPhase).toBe('none');
+
+    // client 订阅未拆：服务端的新租约事件照常入店，重登直接续用
+    mock.simulateIncomingVisit('user-momo');
+    expect(store.inboundPhase).toBe('pending');
+  });
+});
+
 describe('inbound（好友宠物来我家）', () => {
   it('accepts an incoming visit and receives the guest projection during the lease window', async () => {
     const { mock, store, advance } = setup({

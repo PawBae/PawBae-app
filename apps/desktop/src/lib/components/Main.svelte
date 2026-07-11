@@ -5,7 +5,7 @@
   import { platformClient } from '../platform/client';
   import { connector } from '../platform/connector';
   import { projectionPublisher } from '../platform/projection-publisher';
-  import type { FriendEntry } from '../platform/types';
+  import type { FriendEntry, PlatformSession } from '../platform/types';
   import { accountStore } from '../stores/account.svelte';
   import { agentStore } from '../stores/agents.svelte';
   import { petStore } from '../stores/pet.svelte';
@@ -124,6 +124,9 @@
 
   // ---- 好友数据（W7 换线）：Home 打开时按需取，登出即清 ----
   let friendEntries = $state<FriendEntry[]>([]);
+  // 平台会话的响应式镜像：好友刷新必须键在它上面，不能键在 accountStore ——
+  // 两边并行恢复会话，键错了会在平台会话就绪前拉一次空列表且再无依赖触发重取。
+  let platformSession = $state<PlatformSession | null>(null);
   // 「稍后」= 本地暂时收起事件卡，不替用户发 decline；服务端 24h 过期兜底
   let dismissedVisitId = $state<string | null>(null);
 
@@ -135,7 +138,7 @@
     }
   }
   $effect(() => {
-    if (accountStore.session === null) {
+    if (platformSession === null) {
       friendEntries = [];
       return;
     }
@@ -324,14 +327,21 @@
     void reportUnseenCrashes();
     // 恢复持久化登录会话（未配置云端凭据时内部直接 no-op）
     void accountStore.init();
-    // W7 换线：真实 PlatformClient 上线。start() 恢复会话并订阅认证变化；
-    // visitStore 从此吃三源合流的真实租约流（RPC 回包/参与者轮询/visit_ended 广播）。
-    void platformClient.start();
-    visitStore.init(platformClient);
-    visitStore.startClock();
-
     let disposed = false;
     const cleanups: (() => void)[] = [];
+
+    // W7 换线：真实 PlatformClient 上线。start() 恢复会话并订阅认证变化；
+    // visitStore 从此吃三源合流的真实租约流（RPC 回包/参与者轮询/visit_ended 广播）。
+    // 监听在 start() 首个 await 落定前同步挂上，会话恢复的广播才不会漏。
+    void platformClient.start();
+    cleanups.push(
+      platformClient.onSessionChange((s) => {
+        platformSession = s;
+        if (s === null) visitStore.reset(); // 租约属于会话：登出即清，不跨账号残留
+      }),
+    );
+    visitStore.init(platformClient);
+    visitStore.startClock();
 
     function addListener<T>(event: string, handler: (e: { payload: T }) => void) {
       listen<T>(event, handler).then((u) => {

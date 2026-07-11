@@ -100,6 +100,12 @@ describe('Social Home window flow', () => {
     expect(mainSource).toContain('void platformClient.start()');
     expect(mainSource).toContain('visitStore.init(platformClient)');
     expect(mainSource).toContain('visitStore.startClock()');
+    // 好友刷新键在平台会话镜像上（不是 accountStore——两边并行恢复会有空窗）；
+    // 登出清空 visitStore，租约不跨账号残留
+    expect(mainSource).toContain('platformClient.onSessionChange((s) => {');
+    expect(mainSource).toContain('platformSession = s;');
+    expect(mainSource).toContain('if (s === null) visitStore.reset()');
+    expect(mainSource).toMatch(/if \(platformSession === null\) \{\s*friendEntries = \[\];/);
   });
 
   it('shares and persists the onboarding theme choice', () => {
