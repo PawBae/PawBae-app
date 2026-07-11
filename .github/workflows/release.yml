@@ -5,6 +5,8 @@ name: release
 #
 # - Tag push (v*): builds and uploads everything to a DRAFT GitHub Release.
 #   Review the draft, then publish it manually (see docs/RELEASING.md).
+#   macOS bundles are Developer ID signed + notarized (hard gate: missing
+#   Apple secrets refuse the tag build); Windows stays unsigned for v1.
 # - workflow_dispatch: builds only and uploads workflow artifacts — use this
 #   to verify the pipeline without cutting a release.
 #
@@ -75,6 +77,30 @@ jobs:
             exit 1
           fi
 
+      # macOS 签名红线：正式版本必须签名 + 公证——被 Gatekeeper 拦住的首启
+      # 体验等于没发。六个 Apple secrets 缺一即拒（docs/RELEASING.md
+      # 「macOS 签名与公证」有逐个 secret 的配置走查）。
+      - name: apple signing preflight
+        if: startsWith(github.ref, 'refs/tags/') && runner.os == 'macOS'
+        shell: bash
+        env:
+          HAS_APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE != '' }}
+          HAS_APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD != '' }}
+          HAS_APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY != '' }}
+          HAS_APPLE_ID: ${{ secrets.APPLE_ID != '' }}
+          HAS_APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD != '' }}
+          HAS_APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID != '' }}
+        run: |
+          fail=0
+          for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+            flag="HAS_${name}"
+            if [ "$(eval "printf '%s' \"\$$flag\"")" != "true" ]; then
+              echo "::error::${name} secret 缺失 — 按 docs/RELEASING.md「macOS 签名与公证」补齐"
+              fail=1
+            fi
+          done
+          exit "$fail"
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
@@ -85,6 +111,34 @@ jobs:
           save-if: false # reuse the cache built by ci.yml on main; don't evict it
 
       - run: pnpm install --frozen-lockfile
+
+      # Apple 签名凭据入构建环境——仅当已配置。不能无条件放进 tauri-action 的
+      # env：空字符串也算「已设置」，会把 tauri bundler 误带进签名流程；这样
+      # workflow_dispatch 冒烟在 secrets 缺席时照旧产出未签名包（tag 构建
+      # 由上面的 preflight 拒绝）。tauri 自己负责临时 keychain 的导入与清理。
+      - name: export apple signing env
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          if [ -z "$APPLE_CERTIFICATE" ]; then
+            echo "Apple secrets 未配置——本次构建不签名（正式版本会被 preflight 拒绝）"
+            exit 0
+          fi
+          for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+            {
+              echo "${name}<<PAWBAE_SECRET_EOF"
+              eval "printf '%s\n' \"\$$name\""
+              echo "PAWBAE_SECRET_EOF"
+            } >> "$GITHUB_ENV"
+          done
+          echo "Apple 签名凭据已入环境：tauri 将签名 + 公证 macOS 产物"
 
       # NOTE: the published major tag is v0 (currently v0.6.x) — there is no v1
       # tag even though upstream README examples show one.
@@ -99,14 +153,8 @@ jobs:
           # Variables 而非 secrets；缺失时账号区显示「云端未配置」，App 照常构建。
           VITE_SUPABASE_URL: ${{ vars.SUPABASE_URL }}
           VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.SUPABASE_PUBLISHABLE_KEY }}
-          # macOS signing + notarization — uncomment once the Apple Developer
-          # secrets exist (and add the keychain import step; docs/RELEASING.md):
-          # APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          # APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          # APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          # APPLE_ID: ${{ secrets.APPLE_ID }}
-          # APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          # APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # macOS 签名 + 公证凭据经上面「export apple signing env」按需注入
+          # $GITHUB_ENV，不在这里直挂（空值防线）。
         with:
           projectPath: apps/desktop
           # On tag pushes: create/update a draft release. On manual runs the
