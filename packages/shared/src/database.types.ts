@@ -661,10 +661,7 @@ export type Database = {
           isSetofReturn: false
         }
       }
-      join_waitlist: {
-        Args: { p_email: string }
-        Returns: undefined
-      }
+      join_waitlist: { Args: { p_email: string }; Returns: undefined }
       mute_user: {
         Args: { p_muted?: boolean; p_target_user_id: string }
         Returns: {
