@@ -20,7 +20,7 @@ openspec
 dist/
 
 # Tauri auto-generated schemas
-src-tauri/gen/
+apps/desktop/src-tauri/gen/
 
 # OMX local runtime state (never commit)
 .omx/

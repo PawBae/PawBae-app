@@ -1,45 +1,28 @@
 {
-  "name": "pawbae-app",
-  "version": "0.2.0",
-  "description": "An AI-powered desktop pet that monitors your coding agents in real time.",
+  "name": "pawbae-monorepo",
+  "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite dev",
-    "build": "vite build",
-    "preview": "vite preview",
-    "check": "svelte-check --tsconfig ./tsconfig.json",
-    "lint": "biome check src",
-    "lint:fix": "biome check --write src",
-    "format": "biome format --write src",
-    "tauri": "tauri",
-    "test": "vitest",
-    "test:ci": "vitest run --passWithNoTests"
+    "dev": "pnpm --dir apps/desktop dev",
+    "build": "pnpm --dir apps/desktop build",
+    "tauri": "pnpm --dir apps/desktop tauri",
+    "check": "pnpm --dir apps/desktop check",
+    "test": "pnpm --dir apps/desktop test",
+    "test:ci": "pnpm --dir apps/desktop test:ci",
+    "website:dev": "pnpm --dir apps/website dev",
+    "website:build": "pnpm --dir apps/website build",
+    "website:check": "pnpm --dir apps/website check",
+    "lint": "biome check apps/desktop/src",
+    "lint:fix": "biome check --write apps/desktop/src",
+    "format": "biome format --write apps/desktop/src"
   },
-  "license": "MIT",
-  "dependencies": {
-    "@aptabase/tauri": "^0.4.1",
-    "@tauri-apps/api": "^2",
-    "@tauri-apps/plugin-clipboard-manager": "^2.3.2",
-    "@tauri-apps/plugin-dialog": "^2.7.1",
-    "@tauri-apps/plugin-global-shortcut": "^2.3.1",
-    "@tauri-apps/plugin-store": "^2.4.3",
-    "svelte-i18n": "^4.0.1"
+  "devDependencies": {
+    "@biomejs/biome": "2.4.15"
   },
   "pnpm": {
     "overrides": {
       "esbuild": ">=0.25.0",
       "undici": "^7.28.0"
     }
-  },
-  "devDependencies": {
-    "@biomejs/biome": "^2.4.15",
-    "@sveltejs/vite-plugin-svelte": "^5.0.0",
-    "@tauri-apps/cli": "^2",
-    "jsdom": "^29.1.1",
-    "svelte": "^5.55.7",
-    "svelte-check": "^4.0.0",
-    "typescript": "~5.6.2",
-    "vite": "^6.4.3",
-    "vitest": "^4.1.6"
   }
 }

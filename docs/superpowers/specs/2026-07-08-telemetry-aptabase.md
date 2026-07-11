@@ -41,6 +41,7 @@
 | `dex_completed` | — | 图鉴集齐率——收集玩法的完成深度 |
 | `diary_opened` | — | 日记翻阅率——"记忆"依恋杠杆是否被主动消费（问候自动发生，不计事件） |
 | `stream_stage_toggled` | `on`: on/off | 直播舞台使用率——「主播即获客渠道」假设的最早信号 |
+| `app_crash_detected` | `total`: 数量；`rust_panic` / `webview`: 分类计数（**只有计数——无堆栈、无消息、无路径**，详情只在本地 crashes/ 目录） | 崩溃率——发布安全双件的观测半边（W2 B 线） |
 
 加新事件 = 在此表加一行 + 一处 `track()` 调用。不进此表的事件不许发。
 

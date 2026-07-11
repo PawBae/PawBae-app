@@ -1,0 +1,593 @@
+{
+  "petDescriptions": {
+    "wukong": "公版西游记，神话齐天大圣小 chibi"
+  },
+  "common": {
+    "back": "返回",
+    "cancel": "取消",
+    "save": "保存",
+    "done": "完成",
+    "delete": "删除",
+    "edit": "编辑",
+    "add": "添加",
+    "test": "测试",
+    "loading": "加载中...",
+    "saving": "保存中...",
+    "success": "成功",
+    "failed": "失败",
+    "unknown": "未知",
+    "default": "默认",
+    "reset": "重置",
+    "retry": "重试",
+    "close": "关闭",
+    "show": "显示",
+    "hide": "隐藏"
+  },
+  "mini": {
+    "settings": "设置",
+    "unpin": "取消置顶",
+    "pin": "置顶",
+    "soundOn": "提示音: 开",
+    "soundOff": "提示音: 关",
+    "moveMascot": "移动看板娘",
+    "mascot": "看板娘",
+    "connecting": "连接中...",
+    "waitingForAgents": "等待 Agent 连接...",
+    "ccStartTracking": "在 Claude Code 中发送消息以开始追踪",
+    "startTracking": "在 {{targets}} 中发送消息以开始追踪",
+    "remove": "移除",
+    "showMore": "展开其余 {{count}} 个会话",
+    "collapse": "收起列表",
+    "idle": "空闲",
+    "waiting": "等待中...",
+    "thinking": "思考中...",
+    "working": "工作中...",
+    "compacting": "压缩中...",
+    "local": "本地",
+    "remote": "远程",
+    "custom": "自定义",
+    "other": "其他"
+  },
+  "settings": {
+    "ocConnections": "OpenClaw 连接",
+    "noConnections": "暂无连接，点击「添加」来连接 OpenClaw 实例",
+    "local": "本地",
+    "remote": "远程",
+    "notConfigured": "未配置",
+    "username": "用户名",
+    "serverAddress": "服务器地址",
+    "key": "密钥:",
+    "agents": "个 agent",
+    "sessions": "个 session",
+    "howToConnect": "如何连接远程服务器？",
+    "prerequisites": "前置条件",
+    "prerequisitesDesc": "远程服务器需安装 OpenClaw 并运行 Gateway",
+    "steps": "步骤",
+    "step1": "1. 生成本地 SSH 密钥（如果没有）",
+    "step2": "2. 将公钥复制到远程服务器",
+    "step3": "3. 验证免密登录",
+    "step4": "4. 填入用户名和服务器地址，点击「测试」",
+    "claudeCode": "Claude Code",
+    "enableClaudeCode": "启用 Claude Code",
+    "enableClaudeCodeDesc": "通过 Hook 监听本地 Claude Code 会话",
+    "codex": "Codex",
+    "enableCodex": "启用 Codex",
+    "enableCodexDesc": "通过 Hook 监听本地 Codex 会话",
+    "hookInstalled": "Hook 已安装",
+    "hookFailed": "安装失败:",
+    "display": "显示",
+    "mascotPosition": "看板娘位置",
+    "mascotPositionDesc": "看板娘在刘海的哪一侧",
+    "mascotScale": "看板娘大小",
+    "mascotScaleDesc": "通过倍率调整看板娘大小",
+    "left": "居左",
+    "right": "居右",
+    "panelMaxHeight": "面板高度",
+    "panelMaxHeightDesc": "展开面板的最大高度",
+    "largeMascotScale": "大看板娘大小",
+    "largeMascotScaleDesc": "大看板娘模式的缩放倍率",
+    "stageToggle": "OBS 直播舞台",
+    "stageToggleDesc": "给直播用的无边框镜像小窗——在 OBS 里添加「窗口捕获」选 PawBae Stage，再加「色度键」滤镜。",
+    "stageBg": "幕布颜色",
+    "stageHint": "色度键滤镜选同一颜色；宠物撞色就换一块幕布。",
+    "stageBg_green": "绿幕",
+    "stageBg_blue": "蓝幕",
+    "stageBg_magenta": "品红幕",
+    "sound": "提示音",
+    "completionSound": "完成提示音",
+    "completionSoundDesc": "任务完成时播放的提示音",
+    "defaultSound": "默认",
+    "ccSound": "Claude Code 完成提示音",
+    "ccSoundDesc": "Claude Code 任务完成时播放提示音",
+    "codexSound": "Codex 完成提示音",
+    "codexSoundDesc": "Codex 任务完成时播放提示音",
+    "enableCursor": "启用 Cursor",
+    "enableCursorDesc": "通过 Hooks 监控本地 Cursor Agent 会话",
+    "cursorSound": "Cursor 完成提示音",
+    "cursorSoundDesc": "Cursor 任务完成时播放提示音",
+    "waitingSound": "等待时提示音",
+    "waitingSoundDesc": "Claude Code 等待用户确认时播放提示音",
+    "autoExpandOnTask": "主动弹窗",
+    "autoExpandOnTaskDesc": "任务完成或需要输入时自动弹出面板",
+    "about": "关于",
+    "currentVersion": "当前版本",
+    "latest": "Latest",
+    "available": "可用",
+    "newVersionFound": "发现新版本",
+    "alreadyLatest": "当前已是最新版本",
+    "checkFailed": "检查失败：",
+    "updateNow": "立即更新",
+    "checking": "检查中...",
+    "checkUpdate": "检查更新",
+    "exitApp": "退出应用",
+    "appMode": "模式",
+    "codingMode": "编程模式",
+    "codingModeDesc": "监控多 Agent 会话、Token 统计与任务提醒",
+    "petMode": "桌宠模式",
+    "petModeDesc": "丰富动作、养成系统与互动玩法",
+    "language": "语言",
+    "languageDesc": "选择界面显示语言",
+    "langZh": "中文",
+    "langEn": "English",
+    "hoverDelay": "悬停触发延迟",
+    "hoverDelayDesc": "悬停后延迟多久展开面板",
+    "autoCloseCompletion": "自动关闭完成弹窗",
+    "autoCloseCompletionDesc": "5 秒后自动关闭完成弹窗",
+    "manboSound": "曼波",
+    "petSfx": "角色音效",
+    "petSfxDesc": "互动时播放角色音效",
+    "petBehavior": "行为",
+    "strollMode": "散步模式",
+    "strollModeDesc": "让宠物在屏幕上自由活动——走动、拖拽和抛掷",
+    "petIdleInterval": "随机动作间隔",
+    "petIdleIntervalDesc": "空闲时看板娘触发随机动作的频率",
+    "minutesShort": "分钟",
+    "privacy": "隐私",
+    "inputReactions": "输入感应",
+    "inputReactionsDesc": "让宠物对你的键盘和鼠标活动做出反应。仅统计事件次数，不记录任何按键或输入内容，数据不会离开你的设备。",
+    "inputKeyboardOff": "键盘感应不可用——请在系统设置中授予辅助功能权限。",
+    "voiceInteraction": "语音互动",
+    "voiceInteractionDesc": "宠物能听懂你的话并做出反应。仅在你按下快捷键时录音，识别由系统本地完成，音频不会离开你的设备。",
+    "voiceShortcutHint": "快捷键：Control + Shift + V 开始/停止。当前优先支持中文识别。",
+    "musicReaction": "听歌互动",
+    "musicReactionDesc": "当你播放音乐（Spotify、Apple Music、网易云、QQ音乐……）时，宠物会跟着进入听歌状态并冒一句话。仅读取系统的「正在播放」信息，不会获取音频内容。",
+    "telemetry": "匿名使用统计",
+    "telemetryDesc": "分享匿名的功能使用计数（启动、agent 任务、进餐）帮助改进 PawBae。绝不包含提示词、文件路径或任何个人信息。默认关闭。",
+    "preparingDownload": "准备下载...",
+    "downloadComplete": "下载完成",
+    "exitFailed": "退出失败：",
+    "updateFailed": "更新失败：",
+    "updating": "更新中...",
+    "account": {
+      "title": "账号",
+      "unconfigured": "云端未配置",
+      "unconfiguredDesc": "此构建没有内置平台凭据，登录暂不可用",
+      "signInLabel": "GitHub 账号",
+      "signInDesc": "登录后解锁好友与串门（封闭内测）",
+      "signIn": "用 GitHub 登录",
+      "signingIn": "等待浏览器授权…",
+      "signOut": "登出",
+      "connect": "连接你的 agent",
+      "connectDesc": "向好友展示宠物的 5 状态投影；关闭后任何数据不出本机",
+      "uploadRewards": "分享奖励时刻",
+      "uploadEggs": "分享孵蛋时刻",
+      "uploadSouvenirs": "分享冒险纪念品",
+      "uploadStreaks": "分享连胜里程碑"
+    }
+  },
+  "onboarding": {
+    "chooseModeTitle": "选择你的模式",
+    "chooseModeSubtitle": "你可以随时在设置中切换模式。",
+    "codingModeLongDesc": "监控你的 AI Agent。悬停看板娘可查看状态、会话和活动。",
+    "petModeLongDesc": "养成你的桌面宠物！喂食、互动，并通过丰富动画提升好感。",
+    "recommended": "推荐",
+    "telemetryOptIn": "分享匿名使用统计，帮助改进 PawBae"
+  },
+  "agentBubble": {
+    "waiting": "需要你看一眼",
+    "compacting": "整理上下文中",
+    "working": "处理中…"
+  },
+  "approvalNote": {
+    "label": "求盖章！"
+  },
+  "growth": {
+    "evolvedTo": "进化为",
+    "maxStage": "满级",
+    "daysTogether": "在一起的第 {days} 天",
+    "streak": "连续签到 {days} 天",
+    "achievements": "成就",
+    "stage": {
+      "newborn": "新生",
+      "sprout": "幼苗",
+      "junior": "少年",
+      "master": "大师",
+      "legend": "传说"
+    },
+    "style": {
+      "commander": "指挥官",
+      "zen": "禅修者",
+      "companion": "贴心伙伴"
+    },
+    "ach": {
+      "agent_first": "初次出击",
+      "agent_10": "小队长",
+      "agent_100": "指挥官",
+      "agent_500": "军团元帅",
+      "focus_first": "深呼吸",
+      "focus_30": "心流行者",
+      "pomodoro_first": "第一颗番茄",
+      "pomodoro_20": "番茄农场主",
+      "typist_1k": "指尖热身",
+      "typist_50k": "键盘演奏家",
+      "typist_500k": "机械之魂",
+      "feed_first": "第一餐",
+      "feed_50": "大厨",
+      "gift_first": "开礼物啦",
+      "streak_3": "常客",
+      "streak_7": "风雨无阻",
+      "streak_30": "形影不离",
+      "week_together": "相伴一周",
+      "month_together": "相伴一月",
+      "hundred_days": "百日纪念",
+      "rich_500": "小金库",
+      "evolved_junior": "进化！",
+      "evolved_master": "大进化",
+      "evolved_legend": "活着的传说"
+    },
+    "achDesc": {
+      "agent_first": "第一次有 agent 在你身边完成任务。",
+      "agent_10": "累计完成 10 个 agent 任务。",
+      "agent_100": "累计完成 100 个 agent 任务。",
+      "agent_500": "累计完成 500 个 agent 任务。",
+      "focus_first": "完成第一个 10 分钟专注块。",
+      "focus_30": "累计 30 个专注块，足足五小时心流。",
+      "pomodoro_first": "完成第一个番茄钟。",
+      "pomodoro_20": "累计完成 20 个番茄钟。",
+      "typist_1k": "累计输入 1,000 次。",
+      "typist_50k": "累计输入 50,000 次。",
+      "typist_500k": "累计输入 500,000 次。",
+      "feed_first": "第一次给宠物喂食。",
+      "feed_50": "累计喂食 50 次。",
+      "gift_first": "领取第一份每日礼物。",
+      "streak_3": "连续 3 天领取礼物。",
+      "streak_7": "连续 7 天领取礼物。",
+      "streak_30": "连续 30 天领取礼物。",
+      "week_together": "相遇已经 7 天。",
+      "month_together": "相遇已经 30 天。",
+      "hundred_days": "相遇已经 100 天。",
+      "rich_500": "累计赚到 500 金币。",
+      "evolved_junior": "进化到少年阶段。",
+      "evolved_master": "进化到大师阶段。",
+      "evolved_legend": "进化到传说阶段。"
+    }
+  },
+  "pet": {
+    "feed": "喂食",
+    "dailyGift": "每日礼物",
+    "claimed": "已领取",
+    "actions": "动作",
+    "shop": "商店",
+    "stop": "停止",
+    "pomodoro": "番茄钟",
+    "quit": "退出",
+    "sleep": "睡觉",
+    "watch": "看视频",
+    "music": "听音乐",
+    "walk": "散步",
+    "milktea": "奶茶",
+    "spin": "转圈",
+    "dance": "跳舞",
+    "pat": "摸头",
+    "min": "分钟",
+    "go": "开始"
+  },
+  "updateModal": {
+    "title": "发现更新",
+    "availableSubtitle": "PawBae 新版本已可安装。",
+    "whatsNew": "更新内容：",
+    "noNotes": "暂无更新说明",
+    "later": "稍后",
+    "skipVersion": "跳过此版本",
+    "updateNow": "立即更新",
+    "pleaseDontClose": "请不要关闭应用",
+    "completeTitle": "更新完成！",
+    "completeDesc": "重启应用以应用更新。",
+    "restartNow": "立即重启",
+    "progress": {
+      "preparing": "准备更新...",
+      "downloading": "下载更新中...",
+      "verifying": "校验签名中...",
+      "downloaded": "下载完成，准备安装...",
+      "ready_to_restart": "更新已准备完成"
+    }
+  },
+  "agentDetail": {
+    "working": "工作中",
+    "idleStatus": "空闲",
+    "currentTask": "当前任务",
+    "recentActivity": "最近动态",
+    "tokensUsed": "消耗 (Tokens)",
+    "sessionStatus": "会话状态",
+    "messages": "消息",
+    "active": "活跃",
+    "error": "错误",
+    "model": "模型",
+    "input": "输入",
+    "output": "输出",
+    "cacheRead": "缓存读",
+    "cacheWrite": "缓存写",
+    "toolDistribution": "工具使用分布",
+    "last14Days": "近14天",
+    "calls": "调用",
+    "token": "Token",
+    "today": "今天"
+  },
+  "claudeStats": {
+    "title": "Claude Code 统计",
+    "titleCodex": "Codex 统计",
+    "titleCursor": "Cursor 统计",
+    "last14Days": "近 14 天",
+    "totalTokens": "总 Token",
+    "sessionsCount": "个会话",
+    "messageCount": "消息数",
+    "aiReply": "AI 回复",
+    "tokenDetails": "Token 明细",
+    "input": "输入",
+    "output": "输出",
+    "cacheRead": "缓存读",
+    "cacheWrite": "缓存写",
+    "dailyTokens": "每日 Token",
+    "dailyMessages": "每日消息",
+    "token": "Token",
+    "messagesLabel": "消息"
+  },
+  "voice": {
+    "reply": {
+      "greet": "你好呀～",
+      "praise": "嘿嘿，谢谢夸奖！",
+      "headpat": "好舒服～再摸摸嘛",
+      "feed": "好吃好吃！",
+      "sleep": "好困……晚安",
+      "play": "好耶，一起玩！",
+      "scold": "呜……人家知道错了",
+      "callName": "在的在的，我在听！",
+      "unknown": "嗯？没太听懂～"
+    }
+  },
+  "petMusic": {
+    "p1": "music is my life～",
+    "p2": "这首歌我听过！",
+    "p3": "一起摇摆吧～",
+    "p4": "调大点声嘛",
+    "p5": "好上头的旋律",
+    "p6": "单曲循环中…",
+    "p7": "这节奏绝了",
+    "p8": "陪你一起听～"
+  },
+  "board": {
+    "title": "今日任务",
+    "task": {
+      "gift": "领今日礼物",
+      "headpat": "摸摸头",
+      "meal": "让宠物吃一顿",
+      "agent": "陪 agent 完成 1 个任务"
+    },
+    "perfectDay": "全勤达成！+15 金币",
+    "streakHint": "打卡连胜：完成任意一项即可续上",
+    "shieldHint": "连胜护盾：断一天自动消耗一个护盾而不清零（每连续 7 天送一个，上限 2）"
+  },
+  "share": {
+    "button": "周报卡",
+    "heroLabel": "本周投喂",
+    "tasks": "次任务",
+    "messages": "条消息",
+    "streak": "{days} 天连胜",
+    "together": "和 {name} 相伴第 {days} 天",
+    "save": "保存图片",
+    "copy": "复制",
+    "copied": "已复制——直接粘贴分享！",
+    "saved": "已保存！",
+    "exportFailed": "导出失败——请查看日志"
+  },
+  "profile": {
+    "nicknameLabel": "昵称（你怎么叫她）"
+  },
+  "lore": {
+    "species": "云耳小生物 · 来自 agent 干活的那片云",
+    "short": "出生在 agent 干活的那片云。云朵耳能听见谁的活干完了；完工飘来的香气就是她的饭。云从来不责备谁。",
+    "tagline": "她从 agent 干活的那片云滑下来，落在了你的桌面上。"
+  },
+  "adventure": {
+    "awayNote": "去冒险了",
+    "shelfTitle": "纪念品架",
+    "shelfHint": "任务跑久一点，她就会背上小包回云上转转——回来从不空着爪子。"
+  },
+  "souvenir": {
+    "cloud_fluff": {
+      "name": "一撮云绒",
+      "flavor": "她说枕着睡特别香，就是容易打喷嚏。"
+    },
+    "ding_echo": {
+      "name": "一声「叮」的回声",
+      "flavor": "装在耳朵里带回来的，摇一摇还能响半声。"
+    },
+    "rounded_pebble": {
+      "name": "云打磨过的小石子",
+      "flavor": "在云上滚了很多年，圆得没有脾气。"
+    },
+    "steam_candy": {
+      "name": "蒸汽软糖",
+      "flavor": "用完工任务的暖香凝的，闻着饱，吃不着。"
+    },
+    "mist_ribbon": {
+      "name": "一段雾做的缎带",
+      "flavor": "打不了结，但飘起来很好看。"
+    },
+    "star_crumbs": {
+      "name": "星星碎屑",
+      "flavor": "云上居民扫地扫出来的，说是不值钱，她还是捡了一小把。"
+    },
+    "rain_seed": {
+      "name": "一粒雨的种子",
+      "flavor": "埋在花盆里长不出雨，她还是想试试。"
+    },
+    "stray_feather": {
+      "name": "不知道是谁的羽毛",
+      "flavor": "云上没有鸟，所以这根羽毛很有讨论价值。"
+    },
+    "tiny_ladder": {
+      "name": "迷你云梯",
+      "flavor": "只有三格，够一只很小的东西爬一段很小的高度。"
+    },
+    "washed_note": {
+      "name": "一张旧纸条",
+      "flavor": "上面的字被雨洗掉了，她坚持说写的是好话。"
+    },
+    "wind_knot": {
+      "name": "一个风打的结",
+      "flavor": "风路过时随手打的，解开就没有了，所以不能解。"
+    },
+    "warm_button": {
+      "name": "晒暖的纽扣",
+      "flavor": "不知道是谁的，但握在手里一直是温的。"
+    },
+    "rain_smell_jar": {
+      "name": "雨前的味道",
+      "flavor": "装在小瓶里，开盖只能闻一次。她建议留给很难的日子。"
+    },
+    "moon_shaving": {
+      "name": "月亮刨花",
+      "flavor": "月亮每个月瘦下去的那部分。云上居民收了她三声「叮」。"
+    },
+    "dud_thunder": {
+      "name": "没炸响的小雷",
+      "flavor": "哑火的。抱着睡会轻轻震，像打呼。"
+    },
+    "cloud_bell": {
+      "name": "云铃铛",
+      "flavor": "只在没有人听的时候响，所以没人能证明它不响。"
+    },
+    "fog_marble": {
+      "name": "雾芯玻璃珠",
+      "flavor": "里面卷着一小团雾，天气要变时会自己转圈。"
+    },
+    "sky_postcard": {
+      "name": "天空寄给自己的明信片",
+      "flavor": "收件人和寄件人都是天空，邮票是一小块晚霞。"
+    },
+    "dream_cotton": {
+      "name": "梦的棉花",
+      "flavor": "从睡着的云身上轻轻摘的。据说塞进枕头能多做一个梦。"
+    },
+    "ding_whistle": {
+      "name": "会吹「叮」的哨子",
+      "flavor": "吹出来的不是哨声是叮声。云上工作狂们的最爱。"
+    },
+    "whole_kiwi": {
+      "name": "一整颗猕猴桃",
+      "flavor": "云上居民公认睡得最久、绒毛长得最好的那朵。她抱回来的路上谁都没敢碰。"
+    },
+    "first_ding": {
+      "name": "世界上第一声「叮」",
+      "flavor": "封在一盏琥珀色的小灯里。之后所有的「叮」都是它的孩子。"
+    },
+    "cloud_key": {
+      "name": "云的钥匙",
+      "flavor": "打不开任何门，因为云上没有门。但拿着它，去哪儿都算回家。"
+    },
+    "bottled_aurora": {
+      "name": "瓶装极光",
+      "flavor": "极光冬天路过云顶时留下的一绺，晚上会自己变颜色。"
+    }
+  },
+  "skin": {
+    "title": "皮肤工坊",
+    "importFolder": "导入文件夹",
+    "importImage": "导入图片",
+    "openFolder": "打开皮肤文件夹",
+    "guide": "创作指南",
+    "customBadge": "自定义",
+    "remove": "删除",
+    "cancel": "取消",
+    "removeConfirm": "删除这个皮肤？",
+    "importOk": "皮肤已导入——她已经穿上啦 ✓",
+    "issueErrors": "导入失败：",
+    "issueWarnings": "小提醒：",
+    "issue": {
+      "notObject": "pet.json 不是合法的 JSON 对象",
+      "invalidId": "皮肤 id 不安全：{id}",
+      "unsafeSheetPath": "图集路径不安全：{path}",
+      "atlasField": "图集参数 {field} 必须是正整数",
+      "atlasWiderThanImage": "图集需要 {need}px 宽，图片只有 {have}px",
+      "atlasTallerThanImage": "图集需要 {need}px 高，图片只有 {have}px",
+      "atlasRemainder": "图片在 {axis} 方向未被整除（用到 {used}px / 共 {actual}px）",
+      "inheritedRowsExceedAtlas": "未声明动画时按标准 9 行 × 8 列布局，但图集只有 {rows} 行 × {cols} 列",
+      "missingIdle": "动画必须包含 idle 行",
+      "badAnimation": "动画 {name} 不是对象",
+      "rowOutOfRange": "{name}：行号 {row} 超出图集（共 {rows} 行）",
+      "badFrames": "{name}：帧数必须为正整数（当前 {frames}）",
+      "badOffsetCol": "{name}：offsetCol 必须是非负整数（当前 {offsetCol}）",
+      "framesOverflow": "{name}：需要 {need} 列，图集只有 {cols} 列",
+      "highFps": "{name}：{fps} fps 过高",
+      "unknownAnimation": "未知动画名：{name}（可能拼写有误）",
+      "missingStandardRows": "缺少标准动画行：{rows}（会自动优雅回退）",
+      "unknownStateMapTarget": "stateMap 的 {state} 指向未声明的动画 {target}",
+      "hugeImage": "图片很大（{w}×{h}），可能影响性能",
+      "importFailed": "导入失败：{reason}",
+      "unreadable": "无法读取导入的皮肤"
+    }
+  },
+  "egg": {
+    "title": "云蛋",
+    "buy": "买一颗云蛋",
+    "buyHint": "还没见过的邻居寄来的到访信物——用完工的暖香焐热它，焐够就破壳。",
+    "allMet": "云上的邻居都认识啦，新面孔还在路上！",
+    "warmthHint": "agent 每次真完工、每喂一顿饭，都会添一缕暖香。",
+    "ready": "焐好了！点一下破壳",
+    "hatchedSub": "新邻居搬进来啦！去画廊打个招呼吧。",
+    "foundBubble": "她带回来一颗云蛋！"
+  },
+  "dex": {
+    "metCount": "已认识 {met}/{total}",
+    "lockedHint": "还没认识这位邻居——孵一颗云蛋把 TA 请来吧。"
+  },
+  "diary": {
+    "title": "日记本",
+    "open": "日记",
+    "empty": "日记本还空着——一起去干点活吧！",
+    "today": "今天",
+    "yesterday": "昨天",
+    "dateLabel": "{m}月{d}日",
+    "joiner": "",
+    "sep": "，",
+    "end": "。",
+    "opener": {
+      "v0": "今天我们",
+      "v1": "记一笔：今天我们",
+      "v2": "又是并肩干活的一天——我们"
+    },
+    "seg": {
+      "tasks": "完工 {n} 次",
+      "meals": "吃了 {n} 顿",
+      "coins": "攒下 {n} 枚金币"
+    },
+    "m": {
+      "adopted": "我们第一次见面的日子。你好呀，是我！",
+      "evolution": "我长成{stage}啦！",
+      "achievement": "解锁了成就「{name}」！",
+      "perfectDay": "全勤日——今天的小事一件没落。",
+      "souvenir": "带回了一件宝贝：{name}。",
+      "eggFound": "冒险路上捡到一颗云蛋！",
+      "eggHatched": "蛋破壳了——欢迎回家，{name}！",
+      "dexCompleted": "云上的邻居，我们都认识啦。"
+    }
+  },
+  "greet": {
+    "morning": "早安！今天也请多指教。",
+    "day": "午安！看到你真好。",
+    "evening": "晚上好！今天辛苦啦。",
+    "night": "这么晚还在忙呀，我陪着你。",
+    "yesterday": "昨天我们完工 {n} 次！"
+  }
+}
