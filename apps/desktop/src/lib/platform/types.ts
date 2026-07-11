@@ -1,49 +1,16 @@
-// 契约 v0 本地镜像。权威定义在两份交接文档里：
-//   数据类型     → docs/team/line-a-cloud.md §2（A 线拥有，落地为 @pawbae/shared）
-//   PlatformClient → docs/team/line-b-connector.md §2（B 线拥有，W3 冻结）
-// @pawbae/shared 随 PR-B 落地后，本文件的数据类型改为 re-export；接口以 B 线
-// 冻结版为准——任何差异一律以文档/冻结版为权威，不以本镜像为准。
+// 契约类型。数据类型（投影/访问/好友）自 @pawbae/shared re-export——契约
+// 单一来源（A 线拥有，#54 落地）；PlatformClient/PlatformSession/Unsubscribe
+// 是 B 线接口（docs/team/line-b-connector.md §2 冻结版），不进 shared。
 
-export type ProjectionStatus = 'idle' | 'working' | 'waiting' | 'compacting' | 'offline';
+export type {
+  FriendEntry,
+  ProjectionStatus,
+  PublicPetProjection,
+  VisitLease,
+  VisitStatus,
+} from '@pawbae/shared';
 
-export interface PublicPetProjection {
-  v: 1; // schema 版本，向后兼容演进
-  petId: string;
-  displayName: string; // profiles.display_name ?? handle
-  skinId: string; // 内置皮肤 id（白名单枚举）
-  status: ProjectionStatus;
-  updatedAt: string; // ISO 8601
-}
-
-export type VisitStatus =
-  | 'requested'
-  | 'accepted'
-  | 'traveling'
-  | 'visiting'
-  | 'returning' // ← 未结束态
-  | 'completed'
-  | 'declined'
-  | 'cancelled'
-  | 'expired'
-  | 'recalled'
-  | 'blocked'; // ← 终止态
-
-export interface VisitLease {
-  id: string;
-  visitorUserId: string; // 访客宠物的主人
-  hostUserId: string;
-  status: VisitStatus;
-  startedAt: string | null; // accepted 之前为 null
-  endsAt: string | null; // 固定 30 分钟租约
-}
-
-export interface FriendEntry {
-  userId: string;
-  handle: string;
-  displayName: string | null;
-  relation: 'pending_in' | 'pending_out' | 'accepted';
-  muted: boolean;
-}
+import type { FriendEntry, PublicPetProjection, VisitLease } from '@pawbae/shared';
 
 export interface PlatformSession {
   userId: string;
