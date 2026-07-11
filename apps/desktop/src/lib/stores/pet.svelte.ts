@@ -1,5 +1,12 @@
+import {
+  createEggHatchedEvent,
+  createSouvenirFoundEvent,
+  createStreakMilestoneEvent,
+  createTaskCompletedEvent,
+} from '@pawbae/shared';
 import { listen } from '@tauri-apps/api/event';
 import { load } from '@tauri-apps/plugin-store';
+import { connector, crossedStreakMilestone } from '../platform/connector';
 import type {
   ClaudeStats,
   ClaudeStatsSource,
@@ -370,9 +377,15 @@ class PetStore {
   markBoardTask(task: BoardTaskId) {
     const result = markTask(this.boardState, task, todayStr());
     if (!result.taskCompleted) return;
+    const prevStreak = this.petData.streak;
     this.petData = { ...this.petData, ...result.state };
     if (result.checkedIn) {
       track('board_checkin', { streak_bucket: streakBucket(result.state.streak) });
+      // 只在跨过里程碑（3/7/14/30/60/100）时分享一次，不是每天发
+      const milestone = crossedStreakMilestone(prevStreak, result.state.streak);
+      if (milestone !== null) {
+        connector.uploadEvent(createStreakMilestoneEvent({ days: milestone }));
+      }
     }
     if (result.perfectDay) {
       this.celebrations = [...this.celebrations, { kind: 'perfect_day' }];
@@ -668,6 +681,8 @@ class PetStore {
     if (unmet.length === 1) this.noteDiaryMoment('dex_completed');
     // Builtin ids are a fixed vocabulary (never user content), safe for telemetry.
     track('egg_hatched', { species: id });
+    // opt-in 分享（connector 三重门内部把关）；桌面蛋没有稀有度概念，v0 恒 common
+    connector.uploadEvent(createEggHatchedEvent({ rarity: 'common' }));
     if (unmet.length === 1) track('dex_completed');
     this.persistRewards();
     return id;
@@ -706,6 +721,7 @@ class PetStore {
     if (found.rarity !== 'common') this.noteDiaryMoment('souvenir', found.id);
     // Rarity only — the dictionary stays minimal (no item ids).
     track('souvenir_found', { rarity: found.rarity });
+    connector.uploadEvent(createSouvenirFoundEvent({ rarity: found.rarity }));
     this.persistRewards();
   }
 
@@ -731,6 +747,8 @@ class PetStore {
         this.bumpDiary('agentTasks');
         this.warmEgg();
         this.persistRewards();
+        // opt-in 分享与金币奖励同一条去重线：重复 stop 不会重复上传
+        connector.uploadEvent(createTaskCompletedEvent({ source: payload.source }));
       }
       this.settleAdventure(payload.sessionId, Date.now());
       void this.settleTokenFeed(payload.source);

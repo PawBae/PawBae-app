@@ -96,7 +96,8 @@ export class MockPlatformClient implements PlatformClient {
   private seq = 0;
   private queue: ScheduledEvent[] = [];
 
-  private leases = new Map<string, VisitLease>();
+  // 内部持有可变副本（契约 VisitLease 是 readonly；对外发射时按 VisitLease 读）
+  private leases = new Map<string, { -readonly [K in keyof VisitLease]: VisitLease[K] }>();
   private idempotency = new Map<string, string>();
   private redeemedInvites = new Set<string>();
   private leaseListeners = new Set<(lease: VisitLease) => void>();

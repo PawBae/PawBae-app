@@ -2,6 +2,7 @@
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import { _ } from 'svelte-i18n';
+  import { connector } from '../platform/connector';
   import { accountStore } from '../stores/account.svelte';
   import { agentStore } from '../stores/agents.svelte';
   import { petStore } from '../stores/pet.svelte';
@@ -28,6 +29,21 @@
   $effect(() => {
     const next = skinsStore.resolve(settingsStore.miniPetId);
     if (next) pet = next;
+  });
+
+  // Connector 三重门同步：登录态/总闸/分项开关任何一个变化都重推给 connector
+  // （模块自身不 import store，门永远以这里喂的快照为准）。
+  $effect(() => {
+    connector.configure({
+      signedIn: accountStore.session !== null,
+      connectEnabled: settingsStore.platformConnectEnabled,
+      uploads: {
+        task_completed: settingsStore.uploadRewardsEnabled,
+        egg_hatched: settingsStore.uploadEggsEnabled,
+        souvenir_found: settingsStore.uploadSouvenirsEnabled,
+        streak_milestone: settingsStore.uploadStreaksEnabled,
+      },
+    });
   });
 
   // OBS 直播舞台: settings own the choice, this effect owns the window — including
