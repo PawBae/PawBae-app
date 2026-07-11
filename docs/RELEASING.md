@@ -34,7 +34,9 @@ Summary (see §4 and "Updater signing" below).
 
 Tag builds refuse to start while the updater public key is still the
 placeholder or the `MINISIGN_SECRET_KEY` secret is missing — provision the
-keypair first (see "Updater signing").
+keypair first (see "Updater signing"). macOS tag builds additionally refuse
+to start while any of the six Apple signing secrets is missing (see
+"macOS signing & notarization").
 
 To verify the pipeline without cutting a release, run the workflow manually
 (`workflow_dispatch`) — bundles are attached as workflow artifacts instead.
@@ -126,15 +128,77 @@ Rules (non-negotiable):
   users must manually download. Rotating after a leak has the same blast
   radius, so treat the secret with Apple-certificate-level care.
 
-## Code signing (not set up yet)
+## macOS signing & notarization
 
-Builds are currently **unsigned**:
+Tag builds sign the app with a **Developer ID Application** certificate and
+notarize it through Apple's notary service — both handled by the Tauri
+bundler once the six secrets below exist. The release workflow hard-gates on
+them: a `v*` tag build fails fast while any secret is missing. Manual
+`workflow_dispatch` smoke builds skip signing while the secrets are absent
+(unsigned artifacts open via right-click → Open or
+`xattr -cr /Applications/PawBae.app`), and sign + notarize once they exist.
 
-- **macOS**: Gatekeeper warns on first open. Users must right-click → Open, or
-  run `xattr -cr /Applications/PawBae.app`. To sign + notarize, add the Apple
-  Developer secrets (`APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`,
-  `APPLE_SIGNING_IDENTITY`, `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID`) and
-  uncomment the env block in `release.yml`. See
-  https://tauri.app/distribute/sign/macos/
-- **Windows**: SmartScreen shows "unknown publisher". Signing needs a code
-  signing certificate; see https://tauri.app/distribute/sign/windows/
+One-time provisioning, ~20 minutes, needs the active Apple Developer Program
+membership:
+
+### 1. Create the Developer ID Application certificate
+
+1. On your Mac: **Keychain Access → Certificate Assistant → Request a
+   Certificate From a Certificate Authority…** — your Apple ID email, "Saved
+   to disk", save the `.certSigningRequest` file.
+2. At <https://developer.apple.com/account/resources/certificates/add> pick
+   **Developer ID Application**, upload the CSR, download the `.cer`, and
+   double-click it so it joins its private key in the login keychain.
+
+### 2. Export the .p12 and collect the identity strings
+
+Keychain Access → My Certificates → right-click the new
+"Developer ID Application: …" entry → Export…, format **.p12**, choose an
+export password. Then:
+
+```bash
+base64 -i DeveloperID.p12 | pbcopy         # → APPLE_CERTIFICATE (now on the clipboard)
+security find-identity -v -p codesigning   # → the full "Developer ID Application: Name (TEAMID)" string
+```
+
+The Team ID is the 10-character code in the identity string's parentheses
+(also on <https://developer.apple.com/account> under Membership details).
+
+### 3. App-specific password for notarization
+
+<https://account.apple.com> → Sign-In and Security → App-Specific Passwords →
+generate one (name it e.g. `pawbae-notarize`; format `xxxx-xxxx-xxxx-xxxx`).
+
+### 4. Store the six secrets
+
+```bash
+pbpaste | gh secret set APPLE_CERTIFICATE --repo PawBae/PawBae-app
+gh secret set APPLE_CERTIFICATE_PASSWORD --repo PawBae/PawBae-app  # .p12 export password
+gh secret set APPLE_SIGNING_IDENTITY --repo PawBae/PawBae-app      # "Developer ID Application: Name (TEAMID)"
+gh secret set APPLE_ID --repo PawBae/PawBae-app                    # Apple ID email
+gh secret set APPLE_PASSWORD --repo PawBae/PawBae-app              # app-specific password from step 3
+gh secret set APPLE_TEAM_ID --repo PawBae/PawBae-app               # 10-char Team ID
+rm DeveloperID.p12  # GitHub secrets is its only durable home
+```
+
+### 5. Verify
+
+Run the release workflow manually (`workflow_dispatch`): with the secrets in
+place even smoke builds sign + notarize. Download a macOS artifact and check
+(expected outputs in comments):
+
+```bash
+codesign -dv --verbose=2 PawBae.app   # Authority=Developer ID Application: …
+spctl -a -t open --context context:primary-signature -vv PawBae_*.dmg
+                                      # accepted · source=Notarized Developer ID
+xcrun stapler validate PawBae.app     # The validate action worked!
+```
+
+Notes:
+
+- Notarization adds roughly 2–10 minutes per macOS matrix leg.
+- Losing this certificate is recoverable (revoke, reissue, re-set the
+  secrets) — unlike the minisign key, nothing already shipped stops updating.
+- **Windows**: still unsigned for v1 — SmartScreen shows "unknown publisher".
+  Signing needs an OV/EV code-signing certificate; see
+  <https://tauri.app/distribute/sign/windows/>
