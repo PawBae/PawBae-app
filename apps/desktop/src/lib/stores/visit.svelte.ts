@@ -71,6 +71,17 @@ export class VisitStore {
     this.client = null;
   }
 
+  /**
+   * 登出时清空双槽、投影与挂起的幂等键：租约属于会话，不能跨账号残留。
+   * 与 dispose 不同——client 订阅与时钟保持，重新登录后直接续用。
+   */
+  reset(): void {
+    this.outbound = null;
+    this.inbound = null;
+    this.pendingRequest = null;
+    this.dropGuestSubscription();
+  }
+
   // ---------- 时钟 ----------
 
   /** UI 挂载时启动秒级时钟；空窝倒计时与到期本地推导都靠它驱动。 */

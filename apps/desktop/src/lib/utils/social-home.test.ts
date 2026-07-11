@@ -1,10 +1,15 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
+import type { FriendEntry, PublicPetProjection, VisitLease } from '../platform/types';
 import type { CodexPet } from './codex-pet';
 import {
   allowedHomeActions,
   deriveHomePetIdentity,
   deriveLocalAgentState,
+  derivePresence,
+  deriveVisitRequest,
   type FriendSummary,
+  friendDisplayName,
+  friendSummaries,
   isOfficialPetId,
   parseSharedMemory,
   type SocialHomeModel,
@@ -338,5 +343,155 @@ describe('social Home model', () => {
     expect(deriveLocalAgentState(true, { ...quiet, compacting: 1 }, false)).toBe('compacting');
     expect(deriveLocalAgentState(true, quiet, true)).toBe('working');
     expect(deriveLocalAgentState(true, quiet, false)).toBe('idle');
+  });
+});
+
+// ---------- 平台契约 → Home 模型（W7 换线）----------
+
+const acceptedEntry: FriendEntry = {
+  userId: 'user-momo',
+  handle: 'user-abc123',
+  displayName: 'Momo',
+  relation: 'accepted',
+  muted: false,
+};
+
+function lease(overrides: Partial<VisitLease>): VisitLease {
+  return {
+    id: 'visit-1',
+    visitorUserId: 'user-momo',
+    hostUserId: 'me',
+    status: 'requested',
+    startedAt: null,
+    endsAt: null,
+    ...overrides,
+  };
+}
+
+const guestFrame: PublicPetProjection = {
+  v: 1,
+  petId: 'solu',
+  displayName: 'Solu',
+  skinId: 'solu',
+  status: 'working',
+  updatedAt: '2026-07-11T10:00:00Z',
+};
+
+const nameOf = (userId: string) => (userId === 'user-momo' ? 'Momo' : null);
+
+describe('friendSummaries', () => {
+  it('prefers displayName and falls back to the anonymous handle', () => {
+    expect(friendDisplayName(acceptedEntry)).toBe('Momo');
+    expect(friendDisplayName({ ...acceptedEntry, displayName: null })).toBe('user-abc123');
+  });
+
+  it('maps accepted entries only, with owner-name pet placeholder', () => {
+    const summaries = friendSummaries([
+      acceptedEntry,
+      { ...acceptedEntry, userId: 'user-out', relation: 'pending_out' },
+      { ...acceptedEntry, userId: 'user-in', relation: 'pending_in' },
+    ]);
+    expect(summaries).toHaveLength(1);
+    expect(summaries[0].id).toBe('user-momo');
+    expect(summaries[0].displayName).toBe('Momo');
+    expect(summaries[0].pet).toEqual({ id: 'user-momo', name: 'Momo' });
+    expect(summaries[0].visitDirection).toBe('visit-them');
+  });
+
+  it('keeps the visit entry actionable despite unknown presence', () => {
+    // v1 契约没有好友在线状态：占位必须让 selectFriendAction 给出可用的 visit
+    const [summary] = friendSummaries([acceptedEntry]);
+    const action = selectFriendAction({ kind: 'home', visitor: null }, summary, null);
+    expect(action).toEqual({ kind: 'visit', disabledReason: null });
+  });
+});
+
+describe('derivePresence', () => {
+  it('defaults to an empty home', () => {
+    expect(derivePresence(null, 'none', null, 'none', null, nameOf)).toEqual({
+      kind: 'home',
+      visitor: null,
+    });
+  });
+
+  it('shows the guest from the projection while an inbound visit is live', () => {
+    const inbound = lease({ status: 'visiting', endsAt: '2026-07-11T10:30:00Z' });
+    const presence = derivePresence(null, 'none', inbound, 'visiting', guestFrame, nameOf);
+    expect(presence).toEqual({
+      kind: 'home',
+      visitor: { id: 'solu', name: 'Solu' },
+      visitorOwnerName: 'Momo',
+      visitorAgentState: 'working',
+      endsAt: '2026-07-11T10:30:00Z',
+      leaseMinutes: 30,
+    });
+  });
+
+  it('stays home until the first projection frame lands', () => {
+    const inbound = lease({ status: 'visiting' });
+    expect(derivePresence(null, 'none', inbound, 'visiting', null, nameOf)).toEqual({
+      kind: 'home',
+      visitor: null,
+    });
+  });
+
+  it('marks away while the own pet is out, but keeps pending at home', () => {
+    const outbound = lease({
+      visitorUserId: 'me',
+      hostUserId: 'user-momo',
+      status: 'traveling',
+      endsAt: '2026-07-11T10:30:00Z',
+    });
+    expect(derivePresence(outbound, 'traveling', null, 'none', null, nameOf)).toEqual({
+      kind: 'away',
+      friendId: 'user-momo',
+      friendName: 'Momo',
+      endsAt: '2026-07-11T10:30:00Z',
+      leaseMinutes: 30,
+    });
+    expect(
+      derivePresence(
+        lease({ visitorUserId: 'me', hostUserId: 'user-momo' }),
+        'pending',
+        null,
+        'none',
+        null,
+        nameOf,
+      ),
+    ).toEqual({ kind: 'home', visitor: null });
+  });
+
+  it('prefers the guest at home over the own pet being away', () => {
+    const outbound = lease({
+      id: 'v-out',
+      visitorUserId: 'me',
+      hostUserId: 'user-momo',
+      status: 'visiting',
+    });
+    const inbound = lease({ id: 'v-in', status: 'visiting', endsAt: '2026-07-11T10:30:00Z' });
+    const presence = derivePresence(outbound, 'visiting', inbound, 'visiting', guestFrame, nameOf);
+    expect(presence).toMatchObject({ kind: 'home', visitor: { id: 'solu', name: 'Solu' } });
+  });
+});
+
+describe('deriveVisitRequest', () => {
+  it('surfaces a pending inbound lease with empty pet identity', () => {
+    expect(deriveVisitRequest(lease({}), 'pending', nameOf)).toEqual({
+      id: 'visit-1',
+      friendId: 'user-momo',
+      ownerName: 'Momo',
+      pet: { id: 'user-momo', name: '' },
+    });
+  });
+
+  it('withholds the card until the requester resolves to a known friend', () => {
+    expect(
+      deriveVisitRequest(lease({ visitorUserId: 'user-stranger' }), 'pending', nameOf),
+    ).toBeNull();
+  });
+
+  it('returns null outside the pending phase', () => {
+    expect(deriveVisitRequest(null, 'none', nameOf)).toBeNull();
+    expect(deriveVisitRequest(lease({ status: 'visiting' }), 'visiting', nameOf)).toBeNull();
   });
 });

@@ -101,6 +101,7 @@
       "requestsTitle": "串门邀请",
       "requestedBy": "和{owner}一起来",
       "cardTitle": "{owner}家的{pet}想来串门",
+      "cardTitleUnknownPet": "{owner}家的宠物想来串门",
       "cardBody": "每次串门会持续 30 分钟。",
       "accept": "欢迎进来",
       "later": "暂时不行",

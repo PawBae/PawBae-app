@@ -101,6 +101,7 @@
       "requestsTitle": "Visit request",
       "requestedBy": "With {owner}",
       "cardTitle": "{pet} from {owner} wants to visit",
+      "cardTitleUnknownPet": "A pet from {owner} wants to visit",
       "cardBody": "Visits last 30 minutes.",
       "accept": "Welcome in",
       "later": "Not now",
