@@ -22,8 +22,10 @@
 
   let {
     class: className = '',
+    onOpenHome,
   }: {
     class?: string;
+    onOpenHome: () => Promise<void> | void;
   } = $props();
 
   const maxHeight = $derived(settingsStore.panelMaxHeight);
@@ -81,8 +83,14 @@
   // so the panel needs its own way in. Mirrors Main.svelte's openSettings().
   async function openSettings() {
     if (windowStore.settingsOpen) return;
+    windowStore.setHomeOpen(false);
     windowStore.setSettingsOpen(true);
     await tryInvoke('set_mini_size', { restore: false });
+  }
+
+  async function openHome() {
+    if (windowStore.homeOpen) return;
+    await onOpenHome();
   }
 </script>
 
@@ -93,6 +101,15 @@
   >
     <div class="panel-content">
       <div class="panel-topbar">
+        <button
+          class="settings-btn"
+          data-action="open-home"
+          title={$_('home.title')}
+          aria-label={$_('home.title')}
+          onclick={openHome}
+        >
+          ⌂
+        </button>
         <button
           class="settings-btn"
           title={$_('skin.title')}

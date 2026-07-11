@@ -12,13 +12,26 @@
   import { skinsStore } from '../stores/skins.svelte';
   import { visitStore } from '../stores/visit.svelte';
   import { windowStore } from '../stores/window.svelte';
-  import type { AppMode, UpdateModalInfo } from '../types';
+  import type { UpdateModalInfo } from '../types';
   import { aggregateSessions, mascotStateFor } from '../utils/agent-activity';
   import type { CodexPet } from '../utils/codex-pet';
   import { loadDefaultCodexPet } from '../utils/codex-pet';
   import { tryInvoke } from '../utils/invoke';
+  import type { OnboardingResult } from '../utils/onboarding';
+  import {
+    normalizeOnboardingTheme,
+    ONBOARDING_THEME_STORAGE_KEY,
+    type OnboardingTheme,
+  } from '../utils/onboarding-theme';
+  import { effectiveName } from '../utils/pet-name';
+  import {
+    deriveHomePetIdentity,
+    deriveLocalAgentState,
+    type SocialHomeModel,
+  } from '../utils/social-home';
   import { track } from '../utils/telemetry';
   import { classifyIntent } from '../utils/voice-intent';
+  import SocialHome from './home/SocialHome.svelte';
   import MascotView from './MascotView.svelte';
   import Onboarding from './Onboarding.svelte';
   import Panel from './Panel.svelte';
@@ -80,6 +93,62 @@
     void tryInvoke(settingsStore.streamStageEnabled ? 'open_stage_window' : 'close_stage_window');
   });
   let showOnboarding = $state(false);
+  let returnToHomeAfterSettings = false;
+  const isWindows = typeof navigator !== 'undefined' && navigator.userAgent.includes('Windows');
+
+  function loadHomeTheme(): OnboardingTheme {
+    if (typeof localStorage === 'undefined') return 'system';
+    try {
+      return normalizeOnboardingTheme(localStorage.getItem(ONBOARDING_THEME_STORAGE_KEY));
+    } catch {
+      return 'system';
+    }
+  }
+
+  let homeTheme = $state<OnboardingTheme>(loadHomeTheme());
+
+  function setHomeTheme(nextTheme: OnboardingTheme) {
+    homeTheme = nextTheme;
+    try {
+      localStorage.setItem(ONBOARDING_THEME_STORAGE_KEY, nextTheme);
+    } catch {
+      // Keep the in-memory choice when storage is unavailable.
+    }
+  }
+
+  const homeModel = $derived.by((): SocialHomeModel => {
+    const selectedPetId = settingsStore.miniPetId;
+    const currentPetName = pet
+      ? effectiveName(settingsStore.petNicknames[pet.id], pet.displayName)
+      : null;
+    const localPet = deriveHomePetIdentity(
+      selectedPetId,
+      pet,
+      currentPetName,
+      $_(`onboarding.adopt.${selectedPetId}Name`),
+    );
+    const activity = aggregateSessions(sessionStore.claudeSessions);
+    const agentEnabled =
+      settingsStore.appMode === 'coding' &&
+      (settingsStore.enableClaudeCode || settingsStore.enableCodex || settingsStore.enableCursor);
+    const evolution = petStore.evolution;
+
+    return {
+      localPet,
+      presence: { kind: 'home', visitor: null },
+      agentState: deriveLocalAgentState(agentEnabled, activity, agentStore.anySessionActive),
+      realtimeState: 'connected',
+      affection: Math.round(petStore.petData.affection),
+      coins: petStore.petData.coins,
+      togetherDays: petStore.daysTogether + 1,
+      growthCurrent: evolution.xp,
+      growthTarget: evolution.next?.minXp ?? evolution.xp,
+      friends: [],
+      pendingVisit: null,
+      latestMemory: null,
+      memories: [],
+    };
+  });
 
   let voiceRecording = $state(false);
   let voiceText = $state('');
@@ -301,7 +370,7 @@
     }
 
     // Retention heartbeat (installs / DAU / D1-D7-D30). No-op unless the user
-    // opted in; first-run users fire theirs from handleModeSelect post-consent.
+    // opted in; first-run users fire theirs from handleOnboardingComplete post-consent.
     if (settingsStore.appMode) track('app_started', { mode: settingsStore.appMode });
 
     try {
@@ -338,19 +407,20 @@
     }
   }
 
-  async function handleModeSelect(mode: AppMode, shareTelemetry: boolean) {
+  async function handleOnboardingComplete(result: OnboardingResult) {
+    await settingsStore.setTelemetryEnabled(result.shareTelemetry);
+    await settingsStore.setEnableClaudeCode(result.selectedAgents.includes('claude'));
+    await settingsStore.setEnableCodex(result.selectedAgents.includes('codex'));
+    await settingsStore.setEnableCursor(result.selectedAgents.includes('cursor'));
+    if (result.starterPetId) await settingsStore.setMiniPetId(result.starterPetId);
+    await settingsStore.setAppMode(result.mode);
+
+    if (result.shareTelemetry) track('app_started', { mode: result.mode });
     showOnboarding = false;
+    homeTheme = loadHomeTheme();
+    returnToHomeAfterSettings = false;
     windowStore.setSettingsOpen(false);
-    if (shareTelemetry) {
-      await settingsStore.setTelemetryEnabled(true);
-      track('app_started', { mode });
-    }
-    await settingsStore.setAppMode(mode);
-    try {
-      await invoke('set_mini_size', { restore: true, mascotScale: settingsStore.mascotScale });
-    } catch (e) {
-      console.warn('[onboarding] restore size failed:', e);
-    }
+    windowStore.setHomeOpen(true);
   }
 
   $effect(() => {
@@ -379,7 +449,11 @@
 
   async function openSettings() {
     if (windowStore.settingsOpen) return;
+    const openedFromHome = windowStore.homeOpen;
+    returnToHomeAfterSettings = openedFromHome;
+    windowStore.setHomeOpen(false);
     windowStore.setSettingsOpen(true);
+    if (openedFromHome) return;
     try {
       await invoke('set_mini_size', { restore: false });
     } catch (e) {
@@ -390,29 +464,72 @@
   async function closeSettings() {
     if (!windowStore.settingsOpen) return;
     windowStore.setSettingsOpen(false);
+    if (returnToHomeAfterSettings) {
+      returnToHomeAfterSettings = false;
+      windowStore.setHomeOpen(true);
+    } else {
+      try {
+        await invoke('set_mini_size', { restore: true, mascotScale: settingsStore.mascotScale });
+      } catch (e) {
+        console.warn('[settings] restore size failed:', e);
+      }
+    }
+  }
+
+  async function openHome() {
+    if (windowStore.homeOpen) return;
+    returnToHomeAfterSettings = false;
+    await windowStore.setExpanded(false, settingsStore.mascotScale);
+    windowStore.setSettingsOpen(false);
+    windowStore.setHomeOpen(true);
+    try {
+      await invoke('set_mini_size', { restore: false, keepOnTop: false });
+    } catch (e) {
+      console.warn('[home] set_mini_size failed:', e);
+    }
+  }
+
+  async function sendPetToDesktop() {
+    windowStore.setHomeOpen(false);
+    returnToHomeAfterSettings = false;
     try {
       await invoke('set_mini_size', { restore: true, mascotScale: settingsStore.mascotScale });
     } catch (e) {
-      console.warn('[settings] restore size failed:', e);
+      console.warn('[home] restore size failed:', e);
     }
   }
 </script>
 
-<div class="root" data-tauri-drag-region={windowStore.settingsOpen ? undefined : ''}>
-  <MascotView
-    {pet}
-    {voiceRecording}
-    {voiceText}
-    {voiceError}
-    {voiceReply}
-    {voiceEmotion}
-    {voiceNonce}
-  />
-  <Panel />
+<div
+  class="root"
+  data-tauri-drag-region={windowStore.settingsOpen || windowStore.homeOpen ? undefined : ''}
+>
+  {#if !windowStore.homeOpen}
+    <MascotView
+      {pet}
+      {voiceRecording}
+      {voiceText}
+      {voiceError}
+      {voiceReply}
+      {voiceEmotion}
+      {voiceNonce}
+    />
+    <Panel onOpenHome={openHome} />
+  {/if}
 
-  <Onboarding open={showOnboarding} onSelect={handleModeSelect} />
+  <Onboarding open={showOnboarding} {isWindows} onComplete={handleOnboardingComplete} />
 
   <SettingsPanel open={windowStore.settingsOpen} onClose={closeSettings} />
+
+  <SocialHome
+    open={windowStore.homeOpen}
+    model={homeModel}
+    legacyPet={pet}
+    theme={homeTheme}
+    onThemeChange={setHomeTheme}
+    onSendToDesktop={sendPetToDesktop}
+    onOpenSettings={openSettings}
+  />
 
   <UpdateModal
     open={updateOpen}

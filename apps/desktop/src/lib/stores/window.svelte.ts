@@ -6,6 +6,7 @@ class WindowStore {
   moveMode = $state(false);
   pinned = $state(false);
   settingsOpen = $state(false);
+  homeOpen = $state(false);
 
   async setExpanded(v: boolean, mascotScale: number = 1) {
     this.expanded = v;
@@ -95,6 +96,10 @@ class WindowStore {
 
   setSettingsOpen(v: boolean) {
     this.settingsOpen = v;
+  }
+
+  setHomeOpen(v: boolean) {
+    this.homeOpen = v;
   }
 
   toggle() {
