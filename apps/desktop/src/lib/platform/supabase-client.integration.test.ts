@@ -69,6 +69,19 @@ async function rawRpc(actor: Actor, name: string, params: Record<string, unknown
   if (error) throw new Error(`${name} failed: ${error.message}`);
 }
 
+/**
+ * 等 Realtime 频道真正 join 完成再触发广播源：Broadcast 不回放，join 前发出的帧
+ * 会永久丢失（生产里由轮询兜底，测试里则要确定性）。走 supabase-js 公开 API
+ * 观察频道状态，不需要生产接口暴露 join 时机。
+ */
+async function untilJoined(actor: Actor, lease: VisitLease): Promise<void> {
+  const suffix = `pet:${lease.visitorUserId}:${lease.id}`;
+  await until(
+    () => actor.raw.getChannels().some((c) => c.topic.endsWith(suffix) && c.state === 'joined'),
+    `Realtime 频道 ${suffix} join 完成`,
+  );
+}
+
 describe.runIf(SUPABASE_URL !== '' && PUBLISHABLE_KEY !== '')(
   'SupabasePlatformClient ↔ supabase start 真实栈',
   () => {
@@ -167,6 +180,8 @@ describe.runIf(SUPABASE_URL !== '' && PUBLISHABLE_KEY !== '')(
         expect(replay.petId).toBe('yoonie');
         expect(replay.status).toBe('working');
 
+        // 回放只证明单次 PostgREST 读完成，不证明频道已 join——join 前广播会丢
+        await untilJoined(host, acceptedLease);
         await rawRpc(visitor, 'update_projection', {
           p_pet_id: 'yoonie',
           p_skin_id: 'yoonie',
@@ -191,9 +206,11 @@ describe.runIf(SUPABASE_URL !== '' && PUBLISHABLE_KEY !== '')(
     }, 30_000);
 
     it('recallVisit：本端回包 returning，对端经广播/轮询收敛到 recalled', async () => {
-      // recall 期间保持订阅：visit_ended 广播是对端最快的终局信号
+      // recall 期间保持订阅：visit_ended 广播是对端最快的终局信号。
+      // 等 join 完成再 recall，确保广播路径被确定性压到（轮询仍是正确性兜底）。
       const unsubscribe = host.platform.subscribeGuestProjection(acceptedLease, () => {});
       try {
+        await untilJoined(host, acceptedLease);
         const returning = await visitor.platform.recallVisit(acceptedLease.id, crypto.randomUUID());
         expect(returning.status).toBe('returning');
 
