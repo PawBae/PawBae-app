@@ -699,6 +699,12 @@ mod tests {
     }
 
     #[test]
+    fn embedded_pubkey_is_provisioned_and_decodes() {
+        // 公钥已 provision 后本测试即生效：文件被改坏/退回占位符都会在 PR 阶段爆掉
+        decode_public_key(UPDATER_PUBKEY).expect("embedded updater public key must decode");
+    }
+
+    #[test]
     fn placeholder_pubkey_never_verifies() {
         let data = b"fake dmg payload";
         let (_, sig) = test_keypair_and_signature(data);
