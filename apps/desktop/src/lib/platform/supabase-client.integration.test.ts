@@ -115,9 +115,9 @@ describe.runIf(SUPABASE_URL !== '' && PUBLISHABLE_KEY !== '')(
         await expect(visitor.platform.redeemInvite(INVITE_CODE, key)).resolves.toBeUndefined();
         // 同一幂等键重放：命中 48h 结果缓存，同样成功返回
         await expect(visitor.platform.redeemInvite(INVITE_CODE, key)).resolves.toBeUndefined();
-        await expect(host.platform.redeemInvite('bogus-code-123', crypto.randomUUID())).rejects.toThrow(
-          /invite/i,
-        );
+        await expect(
+          host.platform.redeemInvite('bogus-code-123', crypto.randomUUID()),
+        ).rejects.toThrow(/invite/i);
       },
       20_000,
     );
