@@ -100,7 +100,7 @@ export type Unsubscribe = () => void
 - [ ] **W3 第一项：落地 `src/lib/platform/types.ts`**（PlatformClient 完整接口 + PlatformSession/Unsubscribe，interface-only 无实现，能对着 `@pawbae/shared` 编译）——C review 合并即冻结，C 的 W5 mock 靠它开工
 - [ ] GitHub OAuth 桌面流（loopback 端口或 deep-link 回调），supabase-js 会话持久化
 - [ ] 设置页「账号」区：**新建组件** `AccountSection.svelte`（登录/登出/handle 展示/opt-in 开关组，默认全关）——挂载进 `src/lib/components/settings/SettingsPanel.svelte`（设置区块都住这里，**不是** `Panel.svelte`）的那一行由 owner C 在**同一周**合入：M2「桌面登录打通」要从真实 UI 走通，挂载不能攒到后面
-- [ ] `connector_heartbeat` 定时上报（运行中每 ~60s；节流、失败静默重试）
+- [ ] `connector_heartbeat` 定时上报（运行中每 ~60s；节流、失败静默重试）。**服务端限频 2 次/分钟**（A 线 foundation migration `consume_rate_limit`，超限抛 `rate_limit_exceeded`）——60s 间隔留 1 倍安全边际；**不要把间隔压到 30s 以下**，重试也要退避而非立即补发
 - [ ] opt-in 事件上传：现有奖励/孵蛋/纪念品/连胜时刻 → shared 字典构造器 → events（逐项开关）
 
 ### W5-6 —— 数据管道 + 好友 UI（M3 周）

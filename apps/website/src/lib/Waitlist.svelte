@@ -15,7 +15,9 @@
     if (status === 'sending') return;
     status = 'sending';
     try {
-      const res = await fetch(`${supabaseUrl}/rest/v1/waitlist`, {
+      // 走 RPC 而非表直连：waitlist 表的直接读写已全部 revoke（PR #54 云端
+      // schema），join_waitlist 恒定无返回——重复报名与新报名同形，不可探测。
+      const res = await fetch(`${supabaseUrl}/rest/v1/rpc/join_waitlist`, {
         method: 'POST',
         headers: {
           apikey: supabaseAnonKey,
@@ -23,10 +25,9 @@
           'Content-Type': 'application/json',
           Prefer: 'return=minimal'
         },
-        body: JSON.stringify({ email: email.trim().toLowerCase() })
+        body: JSON.stringify({ p_email: email.trim().toLowerCase() })
       });
-      // 409 = 邮箱已在名单里，对用户来说同样是成功
-      status = res.ok || res.status === 409 ? 'done' : 'error';
+      status = res.ok ? 'done' : 'error';
     } catch {
       status = 'error';
     }
