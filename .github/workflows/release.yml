@@ -95,6 +95,10 @@ jobs:
           # (e.g. forks) resolves to "" and the app builds with telemetry
           # disabled entirely — see src-tauri/src/lib.rs.
           APTABASE_APP_KEY: ${{ secrets.APTABASE_APP_KEY }}
+          # Supabase 平台凭据（登录流）。publishable key 公开设计，放仓库
+          # Variables 而非 secrets；缺失时账号区显示「云端未配置」，App 照常构建。
+          VITE_SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.SUPABASE_PUBLISHABLE_KEY }}
           # macOS signing + notarization — uncomment once the Apple Developer
           # secrets exist (and add the keychain import step; docs/RELEASING.md):
           # APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}

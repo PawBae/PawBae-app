@@ -43,6 +43,13 @@ class SettingsStore {
   streamStageEnabled = $state(false);
   streamStageBg = $state<StageBg>('green');
   ocConnections = $state.raw<OcConnection[]>([{ id: 'local', type: 'local' }]);
+  // 平台 opt-in（B 线 W3，全部默认关）：主开关 = 「连接你的 agent」——
+  // 关 = 心跳/投影/事件一律不出本机；分项 = 逐类事件上传（主开关关时无效）。
+  platformConnectEnabled = $state(false);
+  uploadRewardsEnabled = $state(false);
+  uploadEggsEnabled = $state(false);
+  uploadSouvenirsEnabled = $state(false);
+  uploadStreaksEnabled = $state(false);
 
   private storeInstance: Awaited<ReturnType<typeof load>> | null = null;
 
@@ -96,6 +103,13 @@ class SettingsStore {
     this.ocConnections = ((await store.get('oc_connections')) as OcConnection[]) || [
       { id: 'local', type: 'local' },
     ];
+    this.platformConnectEnabled =
+      ((await store.get('platform_connect_enabled')) as boolean) ?? false;
+    this.uploadRewardsEnabled = ((await store.get('upload_rewards_enabled')) as boolean) ?? false;
+    this.uploadEggsEnabled = ((await store.get('upload_eggs_enabled')) as boolean) ?? false;
+    this.uploadSouvenirsEnabled =
+      ((await store.get('upload_souvenirs_enabled')) as boolean) ?? false;
+    this.uploadStreaksEnabled = ((await store.get('upload_streaks_enabled')) as boolean) ?? false;
   }
 
   private async saveSetting(key: string, value: unknown) {
@@ -268,6 +282,31 @@ class SettingsStore {
   async setOcConnections(v: OcConnection[]) {
     this.ocConnections = v;
     await this.saveSetting('oc_connections', v);
+  }
+
+  async setPlatformConnectEnabled(v: boolean) {
+    this.platformConnectEnabled = v;
+    await this.saveSetting('platform_connect_enabled', v);
+  }
+
+  async setUploadRewardsEnabled(v: boolean) {
+    this.uploadRewardsEnabled = v;
+    await this.saveSetting('upload_rewards_enabled', v);
+  }
+
+  async setUploadEggsEnabled(v: boolean) {
+    this.uploadEggsEnabled = v;
+    await this.saveSetting('upload_eggs_enabled', v);
+  }
+
+  async setUploadSouvenirsEnabled(v: boolean) {
+    this.uploadSouvenirsEnabled = v;
+    await this.saveSetting('upload_souvenirs_enabled', v);
+  }
+
+  async setUploadStreaksEnabled(v: boolean) {
+    this.uploadStreaksEnabled = v;
+    await this.saveSetting('upload_streaks_enabled', v);
   }
 }
 

@@ -157,7 +157,23 @@
     "downloadComplete": "Download complete",
     "exitFailed": "Exit failed: ",
     "updateFailed": "Update failed: ",
-    "updating": "Updating..."
+    "updating": "Updating...",
+    "account": {
+      "title": "Account",
+      "unconfigured": "Cloud not configured",
+      "unconfiguredDesc": "This build has no platform credentials; sign-in is unavailable",
+      "signInLabel": "GitHub account",
+      "signInDesc": "Sign in to unlock friends & visiting (closed beta)",
+      "signIn": "Sign in with GitHub",
+      "signingIn": "Waiting for browser…",
+      "signOut": "Sign out",
+      "connect": "Connect your agent",
+      "connectDesc": "Share your pet's 5-state projection with friends; nothing leaves this machine when off",
+      "uploadRewards": "Share reward moments",
+      "uploadEggs": "Share hatch moments",
+      "uploadSouvenirs": "Share adventure souvenirs",
+      "uploadStreaks": "Share streak milestones"
+    }
   },
   "onboarding": {
     "chooseModeTitle": "Choose Your Mode",

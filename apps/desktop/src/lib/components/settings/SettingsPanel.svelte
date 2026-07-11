@@ -2,6 +2,7 @@
   import { _ } from 'svelte-i18n';
   import { settingsStore } from '../../stores/settings.svelte';
   import AboutSection from './AboutSection.svelte';
+  import AccountSection from './AccountSection.svelte';
   import AppModeSection from './AppModeSection.svelte';
   import ConnectionsSection from './ConnectionsSection.svelte';
   import DisplaySection from './DisplaySection.svelte';
@@ -43,6 +44,8 @@
           <DisplaySection {isWindows} />
           <SoundSection {isWindows} />
         {/if}
+
+        <AccountSection />
 
         <PrivacySection {open} {isWindows} />
 
