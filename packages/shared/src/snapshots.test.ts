@@ -116,10 +116,14 @@ describe('sanitizePublicPetProjection', () => {
     }
   });
 
-  it('requires schema version one, safe ids, approved skins, and projection statuses', () => {
+  it('requires schema version one, safe ids, and projection statuses', () => {
     expect(() => sanitizePublicPetProjection({ ...valid, v: 2 })).toThrowError(/v/i);
     expect(() => sanitizePublicPetProjection({ ...valid, petId: '../pet' })).toThrowError(/petId/i);
-    expect(() => sanitizePublicPetProjection({ ...valid, skinId: 'custom-secret' })).toThrowError(
+    // D2：skinId 只做形状校验（白名单是服务端数据，未批准由服务端回落默认皮）
+    expect(
+      sanitizePublicPetProjection({ ...valid, skinId: 'future-official-pet' }).skinId,
+    ).toBe('future-official-pet');
+    expect(() => sanitizePublicPetProjection({ ...valid, skinId: '../evil' })).toThrowError(
       /skinId/i,
     );
     expect(() => sanitizePublicPetProjection({ ...valid, status: 'celebrating' })).toThrowError(

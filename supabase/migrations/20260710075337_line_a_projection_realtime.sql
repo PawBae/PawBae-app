@@ -15,19 +15,11 @@ CREATE TABLE private.approved_skins (
   )
 );
 
+-- 只种入 #55 版权清理后存活的 3 只（评审决议 D1）；官方四宠资产就绪后
+-- 走 reviewed migration 逐只加行——绝不回填版权角色 id。
 INSERT INTO private.approved_skins (skin_id)
 VALUES
-  ('doro.codex-pet'),
-  ('elaina-2'),
-  ('homie'),
-  ('linnea-2'),
-  ('mambo'),
-  ('naruto'),
-  ('nezuko'),
-  ('phoebe.codex-pet'),
   ('shimeji-bola'),
-  ('skirk-2'),
-  ('taffy'),
   ('wukong'),
   ('yoonie');
 
@@ -195,6 +187,7 @@ AS $$
 DECLARE
   v_actor uuid := (SELECT auth.uid());
   v_display_name text;
+  v_skin_id text;
   v_result public.pet_projections%ROWTYPE;
 BEGIN
   IF v_actor IS NULL THEN
@@ -203,10 +196,16 @@ BEGIN
   IF p_pet_id IS NULL OR p_pet_id !~ '^[a-z0-9][a-z0-9._-]{0,63}$' THEN
     RAISE EXCEPTION 'invalid pet id';
   END IF;
-  IF p_skin_id IS NULL OR p_skin_id !~ '^[a-z0-9][a-z0-9._-]{0,63}$'
-     OR NOT EXISTS (SELECT 1 FROM private.approved_skins WHERE skin_id = p_skin_id) THEN
-    RAISE EXCEPTION 'skin is not approved for public projection';
+  IF p_skin_id IS NULL OR p_skin_id !~ '^[a-z0-9][a-z0-9._-]{0,63}$' THEN
+    RAISE EXCEPTION 'invalid skin id';
   END IF;
+  -- 白名单是数据不是类型（评审决议 D2）：未批准的皮肤不拒绝投影
+  -- （never-punish——好友仍看得到宠物），回落到默认官方皮。
+  SELECT CASE
+    WHEN EXISTS (SELECT 1 FROM private.approved_skins WHERE skin_id = p_skin_id)
+      THEN p_skin_id
+    ELSE 'yoonie'
+  END INTO v_skin_id;
 
   SELECT COALESCE(NULLIF(display_name, ''), handle)
   INTO v_display_name
@@ -229,7 +228,7 @@ BEGIN
     owner_user_id, pet_id, version, display_name, skin_id, status, updated_at
   )
   VALUES (
-    v_actor, p_pet_id, 1, v_display_name, p_skin_id, p_status, clock_timestamp()
+    v_actor, p_pet_id, 1, v_display_name, v_skin_id, p_status, clock_timestamp()
   )
   ON CONFLICT (owner_user_id) DO UPDATE
   SET pet_id = EXCLUDED.pet_id,

@@ -1,8 +1,4 @@
-import {
-  APPROVED_SKIN_IDS,
-  PROJECTION_STATUSES,
-  type PublicPetProjection,
-} from './contracts';
+import { PROJECTION_STATUSES, type PublicPetProjection } from './contracts';
 import {
   assertBoolean,
   assertBoundedInteger,
@@ -80,7 +76,8 @@ export function sanitizePublicPetProjection(input: unknown): PublicPetProjection
     v: 1,
     petId: assertSafeId(raw.petId, 'petId'),
     displayName: assertDisplayName(raw.displayName, 'displayName'),
-    skinId: assertEnum(raw.skinId, APPROVED_SKIN_IDS, 'skinId'),
+    // 形状校验而非白名单成员校验（D2）：白名单是服务端数据，客户端不复刻
+    skinId: assertSafeId(raw.skinId, 'skinId'),
     status: assertEnum(raw.status, PROJECTION_STATUSES, 'status'),
     updatedAt: assertIsoTimestamp(raw.updatedAt, 'updatedAt'),
   });

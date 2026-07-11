@@ -133,7 +133,10 @@ await rpc('connector_heartbeat', {}, alice.token);
 const waitlistEmail = `api-${randomUUID()}@example.test`;
 const firstWaitlist = await rpc('join_waitlist', { p_email: waitlistEmail });
 const replayedWaitlist = await rpc('join_waitlist', { p_email: waitlistEmail });
-assert.equal(firstWaitlist.id, replayedWaitlist.id);
+// D3：returns void 恒定无返回——新报名与重复报名对调用方完全同形，
+// 探测不到某邮箱是否已报名，也拿不到自增 id / created_at
+assert.equal(firstWaitlist, null);
+assert.equal(replayedWaitlist, null);
 
 const friendship = await rpc(
   'send_friend_request',

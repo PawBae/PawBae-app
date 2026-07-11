@@ -7,6 +7,7 @@ describe('@pawbae/shared entrypoint', () => {
       [
         'AGENT_SOURCES',
         'APPROVED_SKIN_IDS',
+        'DEFAULT_PROJECTION_SKIN_ID',
         'EVENT_KINDS',
         'EVENT_RARITIES',
         'FRIEND_RELATIONS',

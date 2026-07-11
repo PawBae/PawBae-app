@@ -29,21 +29,8 @@ describe('shared social contracts', () => {
       'blocked',
     ]);
     expect(FRIEND_RELATIONS).toEqual(['pending_in', 'pending_out', 'accepted']);
-    expect(APPROVED_SKIN_IDS).toEqual([
-      'shimeji-bola',
-      'yoonie',
-      'doro.codex-pet',
-      'elaina-2',
-      'homie',
-      'linnea-2',
-      'mambo',
-      'naruto',
-      'nezuko',
-      'phoebe.codex-pet',
-      'skirk-2',
-      'taffy',
-      'wukong',
-    ]);
+    // 只有 #55 版权清理后存活的 3 只（D1）；四宠就绪后随 reviewed migration 同步加行
+    expect(APPROVED_SKIN_IDS).toEqual(['shimeji-bola', 'wukong', 'yoonie']);
     expect(Object.isFrozen(PROJECTION_STATUSES)).toBe(true);
     expect(Object.isFrozen(VISIT_STATUSES)).toBe(true);
     expect(Object.isFrozen(FRIEND_RELATIONS)).toBe(true);

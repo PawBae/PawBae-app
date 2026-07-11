@@ -8,6 +8,27 @@ This document freezes the database and RPC contract implemented by the Line A vi
 projection, invite, memory, Realtime, and funnel migrations. Database columns use
 `snake_case`; clients map canonical rows to the camel-case `@pawbae/shared` types.
 
+## 0. 评审决议落地（2026-07-10，PR #54 评论区）
+
+跨线审查后 Yining/B 线拍板并已在本 PR 内实施，与后文冲突处以本节为准：
+
+- **D1**：`APPROVED_SKIN_IDS` 与 SQL 种子 `private.approved_skins` 只含 #55
+  版权清理后存活的 3 只（`shimeji-bola` / `wukong` / `yoonie`）。官方四宠
+  资产就绪后走 reviewed migration 逐只加行。
+- **D2**：wire 契约里 `skinId` 为 `string`（白名单当数据管，不当类型管）。
+  未批准的 skinId **不拒绝投影**：`update_projection` 回落到
+  `DEFAULT_PROJECTION_SKIN_ID`（`yoonie`）——never-punish，自定义皮肤的
+  主人在好友端显示为默认官方皮，投影不中断。客户端 `sanitizePublicPetProjection`
+  对 skinId 只做形状校验。
+- **D3**：`join_waitlist` 改为 `returns void`（新报名/重复报名恒定同形，
+  无行回显、无 created_at、无自增 id），限速补 IP 维度（cf-connecting-ip
+  优先，XFF 最后一跳兜底，哈希后入桶，30 次/小时）。官网 Waitlist 同步
+  改走 `/rest/v1/rpc/join_waitlist`。
+- **D5**：`connector_heartbeat` 限频 2 次/分钟已写入 docs/team/line-b-connector.md；
+  B 线心跳按 60s 间隔。
+- **D6**（产品拍板）：拉黑前已完成的访问允许 settle 共同记忆——拉黑只停止
+  新互动，历史保留；`settle_visit_memory` 不加 is_blocked 检查。
+
 ## 1. Security boundary
 
 - `public` is the only Data API schema. Every public table has RLS enabled and an

@@ -49,18 +49,19 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-          cache-dependency-path: packages/shared/pnpm-lock.yaml
+          # monorepo 单锁文件：workspace 依赖全部装在仓库根
+          cache-dependency-path: pnpm-lock.yaml
 
-      - name: Install shared dependencies
-        run: pnpm --dir packages/shared install --frozen-lockfile
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
 
       - name: Typecheck and test shared contracts
         run: |
           pnpm --dir packages/shared typecheck
           pnpm --dir packages/shared test:coverage
 
-      - name: Audit shared dependencies
-        run: pnpm --dir packages/shared audit --registry=https://registry.npmjs.org --audit-level high
+      - name: Audit workspace dependencies
+        run: pnpm audit --registry=https://registry.npmjs.org --audit-level high
 
   database:
     name: Database migrations and security

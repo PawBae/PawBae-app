@@ -522,8 +522,15 @@ begin
 end;
 $$;
 
+-- 评审决议 D3：匿名公开端点的泄露面收敛——
+--   1) returns void：新报名与重复报名对调用方完全同形（无行回显、无
+--      created_at、无自增 id），无法探测某邮箱是否已报名或报名总量；
+--   2) 限速补 IP 维度：cf-connecting-ip 优先（Cloudflare 注入，不可伪造），
+--      退 x-forwarded-for 最后一跳（可信代理追加侧；第一跳可被客户端自带
+--      头伪造，不能用），本地栈缺头时归入常量桶。IP 与邮箱一样先哈希再进
+--      rate_limits，不落原文。
 create or replace function public.join_waitlist(p_email text)
-returns public.waitlist
+returns void
 language plpgsql
 security definer
 set search_path = ''
@@ -531,11 +538,29 @@ as $$
 declare
   v_email text := private.normalize_email(p_email);
   v_subject text;
-  v_result public.waitlist%rowtype;
+  v_headers json := nullif(current_setting('request.headers', true), '')::json;
+  v_xff text[] := string_to_array(coalesce(v_headers ->> 'x-forwarded-for', ''), ',');
+  v_ip_subject text;
 begin
   if not private.valid_email(v_email) then
     raise exception using errcode = '22023', message = 'invalid_email';
   end if;
+
+  v_ip_subject := encode(extensions.digest(
+    coalesce(
+      nullif(btrim(v_headers ->> 'cf-connecting-ip'), ''),
+      nullif(btrim(v_xff[array_length(v_xff, 1)]), ''),
+      'unknown'
+    ),
+    'sha256'
+  ), 'hex');
+  perform private.consume_rate_limit(
+    '00000000-0000-0000-0000-000000000000'::uuid,
+    'waitlist_ip',
+    v_ip_subject,
+    30,
+    interval '1 hour'
+  );
 
   v_subject := encode(extensions.digest(v_email, 'sha256'), 'hex');
   perform private.consume_rate_limit(
@@ -548,17 +573,7 @@ begin
 
   insert into public.waitlist (email)
   values (v_email)
-  on conflict (email) do nothing
-  returning * into v_result;
-
-  if not found then
-    select * into strict v_result
-    from public.waitlist
-    where email = v_email;
-    return v_result;
-  end if;
-
-  return v_result;
+  on conflict (email) do nothing;
 end;
 $$;
 
