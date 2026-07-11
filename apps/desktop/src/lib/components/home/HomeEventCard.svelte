@@ -17,6 +17,14 @@
     onInviteFriend?: (id: string) => void;
     onOpenMemory?: (id: string) => void;
   } = $props();
+
+  // v1 契约在接受串门前不暴露对方宠物身份（pet.name 为空）：标题走未知宠物
+  // 文案，角标回落主人名首字母。
+  const visitTitleKey = $derived(
+    event?.kind === 'visit-request' && event.request.pet.name === ''
+      ? 'home.visit.cardTitleUnknownPet'
+      : 'home.visit.cardTitle',
+  );
 </script>
 
 {#if event?.kind === 'visit-request'}
@@ -26,18 +34,18 @@
       data-visit-announcement={event.request.id}
       aria-live="polite"
     >
-      {$_('home.visit.cardTitle', {
+      {$_(visitTitleKey, {
         values: { pet: event.request.pet.name, owner: event.request.ownerName },
       })}
     </span>
   {/key}
   <aside class="event-card has-actions" data-home-event="visit-request">
     <span class="event-mark" aria-hidden="true">
-      {event.request.pet.name.slice(0, 1).toLocaleUpperCase()}
+      {(event.request.pet.name || event.request.ownerName).slice(0, 1).toLocaleUpperCase()}
     </span>
     <span>
       <strong>
-        {$_('home.visit.cardTitle', {
+        {$_(visitTitleKey, {
           values: { pet: event.request.pet.name, owner: event.request.ownerName },
         })}
       </strong>

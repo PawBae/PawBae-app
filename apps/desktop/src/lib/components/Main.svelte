@@ -2,8 +2,10 @@
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import { _ } from 'svelte-i18n';
+  import { platformClient } from '../platform/client';
   import { connector } from '../platform/connector';
   import { projectionPublisher } from '../platform/projection-publisher';
+  import type { FriendEntry } from '../platform/types';
   import { accountStore } from '../stores/account.svelte';
   import { agentStore } from '../stores/agents.svelte';
   import { petStore } from '../stores/pet.svelte';
@@ -27,6 +29,10 @@
   import {
     deriveHomePetIdentity,
     deriveLocalAgentState,
+    derivePresence,
+    deriveVisitRequest,
+    friendDisplayName,
+    friendSummaries,
     type SocialHomeModel,
   } from '../utils/social-home';
   import { track } from '../utils/telemetry';
@@ -116,6 +122,46 @@
     }
   }
 
+  // ---- 好友数据（W7 换线）：Home 打开时按需取，登出即清 ----
+  let friendEntries = $state<FriendEntry[]>([]);
+  // 「稍后」= 本地暂时收起事件卡，不替用户发 decline；服务端 24h 过期兜底
+  let dismissedVisitId = $state<string | null>(null);
+
+  async function refreshFriends() {
+    try {
+      friendEntries = await platformClient.friends();
+    } catch {
+      // 静默：下次打开 Home 或登录变化时重试（B 线祖训：失败不打断 UI）
+    }
+  }
+  $effect(() => {
+    if (accountStore.session === null) {
+      friendEntries = [];
+      return;
+    }
+    if (windowStore.homeOpen) void refreshFriends();
+  });
+
+  function friendNameOf(userId: string): string | null {
+    const entry = friendEntries.find((e) => e.userId === userId);
+    return entry ? friendDisplayName(entry) : null;
+  }
+
+  function visitFriend(friendUserId: string) {
+    visitStore.requestVisit(friendUserId).catch((e) => {
+      console.warn('[visit] request failed:', e);
+    });
+  }
+  function acceptVisit(requestId: string) {
+    if (visitStore.inbound?.id !== requestId) return;
+    visitStore.respondInbound('accept').catch((e) => {
+      console.warn('[visit] accept failed:', e);
+    });
+  }
+  function delayVisit(requestId: string) {
+    dismissedVisitId = requestId;
+  }
+
   const homeModel = $derived.by((): SocialHomeModel => {
     const selectedPetId = settingsStore.miniPetId;
     const currentPetName = pet
@@ -133,9 +179,23 @@
       (settingsStore.enableClaudeCode || settingsStore.enableCodex || settingsStore.enableCursor);
     const evolution = petStore.evolution;
 
+    // W7 换线：presence/friends/pendingVisit 从真实租约流与好友契约灌入
+    const pendingVisit = deriveVisitRequest(
+      visitStore.inbound,
+      visitStore.inboundPhase,
+      friendNameOf,
+    );
+
     return {
       localPet,
-      presence: { kind: 'home', visitor: null },
+      presence: derivePresence(
+        visitStore.outbound,
+        visitStore.outboundPhase,
+        visitStore.inbound,
+        visitStore.inboundPhase,
+        visitStore.guestProjection,
+        friendNameOf,
+      ),
       agentState: deriveLocalAgentState(agentEnabled, activity, agentStore.anySessionActive),
       realtimeState: 'connected',
       affection: Math.round(petStore.petData.affection),
@@ -143,8 +203,8 @@
       togetherDays: petStore.daysTogether + 1,
       growthCurrent: evolution.xp,
       growthTarget: evolution.next?.minXp ?? evolution.xp,
-      friends: [],
-      pendingVisit: null,
+      friends: friendSummaries(friendEntries),
+      pendingVisit: pendingVisit && pendingVisit.id !== dismissedVisitId ? pendingVisit : null,
       latestMemory: null,
       memories: [],
     };
@@ -264,6 +324,11 @@
     void reportUnseenCrashes();
     // 恢复持久化登录会话（未配置云端凭据时内部直接 no-op）
     void accountStore.init();
+    // W7 换线：真实 PlatformClient 上线。start() 恢复会话并订阅认证变化；
+    // visitStore 从此吃三源合流的真实租约流（RPC 回包/参与者轮询/visit_ended 广播）。
+    void platformClient.start();
+    visitStore.init(platformClient);
+    visitStore.startClock();
 
     let disposed = false;
     const cleanups: (() => void)[] = [];
@@ -529,6 +594,9 @@
     onThemeChange={setHomeTheme}
     onSendToDesktop={sendPetToDesktop}
     onOpenSettings={openSettings}
+    onVisitFriend={visitFriend}
+    onAcceptVisit={acceptVisit}
+    onDelayVisit={delayVisit}
   />
 
   <UpdateModal

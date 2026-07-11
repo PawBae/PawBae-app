@@ -1,3 +1,5 @@
+import type { LocalVisitPhase } from '../platform/lease-machine';
+import type { FriendEntry, PublicPetProjection, VisitLease } from '../platform/types';
 import { type AgentActivity, mascotStateFor } from './agent-activity';
 import type { CodexPet } from './codex-pet';
 import type { OfficialPetId } from './onboarding';
@@ -128,6 +130,96 @@ export function deriveLocalAgentState(
 ): PublicAgentState {
   if (!enabled) return 'offline';
   return mascotStateFor(activity, anyHealthActive);
+}
+
+// ---------- 平台契约 → Home 模型（B 线 W7 换线）----------
+
+/** 好友展示名：display_name（自选昵称）优先，回落匿名代号 handle。 */
+export function friendDisplayName(entry: FriendEntry): string {
+  return entry.displayName ?? entry.handle;
+}
+
+/**
+ * FriendEntry（§2 冻结契约）→ FriendSummary（Home UI 模型）。
+ * v1 契约不含好友宠物身份与实时在线状态：宠物名用主人名占位（串门被接受后
+ * 真实身份才经投影到达），availability/agent 状态给 available/idle——
+ * 给 offline 会被 selectFriendAction 判成 friend-offline 灰掉串门入口，
+ * 而发起请求必须始终可用（服务端仲裁 + 24h 过期兜底）；A 线补 presence 后再收紧。
+ * 只上墙 accepted：pending 关系 v1 不进好友列表。
+ */
+export function friendSummaries(entries: readonly FriendEntry[]): FriendSummary[] {
+  return entries
+    .filter((entry) => entry.relation === 'accepted')
+    .map((entry) => {
+      const name = friendDisplayName(entry);
+      return {
+        id: entry.userId,
+        displayName: name,
+        handle: entry.handle,
+        pet: { id: entry.userId, name },
+        availability: 'available' as const,
+        publicAgentState: 'idle' as const,
+        visitDirection: 'visit-them' as const,
+      };
+    });
+}
+
+/**
+ * 双槽租约 → Home 在场态。访客在场优先于自家外出（类型单值：家里有客先展示客，
+ * 外出另有空窝牌/召回入口表达）。访客身份只信投影——接受前后端不暴露对方宠物。
+ */
+export function derivePresence(
+  outbound: VisitLease | null,
+  outboundPhase: LocalVisitPhase,
+  inbound: VisitLease | null,
+  inboundPhase: LocalVisitPhase,
+  guestProjection: PublicPetProjection | null,
+  nameOf: (userId: string) => string | null,
+): HomePresence {
+  if (inbound && inboundPhase === 'visiting' && guestProjection) {
+    return {
+      kind: 'home',
+      visitor: { id: guestProjection.petId, name: guestProjection.displayName },
+      visitorOwnerName: nameOf(inbound.visitorUserId) ?? guestProjection.displayName,
+      visitorAgentState: guestProjection.status,
+      endsAt: inbound.endsAt ?? '',
+      leaseMinutes: 30,
+    };
+  }
+  if (
+    outbound &&
+    (outboundPhase === 'traveling' || outboundPhase === 'visiting' || outboundPhase === 'returning')
+  ) {
+    return {
+      kind: 'away',
+      friendId: outbound.hostUserId,
+      friendName: nameOf(outbound.hostUserId) ?? '',
+      endsAt: outbound.endsAt ?? '',
+      leaseMinutes: 30,
+    };
+  }
+  return { kind: 'home', visitor: null };
+}
+
+/**
+ * inbound 挂起租约 → 待客事件卡。主人名解析不到（好友列表未加载/关系已解除）
+ * 时返回 null——宁可晚一拍出卡，不渲染残缺文案。
+ */
+export function deriveVisitRequest(
+  inbound: VisitLease | null,
+  inboundPhase: LocalVisitPhase,
+  nameOf: (userId: string) => string | null,
+): VisitRequest | null {
+  if (!inbound || inboundPhase !== 'pending') return null;
+  const ownerName = nameOf(inbound.visitorUserId);
+  if (!ownerName) return null;
+  // v1 契约在接受前不暴露对方宠物身份：pet.name 留空，事件卡走未知宠物文案
+  return {
+    id: inbound.id,
+    friendId: inbound.visitorUserId,
+    ownerName,
+    pet: { id: inbound.visitorUserId, name: '' },
+  };
 }
 
 export function selectHomeEvent(model: SocialHomeModel): HomeEvent | null {

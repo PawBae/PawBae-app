@@ -5,13 +5,12 @@ import {
   supabaseClient,
   toPlatformSession,
 } from '../platform/auth';
-import { platformMock } from '../platform/client';
 import type { PlatformSession } from '../platform/types';
 
 /**
- * 账号状态（B 线 W3）。AccountSection 的唯一数据源；会话变化同步进
- * PlatformClient（W7 前是 mock 的 setSession——真认证 + mock 串门共存，
- * 换真实现时删掉那一行即可）。
+ * 账号状态（B 线 W3）。AccountSection 的唯一数据源。
+ * W7 起不再向 PlatformClient 桥接会话——真实客户端在 start() 里自己订阅
+ * 同一个 GoTrue（platform/supabase-client.ts），两边天然同源。
  *
  * 'unconfigured' = 构建时没有 Supabase 环境变量（见 platform/auth.ts）。
  * App 的一切功能不依赖登录 —— null 会话必须照常工作（契约红线）。
@@ -49,8 +48,6 @@ class AccountStore {
     if (this.phase !== 'signingIn' || s) {
       this.phase = s ? 'signedIn' : 'signedOut';
     }
-    // 让串门层（W7 前是 mock）看到同一份会话
-    platformMock.setSession(s);
   }
 
   async login() {
