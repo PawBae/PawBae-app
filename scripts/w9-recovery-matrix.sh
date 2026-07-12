@@ -23,9 +23,16 @@ read -r API_URL PUBLISHABLE_KEY < <(node -e '
   console.log(s.API_URL, s.PUBLISHABLE_KEY);
 ' "$STATUS_RAW")
 
-DB_CONTAINER="$(docker ps --filter name=supabase_db_ --format '{{.Names}}' | head -1)"
-if [ -z "$DB_CONTAINER" ]; then
-  echo "找不到 supabase db 容器（docker ps --filter name=supabase_db_）" >&2
+# db 容器名绑定本项目（supabase/config.toml 的 project_id）：本机同时跑多个
+# supabase 栈时，全局抓第一个匹配可能把时钟快进打到别的项目的库上
+PROJECT_ID="$(awk -F'"' '/^project_id[[:space:]]*=/ { print $2; exit }' supabase/config.toml)"
+if [ -z "$PROJECT_ID" ]; then
+  echo "supabase/config.toml 里找不到 project_id" >&2
+  exit 1
+fi
+DB_CONTAINER="supabase_db_${PROJECT_ID}"
+if [ "$(docker inspect -f '{{.State.Running}}' "$DB_CONTAINER" 2>/dev/null)" != "true" ]; then
+  echo "本项目的 supabase db 容器 ${DB_CONTAINER} 未运行" >&2
   exit 1
 fi
 
