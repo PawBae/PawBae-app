@@ -8,79 +8,20 @@
 //   → requestVisit 回包即喂 / 对端轮询感知 → accept 30 分钟租约 → 投影订阅即回放
 //   + 广播帧剥 transport id → recall → visit_ended/轮询把 returning→recalled 带给双方。
 
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { afterAll, describe, expect, it } from 'vitest';
-import { type SupabaseLike, SupabasePlatformClient } from './supabase-client';
+import {
+  type Actor,
+  integrationEnv,
+  PUBLISHABLE_KEY,
+  rawRpc,
+  SUPABASE_URL,
+  signUpActor,
+  until,
+  untilJoined,
+} from './integration-harness';
 import type { PublicPetProjection, VisitLease } from './types';
 
-// 桌面 tsconfig 面向 DOM，没有（也不该为一份联调文件引入）@types/node——
-// 本文件只在 vitest 的 node 环境跑，就地声明 process.env 的最小形状；
-// 随机数统一走 Web Crypto 全局（DOM lib 有类型，Node ≥19 运行时也有）。
-declare const process: { env: Record<string, string | undefined> };
-
-const SUPABASE_URL = process.env.PAWBAE_SUPABASE_URL ?? '';
-const PUBLISHABLE_KEY = process.env.PAWBAE_SUPABASE_PUBLISHABLE_KEY ?? '';
-const INVITE_CODE = process.env.PAWBAE_INVITE_CODE ?? '';
-
-/** 联调把 15s 生产轮询压到 2s：跨端感知断言不用等一刻钟。 */
-const POLL_MS = 2_000;
-
-async function until<T>(
-  probe: () => T | undefined | null | false,
-  what: string,
-  timeoutMs = 15_000,
-): Promise<T> {
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    const value = probe();
-    if (value) return value;
-    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
-    await new Promise((resolve) => setTimeout(resolve, 250));
-  }
-}
-
-interface Actor {
-  raw: SupabaseClient;
-  platform: SupabasePlatformClient;
-  userId: string;
-  /** onLeaseChange 全量流水：三源合流的观测窗口。 */
-  leases: VisitLease[];
-}
-
-async function signUpActor(label: string): Promise<Actor> {
-  const raw = createClient(SUPABASE_URL, PUBLISHABLE_KEY, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-  const suffix = crypto.randomUUID().replaceAll('-', '').slice(0, 10);
-  const { data, error } = await raw.auth.signUp({
-    email: `w6-${label}-${suffix}@example.test`,
-    password: `T3st-${crypto.randomUUID()}`,
-  });
-  if (error || !data.user) throw new Error(`signUp(${label}) failed: ${error?.message}`);
-  const platform = new SupabasePlatformClient(() => raw as unknown as SupabaseLike, POLL_MS);
-  await platform.start();
-  const actor: Actor = { raw, platform, userId: data.user.id, leases: [] };
-  platform.onLeaseChange((lease) => actor.leases.push(lease));
-  return actor;
-}
-
-async function rawRpc(actor: Actor, name: string, params: Record<string, unknown>): Promise<void> {
-  const { error } = await actor.raw.rpc(name, params);
-  if (error) throw new Error(`${name} failed: ${error.message}`);
-}
-
-/**
- * 等 Realtime 频道真正 join 完成再触发广播源：Broadcast 不回放，join 前发出的帧
- * 会永久丢失（生产里由轮询兜底，测试里则要确定性）。走 supabase-js 公开 API
- * 观察频道状态，不需要生产接口暴露 join 时机。
- */
-async function untilJoined(actor: Actor, lease: VisitLease): Promise<void> {
-  const suffix = `pet:${lease.visitorUserId}:${lease.id}`;
-  await until(
-    () => actor.raw.getChannels().some((c) => c.topic.endsWith(suffix) && c.state === 'joined'),
-    `Realtime 频道 ${suffix} join 完成`,
-  );
-}
+const INVITE_CODE = integrationEnv('PAWBAE_INVITE_CODE');
 
 describe.runIf(SUPABASE_URL !== '' && PUBLISHABLE_KEY !== '')(
   'SupabasePlatformClient ↔ supabase start 真实栈',
