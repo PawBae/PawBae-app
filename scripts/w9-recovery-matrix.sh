@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# W6 联调一键入口：对 `supabase start` 本地真实栈运行 SupabasePlatformClient 集成测试。
+# W9 恢复矩阵一键入口：对 `supabase start` 本地真实栈运行 SV §12「集成恢复」联调套件。
 #
 #   pnpm dlx supabase start        # 先起本地栈（需要 Docker）
-#   bash scripts/w6-supabase-integration.sh
+#   bash scripts/w9-recovery-matrix.sh
 #
-# 做三件事：发现本地栈地址与 publishable key → 以 postgres 身份播种一张一次性
-# 邀请码（redeemInvite 覆盖用）→ 注入环境变量运行 vitest 集成文件。
-# 没有这些变量时该测试文件在普通 `pnpm test` 里自动跳过。
+# 与 w6-supabase-integration.sh 的差别：矩阵需要“时间快进”——把 visits 的时钟列
+# 拨回过去并手动执行 private.maintain_visits()（与生产 cron 同一条代码路径），
+# 因此额外注入 db 容器名。没有这些变量时该测试文件在普通 `pnpm test` 里自动跳过。
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -24,7 +24,7 @@ read -r API_URL PUBLISHABLE_KEY < <(node -e '
 ' "$STATUS_RAW")
 
 # db 容器名绑定本项目（supabase/config.toml 的 project_id）：本机同时跑多个
-# supabase 栈时，全局抓第一个匹配可能把邀请码播到别的项目的库里
+# supabase 栈时，全局抓第一个匹配可能把时钟快进打到别的项目的库上
 PROJECT_ID="$(awk -F'"' '/^project_id[[:space:]]*=/ { print $2; exit }' supabase/config.toml)"
 if [ -z "$PROJECT_ID" ]; then
   echo "supabase/config.toml 里找不到 project_id" >&2
@@ -35,14 +35,9 @@ if [ "$(docker inspect -f '{{.State.Running}}' "$DB_CONTAINER" 2>/dev/null)" != 
   echo "本项目的 supabase db 容器 ${DB_CONTAINER} 未运行" >&2
   exit 1
 fi
-# 不用 </dev/urandom | head 组合：head 关管道会让 pipefail 下的脚本吃 SIGPIPE(141) 静默死掉
-INVITE_CODE="W6-$(node -e 'console.log(require("node:crypto").randomUUID().replaceAll("-","").slice(0,12).toUpperCase())')"
-docker exec "$DB_CONTAINER" psql -U postgres -v ON_ERROR_STOP=1 -q -c \
-  "INSERT INTO public.invite_codes (code_hash, max_uses, expires_at)
-   VALUES (extensions.digest(upper('${INVITE_CODE}'), 'sha256'), 10, now() + interval '1 hour');"
 
-echo "stack=${API_URL} invite=${INVITE_CODE}"
+echo "stack=${API_URL} db=${DB_CONTAINER}"
 PAWBAE_SUPABASE_URL="$API_URL" \
 PAWBAE_SUPABASE_PUBLISHABLE_KEY="$PUBLISHABLE_KEY" \
-PAWBAE_INVITE_CODE="$INVITE_CODE" \
-pnpm --filter @pawbae/desktop exec vitest run src/lib/platform/supabase-client.integration.test.ts
+PAWBAE_SUPABASE_DB_CONTAINER="$DB_CONTAINER" \
+pnpm --filter @pawbae/desktop exec vitest run src/lib/platform/supabase-client.recovery.integration.test.ts

@@ -118,7 +118,8 @@ export type Unsubscribe = () => void
 
 ### W9 —— 联调与异常矩阵（M5）
 
-- [ ] SV §12「集成恢复」测试执行：requested/traveling/visiting/returning 各阶段断网、跨租约结束重启、双端同时召回/拉黑/到期竞态——不出分身、不重复记忆、不卡访问态
+- [x] SV §12「集成恢复」测试执行：requested/traveling/visiting/returning 各阶段断网、跨租约结束重启、双端同时召回/拉黑/到期竞态——不出分身、不重复记忆、不卡访问态
+  ——七场景矩阵在 `apps/desktop/src/lib/platform/supabase-client.recovery.integration.test.ts`，一键入口 `scripts/w9-recovery-matrix.sh`（对 `supabase start` 真实栈；时间快进 = 整体平移 visits 时钟列 + 手动执行 `private.maintain_visits()`，与生产 cron 同一条代码路径）
 
 ### W10 —— 签名安装包出厂（M6）
 
