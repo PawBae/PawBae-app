@@ -158,14 +158,31 @@ jobs:
         with:
           projectPath: apps/desktop
           # On tag pushes: create/update a draft release. On manual runs the
-          # empty tagName skips the release and we keep workflow artifacts.
+          # empty tagName skips the release and the step below uploads
+          # workflow artifacts instead.
           tagName: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
           releaseName: ${{ startsWith(github.ref, 'refs/tags/') && format('PawBae {0}', github.ref_name) || '' }}
           releaseDraft: true
           prerelease: false
-          uploadUpdaterJson: false # custom updater reads pawbae.ai, not GitHub latest.json
-          uploadWorkflowArtifacts: ${{ github.event_name == 'workflow_dispatch' }}
+          # 注意输入名随 tauri-action 升级过：老的 uploadUpdaterJson /
+          # uploadWorkflowArtifacts 会被静默忽略（只报 warning）。
+          includeUpdaterJson: false # custom updater reads pawbae.ai, not GitHub latest.json
           args: ${{ matrix.args }}
+
+      # 冒烟构建的产物出口：tauri-action 现版本没有 workflow-artifact 输入，
+      # dispatch 运行（tagName 为空、release 上传被跳过）需要自己上传，
+      # 否则签名/公证验证无包可下。tag 构建产物走 draft release，不重复传。
+      - name: upload workflow artifacts (smoke builds)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: bundles-${{ matrix.platform }}-${{ strategy.job-index }}
+          retention-days: 7
+          if-no-files-found: error
+          path: |
+            apps/desktop/src-tauri/target/**/release/bundle/dmg/*.dmg
+            apps/desktop/src-tauri/target/**/release/bundle/nsis/*.exe
+            D:\cargo-target\**\release\bundle\nsis\*.exe
 
   # 给发布资产做 minisign 签名（更新器安装前验签的另一半）。
   # 产出：每个 dmg/exe/msi 一个 .minisig 上传回 release + Step Summary 里
