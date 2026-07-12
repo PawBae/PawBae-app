@@ -530,8 +530,8 @@ describe('SocialHome', () => {
         memories: [
           {
             id: 'memory-1',
-            templateKey: 'rainy-tea',
-            params: {},
+            templateKey: 'played_together',
+            params: { durationBucket: 'short', timeOfDay: 'morning', interactionCount: 4 },
             occurredAt: Date.UTC(2026, 6, 10),
             petIds: ['muru', 'solu'],
           },
@@ -552,13 +552,14 @@ describe('SocialHome', () => {
   });
 
   it('renders allowlisted shared-memory templates at the localized UI boundary', async () => {
+    // 模板文案来自 @pawbae/shared 契约表（不再走 svelte-i18n）——安全参数不含任何自由文本
     component = mountHome({
       ...base,
       memories: [
         {
           id: 'memory-safe',
-          templateKey: 'shared-photo',
-          params: { photoCount: 3 },
+          templateKey: 'worked_together',
+          params: { durationBucket: 'full', timeOfDay: 'afternoon', interactionCount: 12 },
           occurredAt: Date.UTC(2026, 6, 10),
           petIds: ['muru', 'solu'],
         },
@@ -568,7 +569,7 @@ describe('SocialHome', () => {
     await tick();
 
     const memory = document.querySelector('[data-memory-id="memory-safe"]');
-    expect(memory?.textContent).toContain('3 photos together');
+    expect(memory?.textContent).toContain('Side by side');
     expect(memory?.textContent).not.toMatch(/prompt|path|task/i);
   });
 
@@ -578,8 +579,8 @@ describe('SocialHome', () => {
       memories: [
         {
           id: 'memory-1',
-          templateKey: 'rainy-tea',
-          params: {},
+          templateKey: 'played_together',
+          params: { durationBucket: 'short', timeOfDay: 'morning', interactionCount: 4 },
           occurredAt: Date.UTC(2026, 6, 10),
           petIds: ['muru', 'solu'],
         },
@@ -591,7 +592,7 @@ describe('SocialHome', () => {
     const memoryLabel = document
       .querySelector<HTMLButtonElement>('[data-memory-id="memory-1"]')
       ?.getAttribute('aria-label');
-    expect(memoryLabel).toContain('Rainy tea');
+    expect(memoryLabel).toContain('A visit together');
     expect(memoryLabel).toContain('Jul 10');
     expect(memoryLabel).toContain('muru');
     expect(memoryLabel).toContain('solu');

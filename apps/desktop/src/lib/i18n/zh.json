@@ -84,12 +84,7 @@
     "memory": {
       "readyTitle": "共同记忆已整理好",
       "readyBody": "{title} · {date}",
-      "open": "打开记忆",
-      "templates": {
-        "rainy-tea": "雨天的下午茶",
-        "shoulder-nap": "肩并肩打了个盹",
-        "shared-photo": "一起拍了 {photoCount} 张照片"
-      }
+      "open": "打开记忆"
     },
     "plaza": {
       "title": "广场",

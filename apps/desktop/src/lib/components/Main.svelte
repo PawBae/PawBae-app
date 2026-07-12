@@ -4,8 +4,9 @@
   import { _ } from 'svelte-i18n';
   import { platformClient } from '../platform/client';
   import { connector } from '../platform/connector';
+  import { newIdempotencyKey } from '../platform/lease-machine';
   import { projectionPublisher } from '../platform/projection-publisher';
-  import type { FriendEntry, PlatformSession } from '../platform/types';
+  import type { FriendEntry, PlatformSession, SharedMemoryEntry } from '../platform/types';
   import { accountStore } from '../stores/account.svelte';
   import { agentStore } from '../stores/agents.svelte';
   import { petStore } from '../stores/pet.svelte';
@@ -27,12 +28,14 @@
   } from '../utils/onboarding-theme';
   import { effectiveName } from '../utils/pet-name';
   import {
+    announceableMemory,
     deriveHomePetIdentity,
     deriveLocalAgentState,
     derivePresence,
     deriveVisitRequest,
     friendDisplayName,
     friendSummaries,
+    memorySummaries,
     type SocialHomeModel,
   } from '../utils/social-home';
   import { track } from '../utils/telemetry';
@@ -129,6 +132,10 @@
   let platformSession = $state<PlatformSession | null>(null);
   // 「稍后」= 本地暂时收起事件卡，不替用户发 decline；服务端 24h 过期兜底
   let dismissedVisitId = $state<string | null>(null);
+  // ---- 共同记忆（W9 P4-C）：与好友同款「Home 打开时按需取，登出即清」 ----
+  let memoryEntries = $state<SharedMemoryEntry[]>([]);
+  // 打开过的记忆卡本地收起（相册里永远还在），与 dismissedVisitId 同款语义
+  let dismissedMemoryId = $state<string | null>(null);
 
   async function refreshFriends() {
     try {
@@ -137,12 +144,23 @@
       // 静默：下次打开 Home 或登录变化时重试（B 线祖训：失败不打断 UI）
     }
   }
+  async function refreshMemories() {
+    try {
+      memoryEntries = await platformClient.sharedMemories();
+    } catch {
+      // 静默：同上
+    }
+  }
   $effect(() => {
     if (platformSession === null) {
       friendEntries = [];
+      memoryEntries = [];
       return;
     }
-    if (windowStore.homeOpen) void refreshFriends();
+    if (windowStore.homeOpen) {
+      void refreshFriends();
+      void refreshMemories();
+    }
   });
 
   function friendNameOf(userId: string): string | null {
@@ -163,6 +181,11 @@
   }
   function delayVisit(requestId: string) {
     dismissedVisitId = requestId;
+  }
+  function openMemory(memoryId: string) {
+    dismissedMemoryId = memoryId; // 打开即收起事件卡；相册里永远还在
+    // SV §9 漏斗 memory_viewed：fire-and-forget，失败静默不打断 UI
+    platformClient.recordMemoryView(memoryId, newIdempotencyKey()).catch(() => {});
   }
 
   const homeModel = $derived.by((): SocialHomeModel => {
@@ -189,6 +212,15 @@
       friendNameOf,
     );
 
+    // W9 P4-C：相册与「记忆已整理好」事件卡从真实 shared_memories 灌入。
+    // 参与者展示名解析不到（已解除好友/拉黑的历史记忆，D6 历史保留）回落 '?'。
+    const memories = memorySummaries(
+      memoryEntries,
+      platformSession?.userId ?? null,
+      localPet.name,
+      (userId) => friendNameOf(userId) ?? '?',
+    );
+
     return {
       localPet,
       presence: derivePresence(
@@ -208,8 +240,8 @@
       growthTarget: evolution.next?.minXp ?? evolution.xp,
       friends: friendSummaries(friendEntries),
       pendingVisit: pendingVisit && pendingVisit.id !== dismissedVisitId ? pendingVisit : null,
-      latestMemory: null,
-      memories: [],
+      latestMemory: announceableMemory(memories, dismissedMemoryId, Date.now()),
+      memories,
     };
   });
 
@@ -607,6 +639,7 @@
     onVisitFriend={visitFriend}
     onAcceptVisit={acceptVisit}
     onDelayVisit={delayVisit}
+    onOpenMemory={openMemory}
   />
 
   <UpdateModal

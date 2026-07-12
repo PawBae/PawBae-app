@@ -3,6 +3,7 @@ import type { FriendEntry, PublicPetProjection, VisitLease } from '../platform/t
 import type { CodexPet } from './codex-pet';
 import {
   allowedHomeActions,
+  announceableMemory,
   deriveHomePetIdentity,
   deriveLocalAgentState,
   derivePresence,
@@ -11,7 +12,9 @@ import {
   friendDisplayName,
   friendSummaries,
   isOfficialPetId,
-  parseSharedMemory,
+  MEMORY_ANNOUNCE_WINDOW_MS,
+  memoryCardCopy,
+  memorySummaries,
   type SocialHomeModel,
   selectFriendAction,
   selectHomeEvent,
@@ -97,8 +100,8 @@ describe('social Home model', () => {
       },
       latestMemory: {
         id: 'memory-1',
-        templateKey: 'rainy-tea',
-        params: {},
+        templateKey: 'played_together',
+        params: { durationBucket: 'short', timeOfDay: 'morning', interactionCount: 4 },
         occurredAt: Date.UTC(2026, 6, 10),
         petIds: ['muru', 'solu'],
       },
@@ -227,48 +230,95 @@ describe('social Home model', () => {
     ).toEqual({ kind: 'visit', disabledReason: 'friend-busy' });
   });
 
-  it('rejects arbitrary shared-memory titles and accepts only allowlisted templates', () => {
-    expect(
-      parseSharedMemory({
-        id: 'unsafe',
-        title: '/Users/alice/secret-project prompt: deploy prod',
-        occurredAt: Date.UTC(2026, 6, 10),
-        petIds: ['muru', 'solu'],
-      }),
-    ).toBeNull();
-    expect(
-      parseSharedMemory({
+  // 网络边界的模板允许清单校验在平台层（toSharedMemoryEntry，见 supabase-client.test）；
+  // 这里测契约行 → 相册摘要的纯映射与展示派生。
+
+  it('maps memory entries to album summaries with resolved participant names', () => {
+    const entries = [
+      {
         id: 'memory-1',
-        templateKey: 'rainy-tea',
-        params: {},
-        occurredAt: Date.UTC(2026, 6, 10),
-        petIds: ['muru', 'solu'],
-      }),
-    ).toEqual({
+        visitId: 'visit-1',
+        visitorUserId: 'user-me',
+        hostUserId: 'user-momo',
+        templateKey: 'played_together' as const,
+        params: {
+          durationBucket: 'short' as const,
+          timeOfDay: 'morning' as const,
+          interactionCount: 4,
+        },
+        createdAt: '2026-07-10T08:00:00.000Z',
+      },
+      {
+        // created_at 不可解析的行丢弃（fail-closed）
+        id: 'memory-bad',
+        visitId: 'visit-2',
+        visitorUserId: 'user-momo',
+        hostUserId: 'user-me',
+        templateKey: 'shared_snack' as const,
+        params: {
+          durationBucket: 'short' as const,
+          timeOfDay: 'night' as const,
+          interactionCount: 1,
+        },
+        createdAt: 'not-a-date',
+      },
+    ];
+    const summaries = memorySummaries(entries, 'user-me', 'Muru', (id) =>
+      id === 'user-momo' ? 'Momo' : '?',
+    );
+    expect(summaries).toEqual([
+      {
+        id: 'memory-1',
+        occurredAt: Date.parse('2026-07-10T08:00:00.000Z'),
+        petIds: ['Muru', 'Momo'],
+        templateKey: 'played_together',
+        params: { durationBucket: 'short', timeOfDay: 'morning', interactionCount: 4 },
+      },
+    ]);
+  });
+
+  it('announces only a fresh, undismissed memory on the event card', () => {
+    const nowMs = Date.UTC(2026, 6, 12);
+    const memory = {
       id: 'memory-1',
-      templateKey: 'rainy-tea',
-      params: {},
-      occurredAt: Date.UTC(2026, 6, 10),
-      petIds: ['muru', 'solu'],
+      occurredAt: nowMs - 60_000,
+      petIds: ['Muru', 'Momo'],
+      templateKey: 'played_together' as const,
+      params: {
+        durationBucket: 'short' as const,
+        timeOfDay: 'morning' as const,
+        interactionCount: 4,
+      },
+    };
+    expect(announceableMemory([memory], null, nowMs)?.id).toBe('memory-1');
+    // 打开过即本地收起
+    expect(announceableMemory([memory], 'memory-1', nowMs)).toBeNull();
+    // 超出播报窗口只进相册不上卡
+    const stale = { ...memory, occurredAt: nowMs - MEMORY_ANNOUNCE_WINDOW_MS - 1 };
+    expect(announceableMemory([stale], null, nowMs)).toBeNull();
+    // 多条时报最新
+    const older = { ...memory, id: 'memory-0', occurredAt: memory.occurredAt - 1 };
+    expect(announceableMemory([older, memory], null, nowMs)?.id).toBe('memory-1');
+  });
+
+  it('renders memory card copy from the shared contract tables in both locales', () => {
+    const memory = {
+      templateKey: 'played_together' as const,
+      params: {
+        durationBucket: 'short' as const,
+        timeOfDay: 'morning' as const,
+        interactionCount: 4,
+      },
+    };
+    expect(memoryCardCopy(memory, 'zh-CN')).toEqual({
+      title: '一起串门',
+      body: '她们在一个短短的早晨一起玩，留下了4个小瞬间。',
     });
-    expect(
-      parseSharedMemory({
-        id: 'memory-2',
-        templateKey: 'shared-photo',
-        params: { photoCount: '/tmp/private' },
-        occurredAt: Date.UTC(2026, 6, 10),
-        petIds: ['muru', 'solu'],
-      }),
-    ).toBeNull();
-    expect(
-      parseSharedMemory({
-        id: 'memory-3',
-        templateKey: 'rainy-tea',
-        params: {},
-        occurredAt: Date.UTC(2026, 6, 10),
-        petIds: ['muru', '/Users/alice/private-task.md'],
-      }),
-    ).toBeNull();
+    const en = memoryCardCopy(memory, 'en');
+    expect(en.title).toBe('A visit together');
+    expect(en.body).toBe('They played through a little morning and shared 4 little moments.');
+    // 未知/缺省 locale 回落英文
+    expect(memoryCardCopy(memory, null).title).toBe('A visit together');
   });
 
   it('never renders the local pet body while away', () => {

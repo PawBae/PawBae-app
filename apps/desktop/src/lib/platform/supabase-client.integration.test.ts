@@ -178,5 +178,28 @@ describe.runIf(SUPABASE_URL !== '' && PUBLISHABLE_KEY !== '')(
         100_000,
       );
     }, 240_000);
+
+    it('记忆链（W9 P4-C）：召回后的结算幂等，双方相册读到同一行，浏览漏斗可记', async () => {
+      // never-punish：recalled 的访问照样结算记忆（D6）
+      const settled = await visitor.platform.settleMemory(acceptedLease.id, crypto.randomUUID());
+      expect(settled.visitId).toBe(acceptedLease.id);
+      expect(settled.visitorUserId).toBe(visitor.userId);
+      expect(settled.hostUserId).toBe(host.userId);
+
+      // 对端用自己的幂等键重复结算：服务端按 visit_id 唯一，拿回同一行
+      const replay = await host.platform.settleMemory(acceptedLease.id, crypto.randomUUID());
+      expect(replay.id).toBe(settled.id);
+
+      const [mine, theirs] = await Promise.all([
+        visitor.platform.sharedMemories(),
+        host.platform.sharedMemories(),
+      ]);
+      expect(mine.filter((m) => m.visitId === acceptedLease.id)).toHaveLength(1);
+      expect(theirs.filter((m) => m.visitId === acceptedLease.id)).toHaveLength(1);
+
+      await expect(
+        host.platform.recordMemoryView(settled.id, crypto.randomUUID()),
+      ).resolves.toBeUndefined();
+    }, 30_000);
   },
 );

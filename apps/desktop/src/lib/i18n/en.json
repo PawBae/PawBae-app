@@ -84,12 +84,7 @@
     "memory": {
       "readyTitle": "A shared memory is ready",
       "readyBody": "{title} · {date}",
-      "open": "Open memory",
-      "templates": {
-        "rainy-tea": "Rainy tea",
-        "shoulder-nap": "A shoulder-to-shoulder nap",
-        "shared-photo": "{photoCount} photos together"
-      }
+      "open": "Open memory"
     },
     "plaza": {
       "title": "Plaza",
