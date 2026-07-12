@@ -1,5 +1,17 @@
+import {
+  MEMORY_PARAMETER_LOCALIZATIONS,
+  MEMORY_TEMPLATE_LOCALIZATIONS,
+  type MemoryLocale,
+  type MemoryTemplateKey,
+  type MemoryTemplateParams,
+} from '@pawbae/shared';
 import type { LocalVisitPhase } from '../platform/lease-machine';
-import type { FriendEntry, PublicPetProjection, VisitLease } from '../platform/types';
+import type {
+  FriendEntry,
+  PublicPetProjection,
+  SharedMemoryEntry,
+  VisitLease,
+} from '../platform/types';
 import { type AgentActivity, mascotStateFor } from './agent-activity';
 import type { CodexPet } from './codex-pet';
 import type { OfficialPetId } from './onboarding';
@@ -55,19 +67,20 @@ export interface VisitRequest {
   pet: HomePetIdentity;
 }
 
-interface SharedMemoryBase {
+/** 模板键与安全参数 = @pawbae/shared memories.ts 契约（A 线 W8 落地的单一来源）。 */
+export type SharedMemoryTemplateKey = MemoryTemplateKey;
+
+export interface SharedMemorySummary {
   id: string;
   occurredAt: number;
+  /**
+   * 参与者的展示名（v1 契约缺口同好友墙：平台尚无好友宠物身份，用主人名/
+   * 本地宠物名占位），顺序恒为 [访客侧, 主人侧]。
+   */
   petIds: string[];
+  templateKey: MemoryTemplateKey;
+  params: MemoryTemplateParams;
 }
-
-export type SharedMemoryTemplateKey = 'rainy-tea' | 'shoulder-nap' | 'shared-photo';
-
-export type SharedMemorySummary = SharedMemoryBase &
-  (
-    | { templateKey: 'rainy-tea' | 'shoulder-nap'; params: Record<string, never> }
-    | { templateKey: 'shared-photo'; params: { photoCount: number } }
-  );
 
 export interface SocialHomeModel {
   localPet: HomePetIdentity;
@@ -264,51 +277,74 @@ export function selectFriendAction(
   };
 }
 
-const MEMORY_TEMPLATE_KEYS = new Set<SharedMemoryTemplateKey>([
-  'rainy-tea',
-  'shoulder-nap',
-  'shared-photo',
-]);
+// ---------- 平台契约 → Home 模型：共同记忆（P4-C 数据面） ----------
+// 网络边界的形状校验在平台层（toSharedMemoryEntry 走共享契约校验器）完成，
+// 这里只做纯映射与展示派生。
 
-/** Validate the privacy-safe projection at the network/storage boundary. */
-export function parseSharedMemory(value: unknown): SharedMemorySummary | null {
-  if (!value || typeof value !== 'object') return null;
-  const record = value as Record<string, unknown>;
-  const safeId = /^[A-Za-z0-9_-]{1,64}$/;
-  if (typeof record.id !== 'string' || !safeId.test(record.id)) return null;
-  if (!MEMORY_TEMPLATE_KEYS.has(record.templateKey as SharedMemoryTemplateKey)) return null;
-  if (!Number.isFinite(record.occurredAt) || Number(record.occurredAt) < 0) return null;
-  if (
-    !Array.isArray(record.petIds) ||
-    record.petIds.length === 0 ||
-    !record.petIds.every((id) => typeof id === 'string' && safeId.test(id))
-  ) {
-    return null;
+/**
+ * SharedMemoryEntry → 相册摘要。petIds 语义见 SharedMemorySummary；
+ * created_at 不可解析的行丢弃（fail-closed，与坏帧同待遇）。
+ */
+export function memorySummaries(
+  entries: SharedMemoryEntry[],
+  selfUserId: string | null,
+  localPetName: string,
+  nameOf: (userId: string) => string,
+): SharedMemorySummary[] {
+  const summaries: SharedMemorySummary[] = [];
+  for (const entry of entries) {
+    const occurredAt = Date.parse(entry.createdAt);
+    if (!Number.isFinite(occurredAt)) continue;
+    const nameFor = (userId: string) => (userId === selfUserId ? localPetName : nameOf(userId));
+    summaries.push({
+      id: entry.id,
+      occurredAt,
+      petIds: [nameFor(entry.visitorUserId), nameFor(entry.hostUserId)],
+      templateKey: entry.templateKey,
+      params: entry.params,
+    });
   }
-  if (!record.params || typeof record.params !== 'object' || Array.isArray(record.params)) {
-    return null;
-  }
-  const params = record.params as Record<string, unknown>;
-  if (Object.keys(params).some((key) => key !== 'photoCount')) return null;
-  const base = {
-    id: record.id,
-    occurredAt: Number(record.occurredAt),
-    petIds: [...record.petIds] as string[],
-  };
-  if (record.templateKey === 'shared-photo') {
-    if (!Number.isSafeInteger(params.photoCount) || Number(params.photoCount) < 1) return null;
-    return {
-      ...base,
-      templateKey: 'shared-photo',
-      params: { photoCount: Number(params.photoCount) },
-    };
-  }
-  if (params.photoCount !== undefined) return null;
-  return {
-    ...base,
-    templateKey: record.templateKey as 'rainy-tea' | 'shoulder-nap',
-    params: {},
-  };
+  return summaries;
+}
+
+/** 「记忆已整理好」事件卡只播报这个窗口内的新记忆，过期只进相册不上卡。 */
+export const MEMORY_ANNOUNCE_WINDOW_MS = 48 * 60 * 60 * 1000;
+
+/**
+ * 选出值得上事件卡的最新记忆：48h 内 + 未被本地收起（打开过即收起，
+ * 与 dismissedVisitId 同款「本地暂时收起」语义——相册里永远还在）。
+ */
+export function announceableMemory(
+  memories: SharedMemorySummary[],
+  dismissedMemoryId: string | null,
+  nowMs: number,
+): SharedMemorySummary | null {
+  const latest = memories.reduce<SharedMemorySummary | null>(
+    (best, m) => (best === null || m.occurredAt > best.occurredAt ? m : best),
+    null,
+  );
+  if (!latest) return null;
+  if (latest.id === dismissedMemoryId) return null;
+  if (nowMs - latest.occurredAt > MEMORY_ANNOUNCE_WINDOW_MS) return null;
+  return latest;
+}
+
+/**
+ * 记忆卡文案：共享契约的本地化表（模板文案 + 参数词表）就是渲染的单一来源，
+ * 不进 svelte-i18n——A 线拥有这份文案，fixture 与线上数据同一条渲染路径。
+ */
+export function memoryCardCopy(
+  memory: Pick<SharedMemorySummary, 'templateKey' | 'params'>,
+  locale: string | null | undefined,
+): { title: string; body: string } {
+  const lang: MemoryLocale = locale?.toLowerCase().startsWith('zh') ? 'zh' : 'en';
+  const copy = MEMORY_TEMPLATE_LOCALIZATIONS[lang][memory.templateKey];
+  const words = MEMORY_PARAMETER_LOCALIZATIONS[lang];
+  const body = copy.body
+    .replaceAll('{durationBucket}', words.durationBucket[memory.params.durationBucket])
+    .replaceAll('{timeOfDay}', words.timeOfDay[memory.params.timeOfDay])
+    .replaceAll('{interactionCount}', String(memory.params.interactionCount));
+  return { title: copy.title, body };
 }
 
 export function allowedHomeActions(model: SocialHomeModel): HomeAction[] {

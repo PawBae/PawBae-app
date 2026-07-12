@@ -120,6 +120,12 @@ export type Unsubscribe = () => void
 
 - [x] SV §12「集成恢复」测试执行：requested/traveling/visiting/returning 各阶段断网、跨租约结束重启、双端同时召回/拉黑/到期竞态——不出分身、不重复记忆、不卡访问态
   ——七场景矩阵在 `apps/desktop/src/lib/platform/supabase-client.recovery.integration.test.ts`，一键入口 `scripts/w9-recovery-matrix.sh`（对 `supabase start` 真实栈；时间快进 = 整体平移 visits 时钟列 + 手动执行 `private.maintain_visits()`，与生产 cron 同一条代码路径）
+- [x] 共同记忆客户端管道（P4-C 数据面，M5 闭环的 B 线侧）：PlatformClient 增补
+  `settleMemory`/`sharedMemories`/`recordMemoryView`（结算幂等 = 服务端 visit_id 唯一，
+  双端重复调用拿回同一行）；结算触发在 visit store——观察到终局（completed/recalled）
+  即补一笔幂等结算，只追 48h 内结束的访问（限速预算），失败静默由对端与下次重放兜底；
+  记忆卡文案渲染走 `@pawbae/shared` memories.ts 的本地化契约表（不进 svelte-i18n，
+  fixture 与线上数据同一条渲染路径）；相册/事件卡在 Home 打开时按需取、登出即清。
 
 ### W10 —— 签名安装包出厂（M6）
 

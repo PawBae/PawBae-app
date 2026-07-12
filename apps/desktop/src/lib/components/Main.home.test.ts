@@ -84,9 +84,13 @@ describe('Social Home window flow', () => {
     expect(mainSource).toMatch(
       /pendingVisit: pendingVisit && pendingVisit\.id !== dismissedVisitId/,
     );
-    // P4-C 共同记忆未上线：记忆字段保持诚实为空
-    expect(mainSource).toContain('latestMemory: null');
-    expect(mainSource).toContain('memories: []');
+    // W9 P4-C：记忆字段从真实 shared_memories 灌入（#68 的诚实占位已升级）
+    expect(mainSource).toContain('memorySummaries(');
+    expect(mainSource).toContain(
+      'latestMemory: announceableMemory(memories, dismissedMemoryId, Date.now())',
+    );
+    expect(mainSource).toContain('platformClient.sharedMemories()');
+    expect(mainSource).toContain('platformClient.recordMemoryView(memoryId, newIdempotencyKey())');
     expect(mainSource).toContain('{#if !windowStore.homeOpen}');
     expect(mainSource).toContain('<SocialHome');
     expect(mainSource).toContain('onSendToDesktop={sendPetToDesktop}');
@@ -94,6 +98,7 @@ describe('Social Home window flow', () => {
     expect(mainSource).toContain('onVisitFriend={visitFriend}');
     expect(mainSource).toContain('onAcceptVisit={acceptVisit}');
     expect(mainSource).toContain('onDelayVisit={delayVisit}');
+    expect(mainSource).toContain('onOpenMemory={openMemory}');
   });
 
   it('wires the real platform client at mount', () => {
@@ -105,7 +110,9 @@ describe('Social Home window flow', () => {
     expect(mainSource).toContain('platformClient.onSessionChange((s) => {');
     expect(mainSource).toContain('platformSession = s;');
     expect(mainSource).toContain('if (s === null) visitStore.reset()');
-    expect(mainSource).toMatch(/if \(platformSession === null\) \{\s*friendEntries = \[\];/);
+    expect(mainSource).toMatch(
+      /if \(platformSession === null\) \{\s*friendEntries = \[\];\s*memoryEntries = \[\];/,
+    );
   });
 
   it('shares and persists the onboarding theme choice', () => {

@@ -6,6 +6,7 @@
 // 时间模型：不用真实 setTimeout。所有延时事件进虚拟队列，advance(ms) 按序
 // 触发——测试确定性执行，开发面板可用 setInterval(() => mock.advance(dt)) 驱动。
 
+import { MEMORY_TEMPLATE_FIXTURES } from '@pawbae/shared';
 import { isActive, isEnded, newIdempotencyKey } from './lease-machine';
 import type {
   FriendEntry,
@@ -13,6 +14,7 @@ import type {
   PlatformSession,
   ProjectionStatus,
   PublicPetProjection,
+  SharedMemoryEntry,
   Unsubscribe,
   VisitLease,
   VisitStatus,
@@ -106,6 +108,10 @@ export class MockPlatformClient implements PlatformClient {
   private projectionStatus = new Map<string, ProjectionStatus>();
   private projectionPaused = new Set<string>();
   private leaseCounter = 0;
+  /** visitId → 已结算的记忆（服务端 visit_id 唯一约束的镜像）。 */
+  private memories = new Map<string, SharedMemoryEntry>();
+  /** recordMemoryView 流水：测试断言漏斗触发用。 */
+  readonly memoryViews: string[] = [];
 
   constructor(options: MockPlatformOptions = {}) {
     this.currentSession = options.session === undefined ? DEFAULT_SESSION : options.session;
@@ -290,6 +296,40 @@ export class MockPlatformClient implements PlatformClient {
 
   async friends(): Promise<FriendEntry[]> {
     return this.friendList.map((f) => ({ ...f }));
+  }
+
+  // ---------- 共同记忆（P4-C 数据面） ----------
+
+  async settleMemory(visitId: string, _key: string): Promise<SharedMemoryEntry> {
+    if (!this.currentSession) throw new Error('NOT_AUTHENTICATED');
+    const lease = this.mustGet(visitId);
+    // 服务端同款前置：只有真正开始过并走到 completed/recalled 的访问才结算
+    if (!['completed', 'recalled'].includes(lease.status) || lease.startedAt === null) {
+      throw new Error('MEMORY_NOT_ELIGIBLE');
+    }
+    const existing = this.memories.get(visitId);
+    if (existing) return existing; // 服务端按 visit_id 唯一：双端重复结算拿回同一行
+    const fixture = MEMORY_TEMPLATE_FIXTURES[this.memories.size % MEMORY_TEMPLATE_FIXTURES.length];
+    const entry: SharedMemoryEntry = Object.freeze({
+      id: `memory-${this.memories.size + 1}`,
+      visitId,
+      visitorUserId: lease.visitorUserId,
+      hostUserId: lease.hostUserId,
+      templateKey: fixture.templateKey,
+      params: fixture.params,
+      createdAt: this.iso(this.virtualNow),
+    });
+    this.memories.set(visitId, entry);
+    return entry;
+  }
+
+  async sharedMemories(): Promise<SharedMemoryEntry[]> {
+    if (!this.currentSession) return [];
+    return [...this.memories.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
+  async recordMemoryView(memoryId: string, _key: string): Promise<void> {
+    this.memoryViews.push(memoryId);
   }
 
   // ---------- 剧本注入（测试与开发面板用，真实实现没有这些方法） ----------

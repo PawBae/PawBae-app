@@ -446,3 +446,85 @@ describe('parseProjectionFrame', () => {
     expect(parseProjectionFrame('nope')).toBeNull();
   });
 });
+
+// ---------- 共同记忆（P4-C 数据面） ----------
+
+function memoryRow(overrides: Row = {}): Row {
+  return {
+    id: 'memory-1',
+    visit_id: 'visit-1',
+    visitor_user_id: 'user-me',
+    host_user_id: 'user-keyu',
+    template_key: 'played_together',
+    params: { durationBucket: 'short', timeOfDay: 'morning', interactionCount: 4 },
+    created_at: '2026-07-11T00:31:00.000Z',
+    ...overrides,
+  };
+}
+
+describe('共同记忆', () => {
+  it('settleMemory 走结算 RPC 并解析规范行', async () => {
+    const { platform, state } = await startedClient();
+    state.rpcResult = { data: memoryRow(), error: null };
+    const entry = await platform.settleMemory('visit-1', 'key-1');
+    expect(state.rpcCalls).toEqual([
+      {
+        name: 'settle_shared_memory',
+        params: { p_visit_id: 'visit-1', p_idempotency_key: 'key-1' },
+      },
+    ]);
+    expect(entry).toEqual({
+      id: 'memory-1',
+      visitId: 'visit-1',
+      visitorUserId: 'user-me',
+      hostUserId: 'user-keyu',
+      templateKey: 'played_together',
+      params: { durationBucket: 'short', timeOfDay: 'morning', interactionCount: 4 },
+      createdAt: '2026-07-11T00:31:00.000Z',
+    });
+  });
+
+  it('sharedMemories 只放行允许清单模板与安全参数，坏行丢弃不打断列表', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const { platform, state } = await startedClient();
+      state.tables.set('shared_memories', [
+        memoryRow(),
+        // 模板不在共享契约允许清单：丢弃
+        memoryRow({ id: 'memory-2', template_key: 'rainy-tea' }),
+        // 参数带越界自由文本键（隐私红线）：丢弃
+        memoryRow({
+          id: 'memory-3',
+          params: {
+            durationBucket: 'short',
+            timeOfDay: 'morning',
+            interactionCount: 4,
+            note: '/Users/alice/secret-project prompt',
+          },
+        }),
+      ]);
+      const entries = await platform.sharedMemories();
+      expect(entries.map((e) => e.id)).toEqual(['memory-1']);
+      expect(warn).toHaveBeenCalledTimes(2);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('sharedMemories 未登录时安静返回空（App 必须照常工作）', async () => {
+    const { platform } = await startedClient({ signedIn: false });
+    expect(await platform.sharedMemories()).toEqual([]);
+  });
+
+  it('recordMemoryView 走漏斗 RPC，错误上抛给调用方决定', async () => {
+    const { platform, state } = await startedClient();
+    state.rpcResult = { data: null, error: null };
+    await platform.recordMemoryView('memory-1', 'key-2');
+    expect(state.rpcCalls.pop()).toEqual({
+      name: 'record_memory_view',
+      params: { p_memory_id: 'memory-1', p_idempotency_key: 'key-2' },
+    });
+    state.rpcResult = { data: null, error: { message: 'nope' } };
+    await expect(platform.recordMemoryView('memory-1', 'key-3')).rejects.toThrow('nope');
+  });
+});

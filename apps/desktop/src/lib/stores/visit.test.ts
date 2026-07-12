@@ -1,6 +1,6 @@
 // VisitStore 测试：用 MockPlatformClient 驱动完整访客/接待双侧流程，
 // 时钟经 nowFn 注入——最关键的用例是「服务端没发结束消息，本地照样归家」。
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { MockPlatformClient } from '../platform/mock';
 import { VisitStore } from './visit.svelte';
@@ -90,6 +90,48 @@ describe('reset（登出清场）', () => {
     // client 订阅未拆：服务端的新租约事件照常入店，重登直接续用
     mock.simulateIncomingVisit('user-momo');
     expect(store.inboundPhase).toBe('pending');
+  });
+});
+
+describe('共同记忆结算（W9 P4-C）', () => {
+  it('settles exactly once when the visit completes naturally', async () => {
+    const { mock, store, advance } = setup();
+    const settle = vi.spyOn(mock, 'settleMemory');
+
+    await store.requestVisit('user-keyu');
+    advance(1_000 + 30 * MIN + 3_500); // 接受 → 到期 → 归家过场 → completed
+    expect(store.outbound?.status).toBe('completed');
+
+    expect(settle).toHaveBeenCalledTimes(1);
+    const memories = await mock.sharedMemories();
+    expect(memories).toHaveLength(1);
+    expect(memories[0].visitId).toBe(store.outbound?.id);
+  });
+
+  it('settles recalled visits too（never-punish：召回不惩罚记忆）', async () => {
+    const { mock, store, advance } = setup();
+    const settle = vi.spyOn(mock, 'settleMemory');
+
+    await store.requestVisit('user-keyu');
+    advance(4_500); // → visiting
+    await store.recallOutbound();
+    advance(3_500); // 归家过场 → recalled
+    expect(store.outbound?.status).toBe('recalled');
+
+    expect(settle).toHaveBeenCalledTimes(1);
+    expect((await mock.sharedMemories())[0]?.visitId).toBe(store.outbound?.id);
+  });
+
+  it('never settles requested-side endings（declined/cancelled 不产生记忆）', async () => {
+    const { mock, store, advance } = setup({ autoRespond: 'decline' });
+    const settle = vi.spyOn(mock, 'settleMemory');
+
+    await store.requestVisit('user-keyu');
+    advance(1_000); // 对方婉拒 → declined
+    expect(store.outbound?.status).toBe('declined');
+
+    expect(settle).not.toHaveBeenCalled();
+    expect(await mock.sharedMemories()).toEqual([]);
   });
 });
 

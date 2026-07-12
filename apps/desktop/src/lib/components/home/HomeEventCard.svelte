@@ -1,6 +1,6 @@
 <script lang="ts">
   import { _, locale } from 'svelte-i18n';
-  import type { HomeEvent } from '../../utils/social-home';
+  import { type HomeEvent, memoryCardCopy } from '../../utils/social-home';
 
   let {
     event,
@@ -68,9 +68,7 @@
     </span>
   </aside>
 {:else if event?.kind === 'memory-ready'}
-  {@const memoryTitle = $_(`home.memory.templates.${event.memory.templateKey}`, {
-    values: { photoCount: event.memory.templateKey === 'shared-photo' ? event.memory.params.photoCount : 0 },
-  })}
+  {@const memoryTitle = memoryCardCopy(event.memory, $locale).title}
   {@const memoryDate = new Intl.DateTimeFormat($locale ?? 'en', {
     month: 'short',
     day: 'numeric',

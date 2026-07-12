@@ -96,12 +96,13 @@
       publicAgentState: 'idle',
       visitDirection: 'visit-them',
     };
+    // 共享契约 fixture（@pawbae/shared memories.ts）——预览与线上同一条渲染路径
     const memory: SharedMemorySummary = {
-      id: 'preview-memory-rainy-tea',
-      templateKey: 'rainy-tea',
-      params: {},
+      id: 'preview-memory-played-together',
+      templateKey: 'played_together',
+      params: { durationBucket: 'short', timeOfDay: 'morning', interactionCount: 4 },
       occurredAt: Date.UTC(2026, 6, 10),
-      petIds: [localPet.id, solu.id],
+      petIds: [localPet.name, solu.name],
     };
 
     let presence: HomePresence = { kind: 'home', visitor: null };

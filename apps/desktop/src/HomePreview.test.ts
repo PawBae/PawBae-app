@@ -148,7 +148,7 @@ describe('HomePreview', () => {
     await tick();
 
     expect(document.querySelector('[data-preview-toolbar]')?.textContent).toContain(
-      'Opened local preview memory preview-memory-rainy-tea.',
+      'Opened local preview memory preview-memory-played-together.',
     );
     expect(window.location.search).toContain('state=memory');
   });

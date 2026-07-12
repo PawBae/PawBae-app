@@ -1,6 +1,10 @@
 <script lang="ts">
   import { _, locale } from 'svelte-i18n';
-  import type { HomePanel, SharedMemorySummary } from '../../utils/social-home';
+  import {
+    type HomePanel,
+    memoryCardCopy,
+    type SharedMemorySummary,
+  } from '../../utils/social-home';
   import HomePanelShell from './HomePanelShell.svelte';
 
   type AlbumPanel = Extract<HomePanel, 'album' | 'plaza'>;
@@ -22,9 +26,7 @@
   }
 
   function memoryTitle(memory: SharedMemorySummary) {
-    return $_(`home.memory.templates.${memory.templateKey}`, {
-      values: { photoCount: memory.templateKey === 'shared-photo' ? memory.params.photoCount : 0 },
-    });
+    return memoryCardCopy(memory, $locale).title;
   }
 
   function memoryDate(memory: SharedMemorySummary) {

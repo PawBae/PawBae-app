@@ -22,6 +22,9 @@ import type {
   VisitLease,
 } from '../platform/types';
 
+/** 补结算只追这个窗口内结束的访问：更早的历史行不值得消耗限速预算。 */
+const SETTLE_WINDOW_MS = 48 * 60 * 60 * 1000;
+
 export class VisitStore {
   outbound = $state<VisitLease | null>(null);
   inbound = $state<VisitLease | null>(null);
@@ -43,6 +46,8 @@ export class VisitStore {
   private clockTimer: ReturnType<typeof setInterval> | null = null;
   /** 幂等键跟随「用户意图」：同一目标的失败重试复用同一个键，成功后作废。 */
   private pendingRequest: { host: string; key: string } | null = null;
+  /** 本会话已触发过结算的访问：防止轮询重复喂终局行时刷 RPC。 */
+  private settledVisitIds = new Set<string>();
 
   /** @param nowFn 时钟注入——mock 驱动时传 () => mock.now()，真实实现用默认 Date.now。 */
   init(client: PlatformClient, nowFn?: () => number): void {
@@ -53,6 +58,7 @@ export class VisitStore {
     this.unsubLease = client.onLeaseChange((incoming) => {
       const me = client.session()?.userId;
       if (!me) return;
+      this.maybeSettleMemory(client, incoming);
       if (incoming.visitorUserId === me) {
         this.outbound = reconcileLease(this.outbound, incoming);
       }
@@ -60,6 +66,24 @@ export class VisitStore {
         this.inbound = reconcileLease(this.inbound, incoming);
         this.syncGuestSubscription();
       }
+    });
+  }
+
+  /**
+   * 共同记忆结算（P4-C）：观察到访问终局（completed/recalled）就补一笔幂等结算。
+   * 覆盖「双方都关着 App 跨过终局」——没有第三方替他们写记忆，重启后轮询带回的
+   * 历史终局行也要补结算；但只追 48h 内结束的（服务端限速预算 60/h，别对着
+   * 轮询窗口里的全部旧行刷 RPC）。失败静默：对端结算与下次终局重放都是兜底。
+   */
+  private maybeSettleMemory(client: PlatformClient, lease: VisitLease): void {
+    if (lease.status !== 'completed' && lease.status !== 'recalled') return;
+    if (lease.startedAt === null || lease.endsAt === null) return;
+    if (this.settledVisitIds.has(lease.id)) return;
+    const endsAt = Date.parse(lease.endsAt);
+    if (!Number.isFinite(endsAt) || this.nowFn() - endsAt > SETTLE_WINDOW_MS) return;
+    this.settledVisitIds.add(lease.id);
+    void client.settleMemory(lease.id, newIdempotencyKey()).catch(() => {
+      this.settledVisitIds.delete(lease.id); // 失败让位给下一次终局重放
     });
   }
 
@@ -79,6 +103,7 @@ export class VisitStore {
     this.outbound = null;
     this.inbound = null;
     this.pendingRequest = null;
+    this.settledVisitIds.clear();
     this.dropGuestSubscription();
   }
 

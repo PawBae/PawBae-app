@@ -14,7 +14,11 @@
 //
 // 轮询纪律（B 线祖训）：busy lock 防重入；失败静默等下一个 tick，绝不 stale-discard。
 
-import { sanitizePublicPetProjection, VISIT_STATUSES } from '@pawbae/shared';
+import {
+  createMemoryTemplatePayload,
+  sanitizePublicPetProjection,
+  VISIT_STATUSES,
+} from '@pawbae/shared';
 import type { Session } from '@supabase/supabase-js';
 import { authConfigured, supabaseClient, toPlatformSession } from './auth';
 import type {
@@ -22,6 +26,7 @@ import type {
   PlatformClient,
   PlatformSession,
   PublicPetProjection,
+  SharedMemoryEntry,
   Unsubscribe,
   VisitLease,
   VisitStatus,
@@ -30,6 +35,8 @@ import type {
 export const LEASE_POLL_INTERVAL_MS = 15_000;
 /** 单次轮询取回的行数上限：双槽位（出访+接待）活动租约最多 2 张，20 行足够覆盖近期终态。 */
 const LEASE_POLL_LIMIT = 20;
+/** 相册单次取回上限：v1 相册只展示近况，分页留给后续版本。 */
+const MEMORY_FETCH_LIMIT = 30;
 
 // ---------- 注入的 supabase 客户端的结构化窄类型（测试注入假 client 用） ----------
 
@@ -98,6 +105,32 @@ export function toVisitLease(row: unknown): VisitLease {
 
 function sameLease(a: VisitLease, b: VisitLease): boolean {
   return a.status === b.status && a.startedAt === b.startedAt && a.endsAt === b.endsAt;
+}
+
+/**
+ * shared_memories 规范行（snake_case）→ 契约 SharedMemoryEntry。模板键与安全参数
+ * 走共享契约校验器（createMemoryTemplatePayload）——形状不对抛错（fail-closed）。
+ */
+export function toSharedMemoryEntry(row: unknown): SharedMemoryEntry {
+  if (typeof row !== 'object' || row === null) {
+    throw new TypeError('memory row must be an object');
+  }
+  const r = row as Record<string, unknown>;
+  for (const key of ['id', 'visit_id', 'visitor_user_id', 'host_user_id', 'created_at'] as const) {
+    if (typeof r[key] !== 'string' || r[key] === '') {
+      throw new TypeError(`memory row.${key} must be a non-empty string`);
+    }
+  }
+  const payload = createMemoryTemplatePayload(r.template_key, r.params);
+  return Object.freeze({
+    id: r.id as string,
+    visitId: r.visit_id as string,
+    visitorUserId: r.visitor_user_id as string,
+    hostUserId: r.host_user_id as string,
+    templateKey: payload.templateKey,
+    params: payload.params,
+    createdAt: r.created_at as string,
+  });
 }
 
 function errorMessage(error: { message?: string } | null): string {
@@ -305,6 +338,48 @@ export class SupabasePlatformClient implements PlatformClient {
       });
     }
     return entries.sort((a, b) => a.handle.localeCompare(b.handle));
+  }
+
+  // ---------- 共同记忆（P4-C 数据面） ----------
+
+  async settleMemory(visitId: string, key: string): Promise<SharedMemoryEntry> {
+    const client = this.mustClient();
+    const { data, error } = await client.rpc('settle_shared_memory', {
+      p_visit_id: visitId,
+      p_idempotency_key: key,
+    });
+    if (error) throw new Error(errorMessage(error));
+    return toSharedMemoryEntry(data);
+  }
+
+  async sharedMemories(): Promise<SharedMemoryEntry[]> {
+    const client = this.clientFn();
+    if (!client || this.currentSession === null) return [];
+    const { data, error } = await client
+      .from('shared_memories')
+      .select('id,visit_id,visitor_user_id,host_user_id,template_key,params,created_at')
+      .order('created_at', { ascending: false })
+      .limit(MEMORY_FETCH_LIMIT);
+    if (error) throw new Error(errorMessage(error as { message?: string }));
+    if (!Array.isArray(data)) return [];
+    const entries: SharedMemoryEntry[] = [];
+    for (const row of data) {
+      try {
+        entries.push(toSharedMemoryEntry(row));
+      } catch (e) {
+        console.warn('[platform] dropped malformed memory row:', e);
+      }
+    }
+    return entries;
+  }
+
+  async recordMemoryView(memoryId: string, key: string): Promise<void> {
+    const client = this.mustClient();
+    const { error } = await client.rpc('record_memory_view', {
+      p_memory_id: memoryId,
+      p_idempotency_key: key,
+    });
+    if (error) throw new Error(errorMessage(error));
   }
 
   // ---------- 内部 ----------
