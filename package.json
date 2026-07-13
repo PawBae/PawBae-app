@@ -9,6 +9,7 @@
     "check": "pnpm --dir apps/desktop check",
     "test": "pnpm --dir apps/desktop test",
     "test:ci": "pnpm --dir apps/desktop test:ci",
+    "bump": "node scripts/bump-version.mjs",
     "website:dev": "pnpm --dir apps/website dev",
     "website:build": "pnpm --dir apps/website build",
     "website:check": "pnpm --dir apps/website check",
