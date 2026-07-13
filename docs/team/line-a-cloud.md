@@ -128,6 +128,10 @@ export interface FriendEntry {  // 随 W3-4 好友域 PR 进 shared（B 的 Frie
 
 - [ ] funnel SQL 视图（SV §9 五步漏斗）——内测指标看 Supabase，不进 Aptabase
 - [ ] 记忆域收尾 + 三线联调缓冲（`shared_memories` 主体已在 W8 落地，本周只吸收 B/C 联调发现）
+- **生产部署管道已就绪（2026-07-12，B 线代建，归你）**：`.github/workflows/cloud-deploy.yml`
+  （dry-run/deploy 两档 + 迁移对齐/17 公开函数/pg_cron/REST 四重验收 + 邀请码播种），
+  runbook 在 [docs/DEPLOYING-CLOUD.md](../DEPLOYING-CLOUD.md)。注意：**合并迁移 PR ≠ 上生产**——
+  2026-07-12 实测生产库为空（join_waitlist 对外 404），首次部署待执行（缺 SUPABASE_DB_URL secret）。
 
 ### W10 —— 冻结，只修 bug
 

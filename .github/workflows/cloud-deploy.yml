@@ -1,0 +1,180 @@
+name: cloud deploy
+
+# 生产云端部署管道：把 supabase/migrations 推到生产 Supabase 项目。
+# 只接受 workflow_dispatch —— 生产变更永远是人的决定（与发布同款放量闸门）。
+# 文件归属：cloud 域（A 线）；由 B 线代建，交接见 docs/DEPLOYING-CLOUD.md。
+#
+# 唯一 secret：SUPABASE_DB_URL —— Dashboard → Connect → Session pooler 连接串
+# （含密码，percent-encoded）。必须用 Session pooler：GitHub runner 没有 IPv6，
+# 直连 db.<ref>.supabase.co 不通。设置：
+#   gh secret set SUPABASE_DB_URL --repo PawBae/PawBae-app
+# 部署后验证另用仓库 Variables 的 SUPABASE_URL / SUPABASE_PUBLISHABLE_KEY（#61 已配）。
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'dry-run = 只预览将应用的迁移；deploy = 真推 + 验证'
+        type: choice
+        options:
+          - dry-run
+          - deploy
+        default: dry-run
+      seed_invites:
+        description: '播种邀请码数量（0 = 跳过；明文码经 workflow artifact 交付，3 天过期）'
+        type: number
+        default: 0
+      invite_max_uses:
+        description: '每个邀请码可兑换次数'
+        type: number
+        default: 1
+      invite_expires_days:
+        description: '邀请码有效天数'
+        type: number
+        default: 30
+
+permissions:
+  contents: read
+
+# 不允许两次部署并行——迁移应用没有并发语义
+concurrency: cloud-deploy
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: secret preflight
+        env:
+          HAS_DB_URL: ${{ secrets.SUPABASE_DB_URL != '' }}
+        run: |
+          if [ "$HAS_DB_URL" != "true" ]; then
+            echo "::error::SUPABASE_DB_URL secret 缺失——Dashboard → Connect → Session pooler 连接串，按 docs/DEPLOYING-CLOUD.md 配置"
+            exit 1
+          fi
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: push migrations (${{ inputs.action }})
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          set -euo pipefail
+          if [ "${{ inputs.action }}" = "deploy" ]; then
+            supabase db push --db-url "$SUPABASE_DB_URL"
+          else
+            supabase db push --db-url "$SUPABASE_DB_URL" --dry-run
+          fi
+
+      - name: migration parity
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          set -euo pipefail
+          supabase migration list --db-url "$SUPABASE_DB_URL" -o json > migrations.json
+          {
+            echo "## 迁移状态（local vs remote）"
+            echo '```json'
+            cat migrations.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "${{ inputs.action }}" = "deploy" ]; then
+            unapplied=$(jq -r '[.migrations[] | select(.remote == null or .remote == "") | .local] | join(", ")' migrations.json)
+            if [ -n "$unapplied" ]; then
+              echo "::error::部署后仍有未应用的迁移: $unapplied"
+              exit 1
+            fi
+          fi
+
+      # 部署后验收：公开 RPC 面齐全、pg_cron 两个任务已注册、REST 真实可达。
+      # 函数清单直接问库（不猜 REST 参数签名）；REST 冒烟用非法邮箱——校验
+      # 失败先于任何写入，无副作用。
+      - name: verify deployment
+        if: inputs.action == 'deploy'
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ vars.SUPABASE_PUBLISHABLE_KEY }}
+        run: |
+          set -euo pipefail
+          missing=$(psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -tAc "
+            WITH expected(fn) AS (VALUES
+              ('join_waitlist'),('redeem_invite'),
+              ('send_friend_request'),('accept_friend_request'),('unfriend'),
+              ('block_user'),('mute_user'),
+              ('request_visit'),('accept_visit'),('decline_visit'),
+              ('cancel_visit'),('recall_visit'),('end_visit'),
+              ('settle_shared_memory'),('record_memory_view'),
+              ('connector_heartbeat'),('update_projection'))
+            SELECT string_agg(fn, ', ') FROM expected WHERE fn NOT IN (
+              SELECT p.proname FROM pg_proc p
+              JOIN pg_namespace n ON n.oid = p.pronamespace
+              WHERE n.nspname = 'public')")
+          if [ -n "$missing" ]; then
+            echo "::error::生产库缺公开函数: $missing"
+            exit 1
+          fi
+          echo "公开 RPC 面：17/17 齐"
+
+          cron_jobs=$(psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -tAc \
+            "SELECT count(*) FROM cron.job WHERE jobname LIKE 'pawbae-%'")
+          if [ "$cron_jobs" != "2" ]; then
+            echo "::error::pg_cron 任务数 = $cron_jobs（期望 2：maintain-visits + cleanup-runtime）"
+            exit 1
+          fi
+          echo "pg_cron：pawbae-maintain-visits + pawbae-cleanup-runtime 已注册"
+
+          if [ -n "$SUPABASE_URL" ] && [ -n "$SUPABASE_KEY" ]; then
+            code=$(curl -s -o /tmp/probe.json -w '%{http_code}' -X POST \
+              "$SUPABASE_URL/rest/v1/rpc/join_waitlist" \
+              -H "apikey: $SUPABASE_KEY" -H "Content-Type: application/json" \
+              -d '{"p_email":"not-an-email"}')
+            if [ "$code" = "404" ]; then
+              echo "::error::REST 冒烟失败：join_waitlist 对外仍是 404（PostgREST schema cache 未刷新？）"
+              cat /tmp/probe.json
+              exit 1
+            fi
+            echo "REST 冒烟：join_waitlist 可达（HTTP $code = 函数存在，非法邮箱被校验拒绝）"
+          else
+            echo "::warning::仓库 Variables 缺 SUPABASE_URL/SUPABASE_PUBLISHABLE_KEY，跳过 REST 冒烟"
+          fi
+
+      # 邀请码播种：与 redeem_invite 同一哈希口径（sha256(upper(code))，
+      # 见 scripts/w6-supabase-integration.sh 的本地版）。明文码绝不进日志，
+      # 只进 3 天过期的 workflow artifact。
+      - name: seed invite codes
+        if: inputs.action == 'deploy' && inputs.seed_invites > 0
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          COUNT: ${{ inputs.seed_invites }}
+          MAX_USES: ${{ inputs.invite_max_uses }}
+          EXPIRES_DAYS: ${{ inputs.invite_expires_days }}
+        run: |
+          set -euo pipefail
+          mkdir -p invite-codes
+          node -e '
+            const { randomUUID } = require("node:crypto");
+            const n = Number(process.env.COUNT);
+            const codes = Array.from({ length: n }, () =>
+              "PAW-" + randomUUID().replaceAll("-", "").slice(0, 10).toUpperCase());
+            require("node:fs").writeFileSync("invite-codes/codes.txt", codes.join("\n") + "\n");
+          '
+          while IFS= read -r code; do
+            psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -q -c \
+              "INSERT INTO public.invite_codes (code_hash, max_uses, expires_at)
+               VALUES (extensions.digest(upper('${code}'), 'sha256'),
+                       ${MAX_USES}, now() + interval '${EXPIRES_DAYS} days');"
+          done < invite-codes/codes.txt
+          echo "已播种 ${COUNT} 个邀请码（每码 ${MAX_USES} 次，${EXPIRES_DAYS} 天有效）——明文见 invite-codes artifact"
+
+      - name: upload invite codes artifact
+        if: inputs.action == 'deploy' && inputs.seed_invites > 0
+        uses: actions/upload-artifact@v4
+        with:
+          name: invite-codes
+          path: invite-codes/codes.txt
+          retention-days: 3
+          if-no-files-found: error
