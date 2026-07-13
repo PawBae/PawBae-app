@@ -75,46 +75,48 @@ export type Unsubscribe = () => void
 
 雷区清单（逐项核对，来自代码库审计）：
 
-- [ ] `git mv` 保历史；验收 `git log --follow apps/desktop/src/lib/stores/pet.svelte.ts` 能追到移动前
-- [ ] **ci.yml PR 路径过滤**：`src/**`→`apps/desktop/src/**` 等——漏改 = CI 静默停跑、PR 裸奔合并（最大的坑）
-- [ ] ci.yml / release.yml 的 `rust-cache` `workspaces: src-tauri` → `apps/desktop/src-tauri`；各 job 的 `--manifest-path`
-- [ ] release.yml 的 tauri-action 加 `projectPath: apps/desktop`
-- [ ] `biome.json` `files.includes`（漏改 = lint 静默空转）；`package.json` 的 `lint` 脚本路径
-- [ ] `$lib` 别名三处同步：`vitest.config.ts` / `vite.config.js` / `tsconfig.json`
-- [ ] `tauri.conf.json` 相对路径：icon、frontendDist、beforeDevCommand
-- [ ] 根 package.json scripts 转发（`pnpm tauri dev` 手感不变）
-- [ ] CI 给 `packages/shared/**`、`supabase/**` 加路径触发（为 A 铺路）
-- [ ] 预创建 keyless 的 `.github/workflows/cloud.yml` 骨架（shared 单测 + 迁移 dry-run 的空壳；合并后此文件归 A，避免 A 在你的 CI 大改周里动 `ci.yml`）
-- [ ] 验收：vitest 360 / svelte-check 0 errors 13 warnings / biome / clippy / rustfmt 全绿 + 本地 `pnpm tauri dev` 正常
+- [x] `git mv` 保历史；验收 `git log --follow apps/desktop/src/lib/stores/pet.svelte.ts` 能追到移动前
+- [x] **ci.yml PR 路径过滤**：`src/**`→`apps/desktop/src/**` 等——漏改 = CI 静默停跑、PR 裸奔合并（最大的坑）
+- [x] ci.yml / release.yml 的 `rust-cache` `workspaces: src-tauri` → `apps/desktop/src-tauri`；各 job 的 `--manifest-path`
+- [x] release.yml 的 tauri-action 加 `projectPath: apps/desktop`
+- [x] `biome.json` `files.includes`（漏改 = lint 静默空转）；`package.json` 的 `lint` 脚本路径
+- [x] `$lib` 别名三处同步：`vitest.config.ts` / `vite.config.js` / `tsconfig.json`
+- [x] `tauri.conf.json` 相对路径：icon、frontendDist、beforeDevCommand
+- [x] 根 package.json scripts 转发（`pnpm tauri dev` 手感不变）
+- [x] CI 给 `packages/shared/**`、`supabase/**` 加路径触发（为 A 铺路）
+- [x] 预创建 keyless 的 `.github/workflows/cloud.yml` 骨架（shared 单测 + 迁移 dry-run 的空壳；合并后此文件归 A，避免 A 在你的 CI 大改周里动 `ci.yml`）
+- [x] 验收：vitest 360 / svelte-check 0 errors 13 warnings / biome / clippy / rustfmt 全绿 + 本地 `pnpm tauri dev` 正常
 
 ### W2 —— 发布安全双件（M1；完全独立，不等任何人）
 
-- [ ] **更新器 minisign 验签**：生成密钥对（私钥→GitHub secrets，公钥编译进二进制）；`latest.json` 加每资产签名字段；`src-tauri/src/commands/update.rs` 安装前校验，验签失败即中止。现状是 HTTPS 裸信任、下载即执行——这是 P0 安全债
-- [ ] **崩溃上报**：Rust panic hook + webview `onerror`/`unhandledrejection`（Sentry 或最小自建）；隐私一致性：堆栈不带用户路径等敏感串
-- [ ] Intel Mac 更新槽位修复：清单加 `macos-x64` 槽 + `check_for_update` 按 arch 取（现状 Intel 用户会收到 arm64 DMG）
+- [x] **更新器 minisign 验签**：生成密钥对（私钥→GitHub secrets，公钥编译进二进制）；`latest.json` 加每资产签名字段；`src-tauri/src/commands/update.rs` 安装前校验，验签失败即中止。现状是 HTTPS 裸信任、下载即执行——这是 P0 安全债
+- [x] **崩溃上报**：Rust panic hook + webview `onerror`/`unhandledrejection`（Sentry 或最小自建）；隐私一致性：堆栈不带用户路径等敏感串
+- [x] Intel Mac 更新槽位修复：清单加 `macos-x64` 槽 + `check_for_update` 按 arch 取（现状 Intel 用户会收到 arm64 DMG）
 
 ### W3-4 —— 桌面登录 + 心跳（M2 周）
 
 依赖（W1 末应已就绪，若缺立即催）：A 的云项目凭据；Yining 建的 GitHub OAuth App；A 的 PR-B（W2 末，`@pawbae/shared` 由它产生）。
 
-- [ ] **W3 第一项：落地 `src/lib/platform/types.ts`**（PlatformClient 完整接口 + PlatformSession/Unsubscribe，interface-only 无实现，能对着 `@pawbae/shared` 编译）——C review 合并即冻结，C 的 W5 mock 靠它开工
-- [ ] GitHub OAuth 桌面流（loopback 端口或 deep-link 回调），supabase-js 会话持久化
-- [ ] 设置页「账号」区：**新建组件** `AccountSection.svelte`（登录/登出/handle 展示/opt-in 开关组，默认全关）——挂载进 `src/lib/components/settings/SettingsPanel.svelte`（设置区块都住这里，**不是** `Panel.svelte`）的那一行由 owner C 在**同一周**合入：M2「桌面登录打通」要从真实 UI 走通，挂载不能攒到后面
-- [ ] `connector_heartbeat` 定时上报（运行中每 ~60s；节流、失败静默重试）。**服务端限频 2 次/分钟**（A 线 foundation migration `consume_rate_limit`，超限抛 `rate_limit_exceeded`）——60s 间隔留 1 倍安全边际；**不要把间隔压到 30s 以下**，重试也要退避而非立即补发
-- [ ] opt-in 事件上传：现有奖励/孵蛋/纪念品/连胜时刻 → shared 字典构造器 → events（逐项开关）
+- [x] **W3 第一项：落地 `src/lib/platform/types.ts`**（PlatformClient 完整接口 + PlatformSession/Unsubscribe，interface-only 无实现，能对着 `@pawbae/shared` 编译）——C review 合并即冻结，C 的 W5 mock 靠它开工
+- [x] GitHub OAuth 桌面流（loopback 端口或 deep-link 回调），supabase-js 会话持久化
+- [x] 设置页「账号」区：**新建组件** `AccountSection.svelte`（登录/登出/handle 展示/opt-in 开关组，默认全关）——挂载进 `src/lib/components/settings/SettingsPanel.svelte`（设置区块都住这里，**不是** `Panel.svelte`）的那一行由 owner C 在**同一周**合入：M2「桌面登录打通」要从真实 UI 走通，挂载不能攒到后面
+- [x] `connector_heartbeat` 定时上报（运行中每 ~60s；节流、失败静默重试）。**服务端限频 2 次/分钟**（A 线 foundation migration `consume_rate_limit`，超限抛 `rate_limit_exceeded`）——60s 间隔留 1 倍安全边际；**不要把间隔压到 30s 以下**，重试也要退避而非立即补发
+- [x] opt-in 事件上传：现有奖励/孵蛋/纪念品/连胜时刻 → shared 字典构造器 → events（逐项开关）
 
 ### W5-6 —— 数据管道 + 好友 UI（M3 周）
 
-- [ ] PlatformClient 真实实现（§2 接口全量）——实现依据是 A 在 W3-4 冻结的 P4 实施 spec 契约，**不等 A 的访问域代码合并**；A 承诺 W5 末合并访问 RPC 骨架 + Broadcast 授权（硬检查点），你 W6 对着 `supabase start` 接真实栈
-- [ ] 投影发布管道：`agent-activity` 聚合信号 → `ProjectionStatus` 5 枚举 → 防抖/去重上传（复用 `stage-bridge.ts` 的 snapshotKey/snapshotsEqual 思路）；仅在存在活跃租约时发布
-- [ ] **新建组件** `FriendsPanel.svelte`：好友列表、请求收发、静音/拉黑（设计基调见发布计划 §5.3 玻璃卡片体系）；挂载进 `Panel.svelte` 的行由 owner C 在**同一周**合入（M3 好友 e2e 等它）
-- [ ] i18n：只在 `en.json`/`zh.json` 里你自己的前缀区块（`account.*`、`friends.*`）追加
+- [x] PlatformClient 真实实现（§2 接口全量）——实现依据是 A 在 W3-4 冻结的 P4 实施 spec 契约，**不等 A 的访问域代码合并**；A 承诺 W5 末合并访问 RPC 骨架 + Broadcast 授权（硬检查点），你 W6 对着 `supabase start` 接真实栈
+- [x] 投影发布管道：`agent-activity` 聚合信号 → `ProjectionStatus` 5 枚举 → 防抖/去重上传（复用 `stage-bridge.ts` 的 snapshotKey/snapshotsEqual 思路）；仅在存在活跃租约时发布
+- [x] **新建组件** `FriendsPanel.svelte`：好友列表、请求收发、静音/拉黑（设计基调见发布计划 §5.3 玻璃卡片体系）；挂载进 `Panel.svelte` 的行由 owner C 在**同一周**合入（M3 好友 e2e 等它）
+- [x] i18n：只在 `en.json`/`zh.json` 里你自己的前缀区块（`account.*`、`friends.*`）追加
 
 ### W7-8 —— 发布链（M4 周）
 
-- [ ] macOS 签名+公证：release.yml 注释块接线（等 Yining 的 Apple 账号 6 个 secrets）；hardened runtime + `com.apple.security.device.audio-input` entitlement（语音功能）；上线后删 `update.rs` 的 `xattr -cr` hack
+- [x] macOS 签名+公证：release.yml 注释块接线（等 Yining 的 Apple 账号 6 个 secrets）；hardened runtime + `com.apple.security.device.audio-input` entitlement（语音功能）；上线后删 `update.rs` 的 `xattr -cr` hack
 - [ ] Windows 签名：Azure Trusted Signing（`bundle.windows.signCommand` + `trusted-signing-cli`）；账号未就绪则准备好接线点，首波邀请可带说明先行
-- [ ] 版本号单源 bump 脚本（tauri.conf.json / package.json / Cargo.toml 三处现在手动同步，会漂移）；CI 自动生成更新清单 JSON（发布仍手动 = 放量闸门）
+  ——**v1 决议：不签名**（docs/RELEASING.md 已记录，SmartScreen「未知发布者」随首波邀请说明），本项留给 v1 后
+- [x] 版本号单源 bump 脚本（tauri.conf.json / package.json / Cargo.toml 三处现在手动同步，会漂移）；CI 自动生成更新清单 JSON（发布仍手动 = 放量闸门）
+  ——`pnpm bump <x.y.z>`（scripts/bump-version.mjs，四处含 Cargo.lock 一次改齐）+ tag 构建 preflight `--check` 门禁（漂移/与 tag 不符即拒）；sign job 自动生成 latest.json（三槽位 + 每资产签名）传回 draft release + Step Summary，发布人只填 notes_i18n 再部署 pawbae.ai
 
 ### W9 —— 联调与异常矩阵（M5）
 

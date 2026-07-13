@@ -10,9 +10,10 @@ name: release
 # - workflow_dispatch: builds only and uploads workflow artifacts — use this
 #   to verify the pipeline without cutting a release.
 #
-# The in-app updater does NOT read GitHub's latest.json (uploadUpdaterJson is
-# off); it reads https://pawbae.ai/update/latest.json, which is updated by
-# hand after the release is published. See docs/RELEASING.md.
+# The in-app updater does NOT read GitHub's latest.json; it reads
+# https://pawbae.ai/update/latest.json. The sign job generates a ready-made
+# manifest (latest.json with per-asset signatures) as a release asset —
+# fill notes_i18n and deploy it by hand after publishing. See docs/RELEASING.md.
 
 on:
   push:
@@ -59,6 +60,14 @@ jobs:
         with:
           node-version: 20
           cache: pnpm
+
+      # 版本一致性红线：四处版本号（tauri.conf/package.json/Cargo.toml/lock）
+      # 漂移、或与 tag 不一致，直接拒绝构建——错版本的安装包 + 更新清单
+      # 会让更新器永远「已是最新」或装错包。
+      - name: version consistency preflight
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: node scripts/bump-version.mjs --check "${GITHUB_REF_NAME}"
 
       # 更新器验签红线：占位公钥/缺失签名密钥的状态下拒绝出正式版本，
       # 否则会发出一个永远无法通过验签的更新器（docs/RELEASING.md「更新器签名」）。
@@ -194,8 +203,9 @@ jobs:
           path: ${{ env.CARGO_TARGET_DIR }}\release\bundle\nsis\*.exe
 
   # 给发布资产做 minisign 签名（更新器安装前验签的另一半）。
-  # 产出：每个 dmg/exe/msi 一个 .minisig 上传回 release + Step Summary 里
-  # 给出 latest.json 直接粘贴用的 "signature" 字段值。
+  # 产出：每个 dmg/exe/msi 一个 .minisig 上传回 release + 完整的更新清单
+  # latest.json（三槽位 + 每资产签名，notes_i18n 留空待发布人填写）作为
+  # release 资产 + Step Summary 全文。部署到 pawbae.ai 仍是人工动作 = 放量闸门。
   sign:
     name: minisign release assets
     if: startsWith(github.ref, 'refs/tags/')
@@ -272,16 +282,59 @@ jobs:
               --input "$f" > /dev/null
           done
 
-      - name: signature blocks for latest.json
+      # 更新清单自动生成：结构与槽位语义见 docs/RELEASING.md §4（macos =
+      # Apple Silicon 历史命名、macos-x64 = Intel、windows = NSIS）。
+      # 三平台资产是发布契约——缺任何一个资产或签名直接失败，不出残缺清单。
+      - name: generate updater manifest (latest.json)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
         run: |
-          {
-            echo "## latest.json 的 signature 字段（逐资产复制粘贴）"
-            for f in assets/*.minisig; do
-              name=$(basename "$f" .minisig)
-              echo
-              echo "**$name**:"
-              echo '```json'
-              printf '"signature": %s\n' "$(jq -Rs . < "$f")"
-              echo '```'
+          set -euo pipefail
+          VERSION="${TAG#v}"
+          BASE="https://github.com/$REPO/releases/download/$TAG"
+
+          fail=0
+          for asset in "PawBae_${VERSION}_aarch64.dmg" "PawBae_${VERSION}_x64.dmg" "PawBae_${VERSION}_x64-setup.exe"; do
+            for f in "assets/$asset" "assets/$asset.minisig"; do
+              if [ ! -f "$f" ]; then
+                echo "::error::缺少 $f——三平台资产 + 签名是发布契约"
+                fail=1
+              fi
             done
+          done
+          exit_code="$fail"; [ "$exit_code" = 0 ] || exit "$exit_code"
+
+          slot() {
+            jq -n --arg version "$VERSION" --arg url "$BASE/$1" \
+              --rawfile sig "assets/$1.minisig" \
+              '{version: $version, url: $url, signature: $sig, notes_i18n: {en: "", zh: ""}}'
+          }
+          jq -n \
+            --argjson macos "$(slot "PawBae_${VERSION}_aarch64.dmg")" \
+            --argjson macosx64 "$(slot "PawBae_${VERSION}_x64.dmg")" \
+            --argjson windows "$(slot "PawBae_${VERSION}_x64-setup.exe")" \
+            '{platforms: {macos: $macos, "macos-x64": $macosx64, windows: $windows}}' \
+            > latest.json
+
+          # 幂等：重跑先删已存在的 latest.json 资产
+          gh api "repos/$REPO/releases/$RELEASE_ID/assets?per_page=100" \
+            --jq '.[] | select(.name == "latest.json") | .id' |
+          while read -r id; do
+            gh api --method DELETE "repos/$REPO/releases/assets/$id"
+          done
+          gh api --method POST \
+            -H "Content-Type: application/json" \
+            "https://uploads.github.com/repos/$REPO/releases/$RELEASE_ID/assets?name=latest.json" \
+            --input latest.json > /dev/null
+
+          {
+            echo "## 更新清单 latest.json（已作为资产传回 draft release）"
+            echo
+            echo "发布后先填 notes_i18n，再部署到 https://pawbae.ai/update/latest.json（docs/RELEASING.md §4）。"
+            echo
+            echo '```json'
+            cat latest.json
+            echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
