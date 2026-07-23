@@ -1,5 +1,6 @@
 <script lang="ts">
   import { _ } from 'svelte-i18n';
+  import type { FriendEntry, PublicProfile } from '../../platform/types';
   import {
     type FriendContextAction,
     type FriendSummary,
@@ -19,6 +20,16 @@
     onRecallFriend,
     onAcceptVisit,
     onDelayVisit,
+    relationships = [],
+    inviteRedeemed = false,
+    onFindFriend,
+    onSendFriendRequest,
+    onAcceptFriend,
+    onRemoveFriend,
+    onMuteFriend,
+    onBlockFriend,
+    onRedeemInvite,
+    onDeclineVisit,
   }: {
     friends: FriendSummary[];
     presence: HomePresence;
@@ -29,7 +40,55 @@
     onRecallFriend?: (id: string) => void;
     onAcceptVisit?: (id: string) => void;
     onDelayVisit?: (id: string) => void;
+    relationships?: FriendEntry[];
+    inviteRedeemed?: boolean;
+    onFindFriend?: (handle: string) => Promise<PublicProfile | null>;
+    onSendFriendRequest?: (id: string) => Promise<void>;
+    onAcceptFriend?: (id: string) => Promise<void>;
+    onRemoveFriend?: (id: string) => Promise<void>;
+    onMuteFriend?: (id: string, muted: boolean) => Promise<void>;
+    onBlockFriend?: (id: string) => Promise<void>;
+    onRedeemInvite?: (code: string) => Promise<void>;
+    onDeclineVisit?: (id: string) => void;
   } = $props();
+
+  let handleQuery = $state('');
+  let inviteCode = $state('');
+  let searchResult = $state<PublicProfile | null>(null);
+  let actionError = $state('');
+  let busyKey = $state('');
+  const incoming = $derived(relationships.filter((entry) => entry.relation === 'pending_in'));
+  const outgoing = $derived(relationships.filter((entry) => entry.relation === 'pending_out'));
+
+  async function run(key: string, action: () => Promise<void>) {
+    if (busyKey) return;
+    busyKey = key;
+    actionError = '';
+    try {
+      await action();
+    } catch (error) {
+      actionError = error instanceof Error ? error.message : String(error);
+    } finally {
+      busyKey = '';
+    }
+  }
+
+  async function findFriend(event: SubmitEvent) {
+    event.preventDefault();
+    if (!onFindFriend || !handleQuery.trim()) return;
+    await run('search', async () => {
+      searchResult = await onFindFriend(handleQuery);
+      if (!searchResult) actionError = $_('home.friends.searchNotFound');
+    });
+  }
+
+  function confirmBlock(entry: FriendEntry) {
+    if (!onBlockFriend) return;
+    if (!globalThis.confirm($_('home.friends.confirmBlock', { values: { handle: entry.handle } }))) {
+      return;
+    }
+    void run(`block:${entry.userId}`, () => onBlockFriend(entry.userId));
+  }
 
   function callbackAvailable(action: FriendContextAction) {
     if (action.kind === 'visit') return Boolean(onVisitFriend);
@@ -73,6 +132,12 @@
               onclick={() => onDelayVisit?.(pendingVisit.id)}
             >{$_('home.visit.later')}</button>
             <button
+              type="button"
+              data-action="decline-visit"
+              disabled={!onDeclineVisit}
+              onclick={() => onDeclineVisit?.(pendingVisit.id)}
+            >{$_('home.visit.decline')}</button>
+            <button
               class="primary"
               type="button"
               data-action="accept-visit"
@@ -81,6 +146,57 @@
             >{$_('home.visit.accept')}</button>
           </div>
         </article>
+      </section>
+    {/if}
+
+    {#if incoming.length > 0}
+      <section class="relationship-queue" aria-labelledby="incoming-friends-title">
+        <h3 id="incoming-friends-title">{$_('home.friends.incomingTitle')}</h3>
+        <ul>
+          {#each incoming as entry (entry.userId)}
+            <li data-relationship="pending-in">
+              <span class="pet-initial" aria-hidden="true">@</span>
+              <div class="friend-copy">
+                <strong>{entry.displayName ?? entry.handle}</strong>
+                <span>@{entry.handle}</span>
+              </div>
+              <div class="request-actions">
+                <button
+                  type="button"
+                  disabled={!onAcceptFriend || Boolean(busyKey)}
+                  onclick={() =>
+                    void run(`accept:${entry.userId}`, () => onAcceptFriend?.(entry.userId) ?? Promise.resolve())}
+                >{$_('home.friends.accept')}</button>
+                <button type="button" disabled={!onBlockFriend || Boolean(busyKey)} onclick={() => confirmBlock(entry)}>
+                  {$_('home.friends.block')}
+                </button>
+              </div>
+            </li>
+          {/each}
+        </ul>
+      </section>
+    {/if}
+
+    {#if outgoing.length > 0}
+      <section class="relationship-queue" aria-labelledby="outgoing-friends-title">
+        <h3 id="outgoing-friends-title">{$_('home.friends.outgoingTitle')}</h3>
+        <ul>
+          {#each outgoing as entry (entry.userId)}
+            <li data-relationship="pending-out">
+              <span class="pet-initial" aria-hidden="true">→</span>
+              <div class="friend-copy">
+                <strong>{entry.displayName ?? entry.handle}</strong>
+                <span>@{entry.handle}</span>
+              </div>
+              <button
+                type="button"
+                disabled={!onRemoveFriend || Boolean(busyKey)}
+                onclick={() =>
+                  void run(`remove:${entry.userId}`, () => onRemoveFriend?.(entry.userId) ?? Promise.resolve())}
+              >{$_('home.friends.cancelRequest')}</button>
+            </li>
+          {/each}
+        </ul>
       </section>
     {/if}
 
@@ -97,6 +213,7 @@
             {@const action = selectFriendAction(presence, friend, pendingVisit)}
             {@const reasonKey = action.disabledReason ?? (!callbackAvailable(action) ? 'unavailable' : null)}
             {@const reasonId = `friend-action-reason-${friend.id}`}
+            {@const relationship = relationships.find((entry) => entry.userId === friend.id)}
             <li data-friend={friend.id}>
               <span class="pet-initial" aria-hidden="true">
                 {friend.pet.name.slice(0, 1).toLocaleUpperCase()}
@@ -122,6 +239,29 @@
                     {$_(`home.friends.disabled.${reasonKey}`)}
                   </small>
                 {/if}
+                {#if relationship}
+                  <div class="manage-actions">
+                    <button
+                      type="button"
+                      disabled={!onMuteFriend || Boolean(busyKey)}
+                      onclick={() =>
+                        void run(`mute:${relationship.userId}`, () =>
+                          onMuteFriend?.(relationship.userId, !relationship.muted) ?? Promise.resolve())}
+                    >
+                      {relationship.muted ? $_('home.friends.unmute') : $_('home.friends.mute')}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!onRemoveFriend || Boolean(busyKey)}
+                      onclick={() =>
+                        void run(`remove:${relationship.userId}`, () =>
+                          onRemoveFriend?.(relationship.userId) ?? Promise.resolve())}
+                    >{$_('home.friends.remove')}</button>
+                    <button type="button" disabled={!onBlockFriend || Boolean(busyKey)} onclick={() => confirmBlock(relationship)}>
+                      {$_('home.friends.block')}
+                    </button>
+                  </div>
+                {/if}
               </div>
             </li>
           {/each}
@@ -131,18 +271,66 @@
 
     <section class="account-tools" aria-labelledby="friends-find-title">
       <h3 id="friends-find-title">{$_('home.friends.findTitle')}</h3>
-      <label for="friend-handle">{$_('home.friends.searchLabel')}</label>
-      <div class="search-row">
+      <form onsubmit={findFriend}>
+        <label for="friend-handle">{$_('home.friends.searchLabel')}</label>
+        <div class="search-row">
         <input
           id="friend-handle"
           data-friend-search
           type="text"
           placeholder={$_('home.friends.searchPlaceholder')}
-          disabled
+          bind:value={handleQuery}
+          disabled={!inviteRedeemed || !onFindFriend || Boolean(busyKey)}
         />
-        <button data-invite-link type="button" disabled>{$_('home.friends.inviteLink')}</button>
-      </div>
-      <p class="beta-note">{$_('home.friends.betaNote')}</p>
+          <button type="submit" disabled={!inviteRedeemed || !onFindFriend || !handleQuery.trim() || Boolean(busyKey)}>
+            {$_('home.friends.searchAction')}
+          </button>
+        </div>
+      </form>
+      {#if searchResult}
+        <article class="search-result">
+          <div>
+            <strong>{searchResult.displayName ?? searchResult.handle}</strong>
+            <span>@{searchResult.handle}</span>
+          </div>
+          <button
+            type="button"
+            disabled={!onSendFriendRequest || Boolean(busyKey)}
+            onclick={() =>
+              void run(`send:${searchResult?.userId}`, async () => {
+                if (!searchResult || !onSendFriendRequest) return;
+                await onSendFriendRequest(searchResult.userId);
+                searchResult = null;
+                handleQuery = '';
+              })}
+          >{$_('home.friends.sendRequest')}</button>
+        </article>
+      {/if}
+      {#if !inviteRedeemed}
+        <label for="invite-code">{$_('home.friends.inviteCodeLabel')}</label>
+        <div class="search-row">
+          <input
+            id="invite-code"
+            type="text"
+            autocomplete="one-time-code"
+            placeholder="PAW-XXXXXXXXXX"
+            bind:value={inviteCode}
+            disabled={!onRedeemInvite || Boolean(busyKey)}
+          />
+          <button
+            type="button"
+            disabled={!onRedeemInvite || !inviteCode.trim() || Boolean(busyKey)}
+            onclick={() =>
+              void run('redeem', async () => {
+                if (!onRedeemInvite) return;
+                await onRedeemInvite(inviteCode);
+                inviteCode = '';
+              })}
+          >{$_('home.friends.redeemInvite')}</button>
+        </div>
+      {/if}
+      {#if actionError}<p class="action-error" role="alert">{actionError}</p>{/if}
+      <p class="beta-note">{inviteRedeemed ? $_('home.friends.betaReady') : $_('home.friends.betaNote')}</p>
     </section>
 </HomePanelShell>
 
@@ -244,6 +432,33 @@
     line-height: 1.45;
   }
 
+  .action-error {
+    margin-top: 8px;
+    color: #b42318;
+    font-size: 12px;
+  }
+
+  .search-result {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-top: 8px;
+    padding: 9px 10px;
+    border-radius: 10px;
+    background: var(--home-subtle);
+  }
+
+  .search-result > div {
+    display: grid;
+    gap: 1px;
+  }
+
+  .search-result span {
+    color: var(--home-text-muted);
+    font-size: 12px;
+  }
+
   .visit-request,
   li {
     display: grid;
@@ -316,6 +531,19 @@
     max-width: 112px;
     justify-items: end;
     gap: 4px;
+  }
+
+  .manage-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 3px;
+  }
+
+  .manage-actions button {
+    min-height: 24px;
+    padding: 0 5px;
+    font-size: 12px;
   }
 
   .friend-action small {

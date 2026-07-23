@@ -40,8 +40,22 @@
       "findTitle": "Find a friend",
       "searchLabel": "PawBae handle",
       "searchPlaceholder": "@handle",
-      "inviteLink": "Invite link",
-      "betaNote": "Handle search and invite links open with account support.",
+      "searchAction": "Find",
+      "searchNotFound": "No exact PawBae handle matched.",
+      "sendRequest": "Add friend",
+      "inviteCodeLabel": "Beta invite code",
+      "redeemInvite": "Redeem",
+      "betaNote": "Redeem an invite before adding friends.",
+      "betaReady": "Your account is ready for friends and visiting.",
+      "incomingTitle": "Requests to accept",
+      "outgoingTitle": "Requests sent",
+      "accept": "Accept",
+      "cancelRequest": "Cancel",
+      "mute": "Mute",
+      "unmute": "Unmute",
+      "remove": "Remove",
+      "block": "Block",
+      "confirmBlock": "Block @{handle}? This also ends active visits.",
       "mutualTitle": "Mutual friends",
       "emptyTitle": "No mutual friends yet",
       "emptyBody": "Connect an account when Friends beta becomes available.",
@@ -98,8 +112,10 @@
       "cardTitle": "{pet} from {owner} wants to visit",
       "cardTitleUnknownPet": "A pet from {owner} wants to visit",
       "cardBody": "Visits last 30 minutes.",
+      "projectionConsent": "During a visit, your friend can see only your pet's name, approved appearance, and five-state agent mood. Prompts, code, tools, and file paths never leave this device. Continue?",
       "accept": "Welcome in",
       "later": "Not now",
+      "decline": "Decline",
       "remaining": "{minutes} min visit · until {time}",
       "visitorOffline": "Their owner's agent is resting."
     },
@@ -307,6 +323,7 @@
     "progress": {
       "welcome": "Welcome",
       "github": "GitHub",
+      "invite": "Invite",
       "agents": "Agent",
       "adopt": "Adopt",
       "current": "Step {current} of {total}: {name}"
@@ -336,6 +353,16 @@
       "unavailable": "GitHub sign-in opens with the Friends beta.",
       "skip": "Skip for now"
     },
+    "invite": {
+      "title": "Redeem your beta invite",
+      "body": "Your invite unlocks friends and visiting. Eligibility is saved to your account and survives restarts.",
+      "label": "Invite code",
+      "placeholder": "PAW-XXXXXXXXXX",
+      "action": "Redeem invite",
+      "checking": "Checking account eligibility…",
+      "localOnly": "Continue in local-only mode",
+      "invalid": "That invite could not be redeemed. Check the code and try again."
+    },
     "agents": {
       "title": "Which agent should your pet listen to?",
       "body": "Choose one or more. PawBae installs a small local Hook for each connection.",
@@ -350,7 +377,7 @@
     },
     "adopt": {
       "title": "Choose your first desktop companion",
-      "body": "Different personalities, one gentle way to stay close to your agents.",
+      "body": "Solu is the first fully animated beta companion. More official pets arrive after their animation QA.",
       "soluName": "Solu",
       "soluTrait": "Warm & sunny",
       "muruName": "Muru",
@@ -360,7 +387,7 @@
       "lumaName": "Luma",
       "lumaTrait": "Sleepy & dreamy",
       "changeLater": "You can change pets anytime",
-      "spriteNotice": "Your choice will be saved; animated desktop forms arrive with the Stage update.",
+      "spriteNotice": "Solu's complete animated desktop form is included in this beta.",
       "action": "Adopt {name}",
       "selected": "{name} selected"
     },

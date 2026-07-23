@@ -1,6 +1,6 @@
 import type { AppMode } from '../types';
 
-export type OnboardingStep = 'welcome' | 'github' | 'agents' | 'adopt';
+export type OnboardingStep = 'welcome' | 'github' | 'invite' | 'agents' | 'adopt';
 export type OfficialPetId = 'solu' | 'muru' | 'riffi' | 'luma';
 export type AgentId = 'claude' | 'codex' | 'cursor';
 export type AgentInstallStatus = 'idle' | 'installing' | 'connected' | 'failed';
@@ -29,6 +29,7 @@ export interface OfficialPet {
 export const ONBOARDING_STEPS: readonly OnboardingStep[] = [
   'welcome',
   'github',
+  'invite',
   'agents',
   'adopt',
 ] as const;
@@ -39,6 +40,11 @@ export const OFFICIAL_PETS: readonly OfficialPet[] = [
   { id: 'riffi', posterIndex: 2, color: '#A8E0C0', strongColor: '#2E6C58' },
   { id: 'luma', posterIndex: 3, color: '#F5AFC8', strongColor: '#7E4160' },
 ] as const;
+
+/** Only pets with a complete reviewed atlas may be selected in the beta. */
+export const SELECTABLE_OFFICIAL_PETS: readonly OfficialPet[] = OFFICIAL_PETS.filter(
+  (pet) => pet.id === 'solu',
+);
 
 export function nextOnboardingStep(step: OnboardingStep): OnboardingStep {
   const index = ONBOARDING_STEPS.indexOf(step);

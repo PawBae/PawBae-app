@@ -189,7 +189,9 @@ describe('SocialHome', () => {
     });
     await tick();
 
-    const artwork = document.querySelector<HTMLElement>('[data-pet-id="doro"]');
+    const artwork = document.querySelector<HTMLElement>(
+      '[data-pet-id="doro"] [data-physics-anchor]',
+    );
     expect(artwork?.style.backgroundImage).toContain('doro/spritesheet.png');
     expect(document.querySelector('[data-pet-id="muru"]')).toBeNull();
   });
@@ -519,7 +521,10 @@ describe('SocialHome', () => {
 
     expect(document.querySelector('[data-friends-empty]')).not.toBeNull();
     expect(document.querySelector<HTMLInputElement>('[data-friend-search]')?.disabled).toBe(true);
-    expect(document.querySelector<HTMLButtonElement>('[data-invite-link]')?.disabled).toBe(true);
+    expect(
+      document.querySelector<HTMLButtonElement>('.account-tools button[type="submit"]')?.disabled,
+    ).toBe(true);
+    expect(document.querySelector<HTMLInputElement>('#invite-code')).not.toBeNull();
   });
 
   it('opens a private memory from the Album panel', async () => {

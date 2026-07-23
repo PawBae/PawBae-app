@@ -30,7 +30,7 @@
       </div>
       <button class="toggle" class:on={settingsStore.soundEnabled}
         onclick={() => settingsStore.setSoundEnabled(!settingsStore.soundEnabled)}
-        role="switch" aria-checked={settingsStore.soundEnabled}>
+        role="switch" aria-label={$_('settings.ccSound')} aria-checked={settingsStore.soundEnabled}>
         <span class="toggle-thumb"></span>
       </button>
     </div>
@@ -42,7 +42,7 @@
         </div>
         <button class="toggle" class:on={settingsStore.codexSoundEnabled}
           onclick={() => settingsStore.setCodexSoundEnabled(!settingsStore.codexSoundEnabled)}
-          role="switch" aria-checked={settingsStore.codexSoundEnabled}>
+          role="switch" aria-label={$_('settings.codexSound')} aria-checked={settingsStore.codexSoundEnabled}>
           <span class="toggle-thumb"></span>
         </button>
       </div>
@@ -53,7 +53,7 @@
         </div>
         <button class="toggle" class:on={settingsStore.cursorSoundEnabled}
           onclick={() => settingsStore.setCursorSoundEnabled(!settingsStore.cursorSoundEnabled)}
-          role="switch" aria-checked={settingsStore.cursorSoundEnabled}>
+          role="switch" aria-label={$_('settings.cursorSound')} aria-checked={settingsStore.cursorSoundEnabled}>
           <span class="toggle-thumb"></span>
         </button>
       </div>
@@ -65,7 +65,7 @@
       </div>
       <button class="toggle" class:on={settingsStore.waitingSound}
         onclick={() => settingsStore.setWaitingSound(!settingsStore.waitingSound)}
-        role="switch" aria-checked={settingsStore.waitingSound}>
+        role="switch" aria-label={$_('settings.waitingSound')} aria-checked={settingsStore.waitingSound}>
         <span class="toggle-thumb"></span>
       </button>
     </div>
@@ -76,7 +76,7 @@
       </div>
       <button class="toggle" class:on={settingsStore.autoCloseCompletion}
         onclick={() => settingsStore.setAutoCloseCompletion(!settingsStore.autoCloseCompletion)}
-        role="switch" aria-checked={settingsStore.autoCloseCompletion}>
+        role="switch" aria-label={$_('settings.autoCloseCompletion')} aria-checked={settingsStore.autoCloseCompletion}>
         <span class="toggle-thumb"></span>
       </button>
     </div>

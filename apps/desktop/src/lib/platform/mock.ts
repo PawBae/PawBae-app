@@ -10,10 +10,13 @@ import { MEMORY_TEMPLATE_FIXTURES } from '@pawbae/shared';
 import { isActive, isEnded, newIdempotencyKey } from './lease-machine';
 import type {
   FriendEntry,
+  InviteEligibility,
   PlatformClient,
+  PlatformConnectionState,
   PlatformSession,
   ProjectionStatus,
   PublicPetProjection,
+  PublicProfile,
   SharedMemoryEntry,
   Unsubscribe,
   VisitLease,
@@ -104,6 +107,7 @@ export class MockPlatformClient implements PlatformClient {
   private redeemedInvites = new Set<string>();
   private leaseListeners = new Set<(lease: VisitLease) => void>();
   private sessionListeners = new Set<(s: PlatformSession | null) => void>();
+  private connectionListeners = new Set<(state: PlatformConnectionState) => void>();
   private projectionSubs = new Map<string, Set<(p: PublicPetProjection) => void>>();
   private projectionStatus = new Map<string, ProjectionStatus>();
   private projectionPaused = new Set<string>();
@@ -115,7 +119,7 @@ export class MockPlatformClient implements PlatformClient {
 
   constructor(options: MockPlatformOptions = {}) {
     this.currentSession = options.session === undefined ? DEFAULT_SESSION : options.session;
-    this.friendList = options.friends ?? DEFAULT_FRIENDS;
+    this.friendList = (options.friends ?? DEFAULT_FRIENDS).map((friend) => ({ ...friend }));
     this.autoRespond = options.autoRespond ?? 'accept';
     this.respondDelayMs = options.respondDelayMs ?? 1_000;
     this.travelMs = options.travelMs ?? 3_500;
@@ -170,10 +174,21 @@ export class MockPlatformClient implements PlatformClient {
     return () => this.sessionListeners.delete(cb);
   }
 
+  connectionState(): PlatformConnectionState {
+    return this.currentSession ? 'connected' : 'degraded';
+  }
+
+  onConnectionStateChange(cb: (state: PlatformConnectionState) => void): Unsubscribe {
+    this.connectionListeners.add(cb);
+    return () => this.connectionListeners.delete(cb);
+  }
+
   /** 剧本注入：模拟登录/登出。 */
   setSession(session: PlatformSession | null): void {
     this.currentSession = session;
     for (const cb of this.sessionListeners) cb(session);
+    const state = this.connectionState();
+    for (const cb of this.connectionListeners) cb(state);
   }
 
   // ---------- 串门 ----------
@@ -294,8 +309,58 @@ export class MockPlatformClient implements PlatformClient {
     this.redeemedInvites.add(code);
   }
 
+  async inviteEligibility(): Promise<InviteEligibility> {
+    return {
+      redeemed: this.redeemedInvites.size > 0,
+      redeemedAt: this.redeemedInvites.size > 0 ? this.iso(this.virtualNow) : null,
+    };
+  }
+
   async friends(): Promise<FriendEntry[]> {
     return this.friendList.map((f) => ({ ...f }));
+  }
+
+  async findProfileByHandle(handle: string): Promise<PublicProfile | null> {
+    const normalized = handle.trim().replace(/^@/, '').toLowerCase();
+    const entry = this.friendList.find((friend) => friend.handle === normalized);
+    if (!entry) return null;
+    return {
+      userId: entry.userId,
+      handle: entry.handle,
+      displayName: entry.displayName,
+      avatarUrl: null,
+    };
+  }
+
+  async sendFriendRequest(userId: string): Promise<void> {
+    const index = this.friendList.findIndex((friend) => friend.userId === userId);
+    if (index < 0) throw new Error('target_user_not_found');
+    const current = this.friendList[index];
+    if (current.relation === 'pending_in') throw new Error('incoming_request_exists');
+    this.friendList[index] = { ...current, relation: 'pending_out' };
+  }
+
+  async acceptFriendRequest(userId: string): Promise<void> {
+    const index = this.friendList.findIndex((friend) => friend.userId === userId);
+    if (index < 0 || this.friendList[index].relation !== 'pending_in') {
+      throw new Error('not_incoming_request');
+    }
+    this.friendList[index] = { ...this.friendList[index], relation: 'accepted' };
+  }
+
+  async unfriend(userId: string): Promise<void> {
+    const index = this.friendList.findIndex((friend) => friend.userId === userId);
+    if (index >= 0) this.friendList.splice(index, 1);
+  }
+
+  async muteUser(userId: string, muted: boolean): Promise<void> {
+    const index = this.friendList.findIndex((friend) => friend.userId === userId);
+    if (index < 0) throw new Error('accepted_friendship_required');
+    this.friendList[index] = { ...this.friendList[index], muted };
+  }
+
+  async blockUser(userId: string): Promise<void> {
+    await this.unfriend(userId);
   }
 
   // ---------- 共同记忆（P4-C 数据面） ----------

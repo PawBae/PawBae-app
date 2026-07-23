@@ -80,6 +80,40 @@ describe('idempotency and single active visit', () => {
   });
 });
 
+describe('invite and friend controls', () => {
+  it('keeps invite eligibility after redemption and repeated reads', async () => {
+    const mock = new MockPlatformClient();
+    await expect(mock.inviteEligibility()).resolves.toEqual({
+      redeemed: false,
+      redeemedAt: null,
+    });
+    await mock.redeemInvite('CODE-123', 'invite-key');
+    const first = await mock.inviteEligibility();
+    const second = await mock.inviteEligibility();
+    expect(first.redeemed).toBe(true);
+    expect(second).toEqual(first);
+  });
+
+  it('supports exact lookup, accept, mute, remove, and block transitions', async () => {
+    const mock = new MockPlatformClient();
+    const incoming = await mock.findProfileByHandle('@devon');
+    expect(incoming?.handle).toBe('devon');
+    if (!incoming) throw new Error('mock incoming profile is missing');
+    await mock.acceptFriendRequest(incoming.userId);
+    await mock.muteUser(incoming.userId, true);
+    expect(
+      (await mock.friends()).find((friend) => friend.userId === incoming.userId),
+    ).toMatchObject({ relation: 'accepted', muted: true });
+    await mock.unfriend(incoming.userId);
+    expect((await mock.friends()).some((friend) => friend.userId === incoming.userId)).toBe(false);
+
+    const keyu = await mock.findProfileByHandle('keyu');
+    if (!keyu) throw new Error('mock accepted profile is missing');
+    await mock.blockUser(keyu.userId);
+    expect((await mock.friends()).some((friend) => friend.userId === keyu.userId)).toBe(false);
+  });
+});
+
 describe('decline / expiry / recall scripts（SV §6 异常剧本）', () => {
   it('declines with no further transitions', async () => {
     const mock = new MockPlatformClient({ autoRespond: 'decline' });

@@ -10,11 +10,11 @@
     type GithubProfile,
     hookCommandForAgent,
     nextOnboardingStep,
-    OFFICIAL_PETS,
     type OfficialPetId,
     type OnboardingResult,
     type OnboardingStep,
     previousOnboardingStep,
+    SELECTABLE_OFFICIAL_PETS,
   } from '../utils/onboarding';
   import {
     normalizeOnboardingTheme,
@@ -30,6 +30,8 @@
     isWindows: boolean;
     onComplete: (result: OnboardingResult) => Promise<void> | void;
     onGithubSignIn?: () => Promise<GithubProfile>;
+    onInviteEligibility?: () => Promise<boolean>;
+    onRedeemInvite?: (code: string) => Promise<void>;
   }
 
   let {
@@ -37,6 +39,8 @@
     isWindows,
     onComplete,
     onGithubSignIn,
+    onInviteEligibility,
+    onRedeemInvite,
   }: OnboardingProps = $props();
 
   const agents: AgentId[] = ['claude', 'codex', 'cursor'];
@@ -63,6 +67,9 @@
   let githubProfile = $state<GithubProfile | null>(null);
   let githubLoading = $state(false);
   let githubError = $state('');
+  let inviteCode = $state('');
+  let inviteLoading = $state(false);
+  let inviteError = $state('');
   let completionError = $state('');
   let saving = $state(false);
   let headingEl = $state<HTMLHeadingElement | null>(null);
@@ -75,7 +82,9 @@
   });
   let agentErrors = $state<Record<AgentId, string>>({ claude: '', codex: '', cursor: '' });
 
-  const selectedPet = $derived(OFFICIAL_PETS.find((pet) => pet.id === starterPetId) ?? null);
+  const selectedPet = $derived(
+    SELECTABLE_OFFICIAL_PETS.find((pet) => pet.id === starterPetId) ?? null,
+  );
   const connectedAgents = $derived(
     selectedAgents.filter((id) => agentStatuses[id] === 'connected'),
   );
@@ -98,6 +107,9 @@
     githubProfile = null;
     githubLoading = false;
     githubError = '';
+    inviteCode = '';
+    inviteLoading = false;
+    inviteError = '';
     completionError = '';
     saving = false;
   }
@@ -139,11 +151,28 @@
     githubError = '';
     try {
       githubProfile = await onGithubSignIn();
-      goNext();
+      inviteLoading = true;
+      const eligible = (await onInviteEligibility?.()) ?? false;
+      step = eligible ? 'agents' : 'invite';
     } catch (error) {
       githubError = String(error);
     } finally {
       githubLoading = false;
+      inviteLoading = false;
+    }
+  }
+
+  async function redeemInvite() {
+    if (!onRedeemInvite || inviteLoading || !inviteCode.trim()) return;
+    inviteLoading = true;
+    inviteError = '';
+    try {
+      await onRedeemInvite(inviteCode.trim());
+      step = 'agents';
+    } catch {
+      inviteError = $_('onboarding.invite.invalid');
+    } finally {
+      inviteLoading = false;
     }
   }
 
@@ -226,11 +255,12 @@
     const focusedId = target?.dataset.petId;
     const current = Math.max(
       0,
-      OFFICIAL_PETS.findIndex((pet) => pet.id === (focusedId ?? starterPetId)),
+      SELECTABLE_OFFICIAL_PETS.findIndex((pet) => pet.id === (focusedId ?? starterPetId)),
     );
     const direction = event.key === 'ArrowRight' ? 1 : -1;
-    const next = (current + direction + OFFICIAL_PETS.length) % OFFICIAL_PETS.length;
-    starterPetId = OFFICIAL_PETS[next].id;
+    const next =
+      (current + direction + SELECTABLE_OFFICIAL_PETS.length) % SELECTABLE_OFFICIAL_PETS.length;
+    starterPetId = SELECTABLE_OFFICIAL_PETS[next].id;
     void tick().then(() => {
       group.querySelector<HTMLElement>(`[data-pet-id="${starterPetId}"]`)?.focus();
     });
@@ -321,8 +351,44 @@
               {#if !onGithubSignIn}<p class="availability">{$_('onboarding.github.unavailable')}</p>{/if}
               {#if githubError}<p class="error-message">{githubError}</p>{/if}
             {/if}
-            <button class="text-action" type="button" data-action="skip-github" onclick={goNext}>
+            <button
+              class="text-action"
+              type="button"
+              data-action="skip-github"
+              onclick={() => (step = 'agents')}
+            >
               {$_('onboarding.github.skip')}
+            </button>
+          </div>
+        {:else if step === 'invite'}
+          <div class="center-step" data-step="invite">
+            <span class="time-chip">BETA</span>
+            <h1 bind:this={headingEl} tabindex="-1">{$_('onboarding.invite.title')}</h1>
+            <p class="lead">{$_('onboarding.invite.body')}</p>
+            <label class="invite-field">
+              <span>{$_('onboarding.invite.label')}</span>
+              <input
+                type="text"
+                autocomplete="one-time-code"
+                placeholder={$_('onboarding.invite.placeholder')}
+                bind:value={inviteCode}
+                disabled={inviteLoading}
+                onkeydown={(event) => {
+                  if (event.key === 'Enter') void redeemInvite();
+                }}
+              />
+            </label>
+            <button
+              class="primary github-action"
+              type="button"
+              disabled={!onRedeemInvite || inviteLoading || !inviteCode.trim()}
+              onclick={() => void redeemInvite()}
+            >
+              {inviteLoading ? $_('common.loading') : $_('onboarding.invite.action')}
+            </button>
+            {#if inviteError}<p class="error-message">{inviteError}</p>{/if}
+            <button class="text-action" type="button" onclick={() => (step = 'agents')}>
+              {$_('onboarding.invite.localOnly')}
             </button>
           </div>
         {:else if step === 'agents'}
@@ -352,7 +418,7 @@
               <p class="lead">{$_('onboarding.adopt.body')}</p>
             </div>
             <div class="pet-grid" role="radiogroup" tabindex="-1" aria-label={$_('onboarding.adopt.title')} onkeydown={handlePetKeys}>
-              {#each OFFICIAL_PETS as pet, index}
+              {#each SELECTABLE_OFFICIAL_PETS as pet, index}
                 <PetAdoptionCard
                   {pet}
                   selected={starterPetId === pet.id}
@@ -610,6 +676,30 @@
   }
   .github-mark svg { width: 36px; height: 36px; }
   .github-action { margin-top: 24px; min-width: 220px; }
+  .invite-field {
+    display: grid;
+    width: min(360px, 100%);
+    gap: 7px;
+    margin-top: 24px;
+    color: var(--ob-text-muted);
+    font-size: 12px;
+    font-weight: 700;
+    text-align: left;
+  }
+  .invite-field input {
+    min-height: 42px;
+    padding: 0 12px;
+    border: 1px solid var(--ob-border-strong);
+    border-radius: 10px;
+    background: var(--ob-surface);
+    color: var(--ob-text);
+    font: inherit;
+    text-transform: uppercase;
+  }
+  .invite-field input:focus-visible {
+    outline: 2px solid var(--ob-focus);
+    outline-offset: 2px;
+  }
   .availability { margin: 12px 0 0; color: var(--ob-text-muted); font-size: 12px; }
   .center-step > .text-action { margin-top: 16px; color: var(--ob-action); }
   .github-profile { display: flex; align-items: center; gap: 10px; margin-top: 24px; }
@@ -619,7 +709,13 @@
   .agent-list { display: grid; gap: 10px; margin-top: 24px; }
   .adopt-step { max-width: 900px; margin: 0 auto; }
   .adopt-heading { margin-bottom: 20px; }
-  .pet-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+  .pet-grid {
+    display: grid;
+    width: min(220px, 100%);
+    grid-template-columns: minmax(0, 1fr);
+    gap: 14px;
+    margin: 0 auto;
+  }
   .sprite-notice { margin: 10px 0 0; color: var(--ob-text-muted); font-size: 10px; text-align: center; }
   .footer {
     display: grid;

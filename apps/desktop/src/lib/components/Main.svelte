@@ -6,7 +6,13 @@
   import { connector } from '../platform/connector';
   import { newIdempotencyKey } from '../platform/lease-machine';
   import { projectionPublisher } from '../platform/projection-publisher';
-  import type { FriendEntry, PlatformSession, SharedMemoryEntry } from '../platform/types';
+  import type {
+    FriendEntry,
+    PlatformConnectionState,
+    PlatformSession,
+    PublicProfile,
+    SharedMemoryEntry,
+  } from '../platform/types';
   import { accountStore } from '../stores/account.svelte';
   import { agentStore } from '../stores/agents.svelte';
   import { petStore } from '../stores/pet.svelte';
@@ -39,6 +45,7 @@
     type SocialHomeModel,
   } from '../utils/social-home';
   import { track } from '../utils/telemetry';
+  import { visitInteractionFor } from '../utils/visit-stage';
   import { classifyIntent } from '../utils/voice-intent';
   import SocialHome from './home/SocialHome.svelte';
   import MascotView from './MascotView.svelte';
@@ -48,6 +55,10 @@
   import UpdateModal from './UpdateModal.svelte';
 
   let pet = $state<CodexPet | null>(null);
+  const guestPet = $derived.by(() => {
+    skinsStore.revision;
+    return skinsStore.resolveExact(visitStore.guestProjection?.skinId);
+  });
 
   // The skin workshop switches pets at runtime: re-resolve on a new id or a store
   // refresh (a re-imported skin keeps its id, so the id alone would never re-fire).
@@ -79,6 +90,18 @@
       ? mascotStateFor(aggregateSessions(sessionStore.claudeSessions), agentStore.anySessionActive)
       : 'idle'
   );
+  const visitInteraction = $derived.by(() => {
+    if (!visitStore.inbound || !visitStore.guestProjection) return null;
+    const reducedMotion =
+      typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+    return visitInteractionFor({
+      leaseId: visitStore.inbound.id,
+      localStatus: projectionStatus,
+      guestStatus: visitStore.guestProjection.status,
+      timeBucket: Math.floor(visitStore.nowMs / 60_000),
+      reducedMotion,
+    });
+  });
   const projectionGateOpen = $derived(
     accountStore.session !== null &&
       settingsStore.platformConnectEnabled &&
@@ -130,6 +153,8 @@
   // 平台会话的响应式镜像：好友刷新必须键在它上面，不能键在 accountStore ——
   // 两边并行恢复会话，键错了会在平台会话就绪前拉一次空列表且再无依赖触发重取。
   let platformSession = $state<PlatformSession | null>(null);
+  let platformConnectionState = $state<PlatformConnectionState>('degraded');
+  let inviteRedeemed = $state(false);
   // 「稍后」= 本地暂时收起事件卡，不替用户发 decline；服务端 24h 过期兜底
   let dismissedVisitId = $state<string | null>(null);
   // ---- 共同记忆（W9 P4-C）：与好友同款「Home 打开时按需取，登出即清」 ----
@@ -144,6 +169,13 @@
       // 静默：下次打开 Home 或登录变化时重试（B 线祖训：失败不打断 UI）
     }
   }
+  async function refreshInviteEligibility() {
+    try {
+      inviteRedeemed = (await platformClient.inviteEligibility()).redeemed;
+    } catch {
+      inviteRedeemed = false;
+    }
+  }
   async function refreshMemories() {
     try {
       memoryEntries = await platformClient.sharedMemories();
@@ -155,11 +187,13 @@
     if (platformSession === null) {
       friendEntries = [];
       memoryEntries = [];
+      inviteRedeemed = false;
       return;
     }
     if (windowStore.homeOpen) {
       void refreshFriends();
       void refreshMemories();
+      void refreshInviteEligibility();
     }
   });
 
@@ -168,7 +202,15 @@
     return entry ? friendDisplayName(entry) : null;
   }
 
-  function visitFriend(friendUserId: string) {
+  async function visitFriend(friendUserId: string) {
+    const consentKey = 'pawbae:visit-projection-consent:v1';
+    if (localStorage.getItem(consentKey) !== 'accepted') {
+      const accepted = globalThis.confirm(
+        $_('home.visit.projectionConsent'),
+      );
+      if (!accepted) return;
+      localStorage.setItem(consentKey, 'accepted');
+    }
     visitStore.requestVisit(friendUserId).catch((e) => {
       console.warn('[visit] request failed:', e);
     });
@@ -181,6 +223,38 @@
   }
   function delayVisit(requestId: string) {
     dismissedVisitId = requestId;
+  }
+  function declineVisit(requestId: string) {
+    if (visitStore.inbound?.id !== requestId) return;
+    visitStore.respondInbound('decline').catch((e) => {
+      console.warn('[visit] decline failed:', e);
+    });
+  }
+  function handlePetAction(action: string) {
+    if (action === 'recall') {
+      const promise =
+        visitStore.outbound?.status === 'requested'
+          ? visitStore.cancelOutbound()
+          : visitStore.recallOutbound();
+      void promise.catch((e) => console.warn('[visit] recall/cancel failed:', e));
+    } else if (action === 'end-visit') {
+      void visitStore.endInbound().catch((e) => console.warn('[visit] end failed:', e));
+    } else if (action === 'feed' || action === 'snack') {
+      petStore.applyFeed();
+    } else if (action === 'play') {
+      petStore.applyHeadpat();
+    }
+  }
+  async function findFriend(handle: string): Promise<PublicProfile | null> {
+    return platformClient.findProfileByHandle(handle);
+  }
+  async function mutateFriend(action: () => Promise<void>) {
+    await action();
+    await refreshFriends();
+  }
+  async function redeemInvite(code: string) {
+    await platformClient.redeemInvite(code, newIdempotencyKey());
+    await refreshInviteEligibility();
   }
   function openMemory(memoryId: string) {
     dismissedMemoryId = memoryId; // 打开即收起事件卡；相册里永远还在
@@ -232,7 +306,7 @@
         friendNameOf,
       ),
       agentState: deriveLocalAgentState(agentEnabled, activity, agentStore.anySessionActive),
-      realtimeState: 'connected',
+      realtimeState: platformConnectionState,
       affection: Math.round(petStore.petData.affection),
       coins: petStore.petData.coins,
       togetherDays: petStore.daysTogether + 1,
@@ -366,10 +440,14 @@
     // visitStore 从此吃三源合流的真实租约流（RPC 回包/参与者轮询/visit_ended 广播）。
     // 监听在 start() 首个 await 落定前同步挂上，会话恢复的广播才不会漏。
     void platformClient.start();
+    platformConnectionState = platformClient.connectionState();
     cleanups.push(
       platformClient.onSessionChange((s) => {
         platformSession = s;
         if (s === null) visitStore.reset(); // 租约属于会话：登出即清，不跨账号残留
+      }),
+      platformClient.onConnectionStateChange((state) => {
+        platformConnectionState = state;
       }),
     );
     visitStore.init(platformClient);
@@ -514,6 +592,32 @@
     }
   }
 
+  async function waitForPlatformSession(): Promise<PlatformSession> {
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      const session = platformClient.session();
+      if (session) return session;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    throw new Error('Platform session did not become ready');
+  }
+
+  async function handleOnboardingGithubSignIn() {
+    const account = await accountStore.login();
+    const session = platformClient.session() ?? (await waitForPlatformSession());
+    return {
+      login: session.handle || account.handle,
+      displayName: session.displayName ?? account.displayName ?? undefined,
+      avatarUrl: session.avatarUrl ?? account.avatarUrl ?? undefined,
+    };
+  }
+
+  async function checkOnboardingInviteEligibility() {
+    await waitForPlatformSession();
+    const eligibility = await platformClient.inviteEligibility();
+    inviteRedeemed = eligibility.redeemed;
+    return eligibility.redeemed;
+  }
+
   async function handleOnboardingComplete(result: OnboardingResult) {
     await settingsStore.setTelemetryEnabled(result.shareTelemetry);
     await settingsStore.setEnableClaudeCode(result.selectedAgents.includes('claude'));
@@ -614,6 +718,13 @@
   {#if !windowStore.homeOpen}
     <MascotView
       {pet}
+      {guestPet}
+      guestProjection={visitStore.guestProjection}
+      platformAway={
+        visitStore.outboundPhase === 'traveling' ||
+        visitStore.outboundPhase === 'visiting' ||
+        visitStore.outboundPhase === 'returning'
+      }
       {voiceRecording}
       {voiceText}
       {voiceError}
@@ -624,7 +735,14 @@
     <Panel onOpenHome={openHome} />
   {/if}
 
-  <Onboarding open={showOnboarding} {isWindows} onComplete={handleOnboardingComplete} />
+  <Onboarding
+    open={showOnboarding}
+    {isWindows}
+    onComplete={handleOnboardingComplete}
+    onGithubSignIn={accountStore.configured ? handleOnboardingGithubSignIn : undefined}
+    onInviteEligibility={checkOnboardingInviteEligibility}
+    onRedeemInvite={redeemInvite}
+  />
 
   <SettingsPanel open={windowStore.settingsOpen} onClose={closeSettings} />
 
@@ -637,9 +755,21 @@
     onSendToDesktop={sendPetToDesktop}
     onOpenSettings={openSettings}
     onVisitFriend={visitFriend}
+    onPetAction={handlePetAction}
     onAcceptVisit={acceptVisit}
     onDelayVisit={delayVisit}
+    onDeclineVisit={declineVisit}
     onOpenMemory={openMemory}
+    relationships={friendEntries}
+    {inviteRedeemed}
+    onFindFriend={findFriend}
+    onSendFriendRequest={(id) => mutateFriend(() => platformClient.sendFriendRequest(id))}
+    onAcceptFriend={(id) => mutateFriend(() => platformClient.acceptFriendRequest(id))}
+    onRemoveFriend={(id) => mutateFriend(() => platformClient.unfriend(id))}
+    onMuteFriend={(id, muted) => mutateFriend(() => platformClient.muteUser(id, muted))}
+    onBlockFriend={(id) => mutateFriend(() => platformClient.blockUser(id))}
+    onRedeemInvite={redeemInvite}
+    {visitInteraction}
   />
 
   <UpdateModal

@@ -1,29 +1,26 @@
 <script lang="ts">
+  import type { ProjectionStatus } from '../../platform/types';
+  import { skinsStore } from '../../stores/skins.svelte';
   import type { CodexPet } from '../../utils/codex-pet';
-  import type { OfficialPetId } from '../../utils/onboarding';
-  import { tileFrameStyle } from '../../utils/skins';
+  import { petStateToCodexState } from '../../utils/codex-pet';
   import type { HomePetIdentity } from '../../utils/social-home';
+  import SpritePet from '../SpritePet.svelte';
 
   let {
     pet,
     legacyPet,
     size,
     guest = false,
+    state = 'idle',
   }: {
     pet: HomePetIdentity;
     legacyPet: CodexPet | null;
     size: number;
     guest?: boolean;
+    state?: ProjectionStatus;
   } = $props();
 
-  const positions: Record<OfficialPetId, string> = {
-    solu: '0%',
-    muru: '33.333%',
-    riffi: '66.667%',
-    luma: '100%',
-  };
-
-  const glowColors: Record<OfficialPetId, string> = {
+  const glowColors: Record<string, string> = {
     solu: 'rgba(245, 143, 94, 0.18)',
     muru: 'rgba(179, 199, 240, 0.24)',
     riffi: 'rgba(168, 224, 192, 0.2)',
@@ -33,6 +30,17 @@
   const glow = $derived(
     pet.officialPetId ? glowColors[pet.officialPetId] : 'rgba(99, 94, 103, 0.12)',
   );
+  const resolvedPet = $derived.by(() => {
+    skinsStore.revision;
+    const assetId = pet.officialPetId ?? pet.id;
+    return skinsStore.resolveExact(assetId) ?? (legacyPet?.id === assetId ? legacyPet : null);
+  });
+  const assetId = $derived(pet.officialPetId ?? pet.id);
+  const spriteState = $derived.by(() => {
+    if (!resolvedPet) return 'idle';
+    if (state === 'offline' && resolvedPet.animations.sleep) return 'sleep';
+    return petStateToCodexState(resolvedPet, state === 'offline' ? 'idle' : state);
+  });
 </script>
 
 <div
@@ -42,16 +50,12 @@
   aria-label={pet.name}
   style={`--art-size:${size}px;--pet-glow:${glow}`}
 >
-  {#if pet.officialPetId}
-    <div
-      class="official-art"
-      data-pet-id={pet.officialPetId}
-      style={`--poster-x:${positions[pet.officialPetId]}`}
-    ></div>
-  {:else if legacyPet}
-    <div class="legacy-art" data-pet-id={pet.id} style={tileFrameStyle(legacyPet, size)}></div>
+  {#if resolvedPet}
+    <div class="sprite-art" data-pet-id={resolvedPet.id}>
+      <SpritePet pet={resolvedPet} state={spriteState} size={Math.round(size * 0.88)} loop />
+    </div>
   {:else}
-    <div class="missing-art" aria-hidden="true">✦</div>
+    <div class="missing-art" data-pet-id={assetId} aria-hidden="true">✦</div>
   {/if}
 </div>
 
@@ -80,19 +84,10 @@
     transform: scaleY(0.45);
   }
 
-  .official-art {
+  .sprite-art {
     position: relative;
-    width: 100%;
-    height: 100%;
-    background-image: url('/assets/onboarding/pet-family-poster.png');
-    background-position: var(--poster-x) 36%;
-    background-repeat: no-repeat;
-    background-size: 400% auto;
-  }
-
-  .legacy-art {
-    position: relative;
-    max-width: 100%;
+    display: grid;
+    place-items: end center;
   }
 
   .missing-art {

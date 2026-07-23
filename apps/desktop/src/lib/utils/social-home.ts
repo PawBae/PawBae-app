@@ -192,7 +192,11 @@ export function derivePresence(
   if (inbound && inboundPhase === 'visiting' && guestProjection) {
     return {
       kind: 'home',
-      visitor: { id: guestProjection.petId, name: guestProjection.displayName },
+      visitor: {
+        id: guestProjection.skinId,
+        name: guestProjection.displayName,
+        officialPetId: isOfficialPetId(guestProjection.skinId) ? guestProjection.skinId : undefined,
+      },
       visitorOwnerName: nameOf(inbound.visitorUserId) ?? guestProjection.displayName,
       visitorAgentState: guestProjection.status,
       endsAt: inbound.endsAt ?? '',

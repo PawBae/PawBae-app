@@ -11,7 +11,7 @@
 <section class="section">
   <h2>{$_('settings.account.title')}</h2>
   <div class="card">
-    {#if accountStore.phase === 'unconfigured'}
+    {#if !accountStore.configured}
       <div class="setting-row">
         <div class="setting-info">
           <span class="setting-label">{$_('settings.account.unconfigured')}</span>
@@ -29,10 +29,10 @@
         </div>
         <button
           class="gh-signin"
-          disabled={accountStore.phase === 'signingIn'}
-          onclick={() => accountStore.login()}
+          disabled={accountStore.phase === 'signingIn' || accountStore.phase === 'initializing'}
+          onclick={() => void accountStore.login().catch(() => undefined)}
         >
-          {accountStore.phase === 'signingIn'
+          {accountStore.phase === 'signingIn' || accountStore.phase === 'initializing'
             ? $_('settings.account.signingIn')
             : $_('settings.account.signIn')}
         </button>

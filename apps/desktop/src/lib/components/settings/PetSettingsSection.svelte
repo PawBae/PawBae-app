@@ -37,7 +37,7 @@
         </div>
         <button class="toggle" class:on={settingsStore.petSfxEnabled}
           onclick={() => settingsStore.setPetSfxEnabled(!settingsStore.petSfxEnabled)}
-          role="switch" aria-checked={settingsStore.petSfxEnabled}>
+          role="switch" aria-label={$_('settings.petSfx')} aria-checked={settingsStore.petSfxEnabled}>
           <span class="toggle-thumb"></span>
         </button>
       </div>
@@ -54,7 +54,7 @@
         </div>
         <button class="toggle" class:on={settingsStore.strollEnabled}
           onclick={() => settingsStore.setStrollEnabled(!settingsStore.strollEnabled)}
-          role="switch" aria-checked={settingsStore.strollEnabled}>
+          role="switch" aria-label={$_('settings.strollMode')} aria-checked={settingsStore.strollEnabled}>
           <span class="toggle-thumb"></span>
         </button>
       </div>

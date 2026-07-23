@@ -369,6 +369,64 @@ describe('invites and friends', () => {
     await expect(platform.redeemInvite('BAD', 'k2')).rejects.toThrow('invite code is not valid');
   });
 
+  it('restores invite eligibility from the redemption row', async () => {
+    const { platform, state } = await startedClient();
+    await expect(platform.inviteEligibility()).resolves.toEqual({
+      redeemed: false,
+      redeemedAt: null,
+    });
+
+    state.tables.set('invite_redemptions', [
+      { user_id: 'user-me', created_at: '2026-07-23T06:00:00.000Z' },
+    ]);
+    await expect(platform.inviteEligibility()).resolves.toEqual({
+      redeemed: true,
+      redeemedAt: '2026-07-23T06:00:00.000Z',
+    });
+  });
+
+  it('finds only an exact normalized GitHub handle', async () => {
+    const { platform, state } = await startedClient();
+    state.tables.set('profiles', [
+      {
+        id: 'user-keyu',
+        handle: 'keyu',
+        display_name: 'Keyu',
+        avatar_url: 'https://example.test/keyu.png',
+      },
+    ]);
+
+    await expect(platform.findProfileByHandle(' @KEYU ')).resolves.toEqual({
+      userId: 'user-keyu',
+      handle: 'keyu',
+      displayName: 'Keyu',
+      avatarUrl: 'https://example.test/keyu.png',
+    });
+    await expect(platform.findProfileByHandle('key')).resolves.toBeNull();
+    await expect(platform.findProfileByHandle('not a handle')).rejects.toThrow(
+      'invalid_github_handle',
+    );
+  });
+
+  it('maps friend mutations to their server-owned RPC contracts', async () => {
+    const { platform, state } = await startedClient();
+    state.rpcResult = { data: null, error: null };
+
+    await platform.sendFriendRequest('user-keyu');
+    await platform.acceptFriendRequest('user-keyu');
+    await platform.muteUser('user-keyu', true);
+    await platform.unfriend('user-keyu');
+    await platform.blockUser('user-keyu');
+
+    expect(state.rpcCalls).toEqual([
+      { name: 'send_friend_request', params: { p_target_user_id: 'user-keyu' } },
+      { name: 'accept_friend_request', params: { p_requester_user_id: 'user-keyu' } },
+      { name: 'mute_user', params: { p_target_user_id: 'user-keyu', p_muted: true } },
+      { name: 'unfriend', params: { p_other_user_id: 'user-keyu' } },
+      { name: 'block_user', params: { p_target_user_id: 'user-keyu' } },
+    ]);
+  });
+
   it('composes friendships + profiles + mutes into FriendEntry list', async () => {
     const { platform, state } = await startedClient();
     state.tables.set('friendships', [

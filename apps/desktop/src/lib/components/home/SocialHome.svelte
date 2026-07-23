@@ -1,5 +1,6 @@
 <script lang="ts">
   import { _ } from 'svelte-i18n';
+  import type { FriendEntry, PublicProfile } from '../../platform/types';
   import type { CodexPet } from '../../utils/codex-pet';
   import {
     ONBOARDING_THEME_STORAGE_KEY,
@@ -13,6 +14,7 @@
     type SocialHomeModel,
     selectHomeEvent,
   } from '../../utils/social-home';
+  import type { VisitInteraction } from '../../utils/visit-stage';
   import FriendsPanel from './FriendsPanel.svelte';
   import HomeEventCard from './HomeEventCard.svelte';
   import HomePetArtwork from './HomePetArtwork.svelte';
@@ -34,6 +36,17 @@
     onAcceptVisit,
     onDelayVisit,
     onOpenMemory,
+    relationships = [],
+    inviteRedeemed = false,
+    onFindFriend,
+    onSendFriendRequest,
+    onAcceptFriend,
+    onRemoveFriend,
+    onMuteFriend,
+    onBlockFriend,
+    onRedeemInvite,
+    onDeclineVisit,
+    visitInteraction = null,
   }: {
     open?: boolean;
     model: SocialHomeModel;
@@ -48,6 +61,17 @@
     onAcceptVisit?: (id: string) => void;
     onDelayVisit?: (id: string) => void;
     onOpenMemory?: (id: string) => void;
+    relationships?: FriendEntry[];
+    inviteRedeemed?: boolean;
+    onFindFriend?: (handle: string) => Promise<PublicProfile | null>;
+    onSendFriendRequest?: (id: string) => Promise<void>;
+    onAcceptFriend?: (id: string) => Promise<void>;
+    onRemoveFriend?: (id: string) => Promise<void>;
+    onMuteFriend?: (id: string, muted: boolean) => Promise<void>;
+    onBlockFriend?: (id: string) => Promise<void>;
+    onRedeemInvite?: (code: string) => Promise<void>;
+    onDeclineVisit?: (id: string) => void;
+    visitInteraction?: VisitInteraction | null;
   } = $props();
 
   const actionKeys: Record<HomeAction, string> = {
@@ -162,7 +186,7 @@
 
       <div class="dock-position"><SocialDock bind:activePanel /></div>
 
-      <main class="living-room">
+      <main class="living-room" data-visit-interaction={visitInteraction ?? undefined}>
         {#if model.presence.kind === 'away'}
           <div data-away-state class="empty-nest">
             <span aria-hidden="true">⌁</span>
@@ -174,7 +198,12 @@
           </div>
         {:else}
           <div data-local-pet>
-            <HomePetArtwork pet={model.localPet} {legacyPet} size={240} />
+            <HomePetArtwork
+              pet={model.localPet}
+              {legacyPet}
+              size={240}
+              state={model.agentState}
+            />
           </div>
           {#if model.presence.visitor}
             <div
@@ -182,7 +211,13 @@
               class:resting={model.presence.visitorAgentState === 'offline'}
               data-guest-pet
             >
-              <HomePetArtwork pet={model.presence.visitor} legacyPet={null} size={190} guest />
+              <HomePetArtwork
+                pet={model.presence.visitor}
+                legacyPet={null}
+                size={190}
+                guest
+                state={model.presence.visitorAgentState}
+              />
               {#if model.presence.visitorAgentState === 'offline'}
                 <span class="resting-visual" data-visitor-resting-visual aria-hidden="true">zZ</span>
               {/if}
@@ -256,6 +291,16 @@
           onRecallFriend={onPetAction ? (_id) => onPetAction?.('recall') : undefined}
           {onAcceptVisit}
           {onDelayVisit}
+          {relationships}
+          {inviteRedeemed}
+          {onFindFriend}
+          {onSendFriendRequest}
+          {onAcceptFriend}
+          {onRemoveFriend}
+          {onMuteFriend}
+          {onBlockFriend}
+          {onRedeemInvite}
+          {onDeclineVisit}
         />
       {:else if activePanel === 'album' || activePanel === 'plaza'}
         {#key activePanel}
@@ -445,6 +490,24 @@
     display: grid;
     min-width: 0;
     place-items: end center;
+  }
+
+  .living-room[data-visit-interaction='nose-touch'] .guest-slot {
+    transform: translateX(-12px);
+  }
+
+  .living-room[data-visit-interaction='celebrate'] .guest-slot {
+    animation: guest-celebrate 900ms ease-in-out infinite alternate;
+  }
+
+  .living-room[data-visit-interaction='rest'] .guest-slot {
+    transform: translateY(5px);
+  }
+
+  @keyframes guest-celebrate {
+    to {
+      transform: translateY(-7px) rotate(2deg);
+    }
   }
 
   .guest-slot.resting :global(.artwork) {
@@ -649,6 +712,10 @@
   }
 
   @media (prefers-reduced-motion: reduce) {
+    .living-room .guest-slot {
+      animation: none;
+      transform: none;
+    }
     .home-shell {
       animation: none;
     }

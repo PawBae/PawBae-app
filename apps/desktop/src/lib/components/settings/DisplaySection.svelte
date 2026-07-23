@@ -25,7 +25,7 @@
       </div>
       <button class="toggle" class:on={settingsStore.autoExpandOnTask}
         onclick={() => settingsStore.setAutoExpandOnTask(!settingsStore.autoExpandOnTask)}
-        role="switch" aria-checked={settingsStore.autoExpandOnTask}>
+        role="switch" aria-label={$_('settings.autoExpandOnTask')} aria-checked={settingsStore.autoExpandOnTask}>
         <span class="toggle-thumb"></span>
       </button>
     </div>

@@ -84,12 +84,11 @@ describe('Onboarding', () => {
     expect(localStorage.getItem('pawbae-onboarding-theme')).toBe('light');
   });
 
-  it('keeps the adoption grid four across at the narrow desktop breakpoint', () => {
+  it('shows only the fully-QA Solu pet in the beta adoption grid', () => {
     const petGridRules = [...onboardingSource.matchAll(/\.pet-grid\s*\{([^}]*)\}/g)]
       .map((match) => match[1])
       .join('\n');
-    expect(petGridRules).toContain('grid-template-columns: repeat(4, minmax(0, 1fr))');
-    expect(petGridRules).not.toMatch(/grid-template-columns:\s*repeat\((?!4,)/);
+    expect(petGridRules).toContain('grid-template-columns: minmax(0, 1fr)');
   });
 
   it('reserves enough narrow-header width for both appearance and setup actions', () => {
@@ -184,13 +183,13 @@ describe('Onboarding', () => {
 
     document.querySelector<HTMLButtonElement>('[data-action="pet-only"]')?.click();
     await tick();
-    document.querySelector<HTMLButtonElement>('[data-pet-id="muru"]')?.click();
+    document.querySelector<HTMLButtonElement>('[data-pet-id="solu"]')?.click();
     await tick();
     document.querySelector<HTMLButtonElement>('[data-action="complete-adoption"]')?.click();
     await tick();
 
     expect(onComplete).toHaveBeenCalledWith(
-      expect.objectContaining({ mode: 'pet', selectedAgents: [], starterPetId: 'muru' }),
+      expect.objectContaining({ mode: 'pet', selectedAgents: [], starterPetId: 'solu' }),
     );
   });
 
@@ -223,16 +222,16 @@ describe('Onboarding', () => {
     await tick();
 
     const cards = [...document.querySelectorAll<HTMLButtonElement>('[role="radio"]')];
-    expect(cards.map((card) => card.tabIndex)).toEqual([0, -1, -1, -1]);
+    expect(cards.map((card) => card.tabIndex)).toEqual([0]);
     cards[0].focus();
     cards[0].dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
     await tick();
 
-    expect(document.activeElement).toBe(cards[1]);
-    expect(cards[1].getAttribute('aria-checked')).toBe('true');
-    expect(cards.map((card) => card.tabIndex)).toEqual([-1, 0, -1, -1]);
+    expect(document.activeElement).toBe(cards[0]);
+    expect(cards[0].getAttribute('aria-checked')).toBe('true');
+    expect(cards.map((card) => card.tabIndex)).toEqual([0]);
 
-    cards[1].dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
+    cards[0].dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
     await tick();
     expect(document.activeElement).toBe(cards[0]);
     expect(cards[0].getAttribute('aria-checked')).toBe('true');
