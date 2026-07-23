@@ -30,7 +30,7 @@ describe('shared social contracts', () => {
     ]);
     expect(FRIEND_RELATIONS).toEqual(['pending_in', 'pending_out', 'accepted']);
     // 只有 #55 版权清理后存活的 3 只（D1）；四宠就绪后随 reviewed migration 同步加行
-    expect(APPROVED_SKIN_IDS).toEqual(['shimeji-bola', 'wukong', 'yoonie']);
+    expect(APPROVED_SKIN_IDS).toEqual(['shimeji-bola', 'solu', 'wukong', 'yoonie']);
     expect(Object.isFrozen(PROJECTION_STATUSES)).toBe(true);
     expect(Object.isFrozen(VISIT_STATUSES)).toBe(true);
     expect(Object.isFrozen(FRIEND_RELATIONS)).toBe(true);

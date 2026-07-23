@@ -1,0 +1,96 @@
+{
+  "id": "solu",
+  "displayName": "Solu",
+  "description": "A bright, affectionate sun-petal companion who celebrates every finished task.",
+  "spritesheetPath": "spritesheet.png",
+  "imageRendering": "auto",
+  "kind": "creature",
+  "schemaVersion": 2,
+  "atlas": {
+    "cellW": 256,
+    "cellH": 256,
+    "cols": 4,
+    "rows": 4
+  },
+  "animations": {
+    "idle": {
+      "row": 0,
+      "offsetCol": 0,
+      "frames": 2,
+      "fps": 2,
+      "loopRestMs": 1200
+    },
+    "running": {
+      "row": 0,
+      "offsetCol": 2,
+      "frames": 2,
+      "fps": 8
+    },
+    "run-left": {
+      "row": 0,
+      "offsetCol": 2,
+      "frames": 2,
+      "fps": 8
+    },
+    "run-right": {
+      "row": 0,
+      "offsetCol": 2,
+      "frames": 2,
+      "fps": 8,
+      "flipX": true
+    },
+    "working": {
+      "row": 1,
+      "offsetCol": 0,
+      "frames": 2,
+      "fps": 4
+    },
+    "waiting": {
+      "row": 1,
+      "offsetCol": 2,
+      "frames": 2,
+      "fps": 3,
+      "loopRestMs": 800
+    },
+    "happy": {
+      "row": 2,
+      "offsetCol": 0,
+      "frames": 2,
+      "fps": 5
+    },
+    "sleep": {
+      "row": 2,
+      "offsetCol": 2,
+      "frames": 2,
+      "fps": 2,
+      "loopRestMs": 1800
+    },
+    "arrival": {
+      "row": 3,
+      "offsetCol": 0,
+      "frames": 2,
+      "fps": 6
+    },
+    "return": {
+      "row": 3,
+      "offsetCol": 2,
+      "frames": 2,
+      "fps": 6
+    }
+  },
+  "stateMap": {
+    "idle": "idle",
+    "working": "working",
+    "compacting": "waiting",
+    "waiting": "waiting"
+  },
+  "oneShot": [
+    "happy",
+    "arrival",
+    "return"
+  ],
+  "physics": {
+    "enabled": true
+  },
+  "displayScale": 0.96
+}

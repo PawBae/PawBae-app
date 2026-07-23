@@ -32,7 +32,12 @@ export type FriendRelation = (typeof FRIEND_RELATIONS)[number];
  * 服务端回落到 DEFAULT_PROJECTION_SKIN_ID。上新皮肤 = reviewed migration
  * 加行，不发契约版本。
  */
-export const APPROVED_SKIN_IDS = Object.freeze(['shimeji-bola', 'wukong', 'yoonie'] as const);
+export const APPROVED_SKIN_IDS = Object.freeze([
+  'shimeji-bola',
+  'solu',
+  'wukong',
+  'yoonie',
+] as const);
 /** 未批准 skinId 的投影回落皮肤（原创默认宠）。 */
 export const DEFAULT_PROJECTION_SKIN_ID = 'yoonie';
 export type ApprovedSkinId = (typeof APPROVED_SKIN_IDS)[number];

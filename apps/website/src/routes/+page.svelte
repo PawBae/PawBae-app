@@ -7,51 +7,36 @@
 <header class="hero" id="download">
   <div class="wrap hero-in">
     <a class="ship-pill" href="https://github.com/PawBae/PawBae-app/blob/main/CHANGELOG.md">
-      <span class="dot"></span> Just shipped v0.2.0 — OBS stream stage · Changelog →
+      <span class="dot"></span> PawBae v1 · invite-only beta
     </a>
     <h1>The desktop pet that watches your AI agents</h1>
     <p class="sub">
-      Your agent. Your pet. Your desktop. PawBae works when Claude Code works, waits when it waits,
-      and celebrates when you ship.
+      Solu lives beside your code, mirrors your agent's five safe states, visits a friend's
+      desktop, and brings home a shared memory.
     </p>
     <div class="ctas">
-      <a class="btn btn-yellow" href="https://github.com/PawBae/PawBae-app/releases/latest">Download Now For Free</a>
-      <a class="btn btn-ghost-dark" href="#waitlist">Join the waitlist</a>
+      <a class="btn btn-yellow" href="#waitlist">Join the closed beta</a>
+      <a class="btn btn-ghost-dark" href="https://github.com/PawBae/PawBae-app/releases">View beta builds</a>
     </div>
     <p class="cta-note">
-      macOS (Apple silicon) · Windows beta · Closed beta, <a href="#waitlist">invite only</a>
+      macOS (Apple silicon &amp; Intel) · Windows beta · Invite required for social features
     </p>
 
     <div class="hero-shot">
       <div class="hero-glow"></div>
-      <div class="desk">
-        <div class="pet-perch">
-          <svg viewBox="0 0 120 100" aria-label="PawBae pet sitting on the terminal">
-            <path class="pet-tail" d="M92 70 q18 0 15 -16" stroke="#f5b06c" stroke-width="9" fill="none" stroke-linecap="round" />
-            <path d="M36 42 L29 20 L52 31 Z" fill="#ffd9ae" stroke="#f5b06c" stroke-width="3" stroke-linejoin="round" />
-            <path d="M84 42 L91 20 L68 31 Z" fill="#ffd9ae" stroke="#f5b06c" stroke-width="3" stroke-linejoin="round" />
-            <ellipse cx="60" cy="62" rx="36" ry="31" fill="#ffe3c2" />
-            <path d="M45 58 q5 6 10 0" stroke="#8a5a2b" stroke-width="3" fill="none" stroke-linecap="round" />
-            <path d="M65 58 q5 6 10 0" stroke="#8a5a2b" stroke-width="3" fill="none" stroke-linecap="round" />
-            <path d="M55 70 q5 4 10 0" stroke="#8a5a2b" stroke-width="2.5" fill="none" stroke-linecap="round" />
-            <ellipse cx="38" cy="68" rx="6" ry="4" fill="#ffb98a" opacity="0.7" />
-            <ellipse cx="82" cy="68" rx="6" ry="4" fill="#ffb98a" opacity="0.7" />
-          </svg>
+      <div class="desktop-capture" aria-label="PawBae desktop home with Solu and a visiting pet">
+        <div class="capture-topbar">
+          <div><strong>Solu</strong><span>your desktop companion</span></div>
+          <span class="capture-account">@yining</span>
         </div>
-        <span class="status-chip"><span class="dot"></span> working…</span>
-        <div class="hero-toast">Momo dropped by 👋</div>
-        <div class="term">
-          <div class="term-bar">
-            <span class="tl" style="background:#ff5f57"></span><span class="tl" style="background:#febc2e"></span><span class="tl" style="background:#28c840"></span>
-            <span class="term-title">claude — ~/projects/orbit-api</span>
-          </div>
-          <div class="term-body">
-            <div><span class="pr">❯</span> claude "add rate limiting to the auth routes"</div>
-            <div><span class="ok">⏺</span> Read(src/routes/auth.ts)</div>
-            <div><span class="ok">⏺</span> Edit(src/middleware/rateLimit.ts)</div>
-            <div><span class="dim">✻ Running tests… 42 passed</span></div>
-            <div><span class="ok">⏺</span> Done. Rate limiting added to 3 routes.</div>
-          </div>
+        <div class="capture-room">
+          <div class="capture-status"><span class="dot"></span> Agent working</div>
+          <div class="sprite-frame sprite-working" role="img" aria-label="Solu working"></div>
+          <div class="sprite-frame sprite-guest" role="img" aria-label="Solu visiting"></div>
+          <div class="guest-label">Momo's Solu · 18 min left</div>
+        </div>
+        <div class="capture-dock" aria-hidden="true">
+          <span>Friends</span><span>Album</span><span>Settings</span>
         </div>
       </div>
     </div>
@@ -133,16 +118,9 @@
         </div>
       </div>
       <div class="glass-card memory-card">
-        <div class="memory-art">
-          <svg viewBox="0 0 320 150" width="100%" height="100%" aria-label="two pets celebrating">
-            <ellipse cx="115" cy="104" rx="32" ry="27" fill="#ffe3c2" />
-            <path d="M95 84 L89 66 L109 76 Z" fill="#ffd9ae" /><path d="M135 84 L141 66 L121 76 Z" fill="#ffd9ae" />
-            <path d="M104 100 q4 5 9 0 M121 100 q4 5 9 0" stroke="#8a5a2b" stroke-width="2.5" fill="none" stroke-linecap="round" />
-            <ellipse cx="205" cy="106" rx="30" ry="25" fill="#d6edff" />
-            <path d="M186 88 L180 70 L200 80 Z" fill="#bfe3ff" /><path d="M224 88 L230 70 L210 80 Z" fill="#bfe3ff" />
-            <path d="M195 102 q4 5 9 0 M212 102 q4 5 9 0" stroke="#2b4a6f" stroke-width="2.5" fill="none" stroke-linecap="round" />
-            <text x="150" y="58" font-size="20">🎉</text>
-          </svg>
+        <div class="memory-art" aria-label="Two Solu pets celebrating together">
+          <div class="sprite-frame sprite-happy"></div>
+          <div class="sprite-frame sprite-happy second"></div>
         </div>
         <div class="memory-body">
           <h3>Shipped it. Together.</h3>
@@ -284,10 +262,6 @@
     font-size: 13.5px;
     color: #6b7280;
   }
-  .cta-note a {
-    color: #9ca3af;
-  }
-
   .hero-shot {
     position: relative;
     max-width: 880px;
@@ -299,116 +273,129 @@
     background: radial-gradient(closest-side, rgba(125, 211, 252, 0.16), transparent 70%);
     pointer-events: none;
   }
-  .desk {
+  .desktop-capture {
     position: relative;
-    background: linear-gradient(180deg, #1b2437, #131a2a);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-bottom: none;
-    border-radius: 18px 18px 0 0;
-    padding: 42px 42px 0;
-  }
-  .term {
-    background: #0d1117;
-    border-radius: 10px 10px 0 0;
-    border: 1px solid rgba(255, 255, 255, 0.09);
-    border-bottom: none;
     overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-bottom: 0;
+    border-radius: 20px 20px 0 0;
+    background: #f8f5f1;
+    color: #322e34;
+    box-shadow: 0 -12px 80px rgba(245, 143, 94, 0.12);
     text-align: left;
   }
-  .term-bar {
+  .capture-topbar {
     display: flex;
     align-items: center;
-    gap: 6px;
-    padding: 10px 12px;
-    background: #161b22;
+    justify-content: space-between;
+    padding: 16px 20px;
+    border-bottom: 1px solid #e5ded9;
+    background: rgba(255, 255, 255, 0.9);
   }
-  .term-bar .tl {
-    width: 11px;
-    height: 11px;
-    border-radius: 50%;
+  .capture-topbar > div {
+    display: grid;
+    gap: 1px;
   }
-  .term-title {
-    margin-left: 10px;
-    font-size: 11.5px;
-    color: #7d8590;
-    font-family: var(--font-mono);
+  .capture-topbar strong {
+    color: #2e2b31;
+    font-size: 14px;
   }
-  .term-body {
-    padding: 14px 18px 22px;
-    font-family: var(--font-mono);
-    font-size: 12.5px;
-    line-height: 1.8;
-    color: #a9b1d6;
-  }
-  .term-body .pr {
-    color: #7dd3fc;
-  }
-  .term-body .ok {
-    color: #34d399;
-  }
-  .term-body .dim {
-    color: #565f89;
-  }
-  .pet-perch {
-    position: absolute;
-    top: -8px;
-    right: 120px;
-    width: 104px;
-  }
-  .pet-tail {
-    transform-origin: 88px 66px;
-    animation: wag 3.2s ease-in-out infinite;
-  }
-  @keyframes wag {
-    0%,
-    100% {
-      transform: rotate(0);
-    }
-    50% {
-      transform: rotate(9deg);
-    }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .pet-tail {
-      animation: none;
-    }
-  }
-  .status-chip {
-    position: absolute;
-    top: 2px;
-    right: 34px;
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    background: rgba(255, 255, 255, 0.92);
-    backdrop-filter: blur(8px);
-    border-radius: 999px;
-    padding: 4px 11px;
+  .capture-topbar span {
+    color: #777078;
     font-size: 12px;
-    font-weight: 600;
-    color: var(--ink-900);
-    box-shadow: var(--card-shadow);
   }
-  .status-chip .dot {
+  .capture-account {
+    padding: 5px 10px;
+    border-radius: 999px;
+    background: #f4efec;
+    font-weight: 700;
+  }
+  .capture-room {
+    position: relative;
+    display: flex;
+    min-height: 340px;
+    align-items: end;
+    justify-content: center;
+    gap: 8px;
+    overflow: hidden;
+    background:
+      radial-gradient(circle at 50% 90%, rgba(245, 143, 94, 0.2), transparent 38%),
+      linear-gradient(180deg, #fffdfa, #f4ede7);
+  }
+  .capture-room::after {
+    position: absolute;
+    right: 8%;
+    bottom: 28px;
+    left: 8%;
+    height: 1px;
+    background: #d9cec8;
+    content: '';
+  }
+  .capture-status,
+  .guest-label {
+    position: absolute;
+    z-index: 3;
+    border: 1px solid #ded5d0;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.9);
+    box-shadow: 0 8px 24px rgba(70, 54, 45, 0.08);
+    font-size: 12px;
+    font-weight: 700;
+  }
+  .capture-status {
+    top: 18px;
+    left: 20px;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 6px 10px;
+  }
+  .capture-status .dot {
     width: 7px;
     height: 7px;
     border-radius: 50%;
-    background: var(--mint);
+    background: #34d399;
   }
-  .hero-toast {
-    position: absolute;
-    top: -2px;
-    left: 46px;
-    background: rgba(255, 255, 255, 0.92);
-    backdrop-filter: blur(8px);
-    border-radius: 12px;
-    padding: 9px 15px;
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--ink-900);
-    box-shadow: var(--card-shadow);
+  .guest-label {
+    right: 16%;
+    bottom: 20px;
+    padding: 6px 10px;
   }
-
+  .sprite-frame {
+    width: 256px;
+    height: 256px;
+    flex: 0 0 auto;
+    background-image: url('/media/solu-spritesheet.png');
+    background-repeat: no-repeat;
+    background-size: 400% 400%;
+  }
+  .sprite-working {
+    /* Nudge past the generated sheet's one-pixel cell-edge bleed. */
+    background-position: 0 34%;
+  }
+  .sprite-guest {
+    width: 205px;
+    height: 205px;
+    margin-left: -42px;
+    background-position: 66.667% 66.667%;
+    filter: saturate(0.86);
+  }
+  .capture-dock {
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+    padding: 10px;
+    border-top: 1px solid #e5ded9;
+    background: #fff;
+  }
+  .capture-dock span {
+    padding: 5px 10px;
+    border-radius: 9px;
+    background: #f4efec;
+    color: #6f676e;
+    font-size: 11px;
+    font-weight: 700;
+  }
   /* ============ gray-950 工具带 ============ */
   .tools-band {
     background: var(--band-950);
@@ -563,8 +550,22 @@
     }
   }
   .memory-art {
+    display: flex;
     height: 150px;
+    align-items: end;
+    justify-content: center;
     background: linear-gradient(160deg, #bae6fd, #ddd6fe 55%, #fed7aa);
+    overflow: hidden;
+  }
+  .memory-art .sprite-frame {
+    width: 138px;
+    height: 138px;
+    margin: 0 -14px -3px;
+    background-position: 0 66.667%;
+  }
+  .memory-art .second {
+    background-position: 33.333% 66.667%;
+    transform: scaleX(-1);
   }
   .memory-body {
     padding: 14px 18px 16px;
@@ -720,5 +721,48 @@
     font-size: 14px;
     color: var(--dark-body);
     margin: 0;
+  }
+
+  @media (max-width: 560px) {
+    .hero {
+      padding-top: 34px;
+    }
+    .hero-shot {
+      margin-top: 34px;
+    }
+    .capture-topbar {
+      padding: 12px;
+    }
+    .capture-room {
+      min-height: 260px;
+    }
+    .capture-room .sprite-frame {
+      width: 172px;
+      height: 172px;
+    }
+    .capture-room .sprite-guest {
+      width: 140px;
+      height: 140px;
+      margin-left: -48px;
+    }
+    .guest-label {
+      right: 8px;
+      bottom: 12px;
+    }
+    .capture-dock {
+      justify-content: flex-start;
+      overflow-x: auto;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      scroll-behavior: auto !important;
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
   }
 </style>

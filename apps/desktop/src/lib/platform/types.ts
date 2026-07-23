@@ -27,6 +27,20 @@ export interface PlatformSession {
   avatarUrl: string | null;
 }
 
+export interface PublicProfile {
+  userId: string;
+  handle: string;
+  displayName: string | null;
+  avatarUrl: string | null;
+}
+
+export interface InviteEligibility {
+  redeemed: boolean;
+  redeemedAt: string | null;
+}
+
+export type PlatformConnectionState = 'connected' | 'degraded' | 'reconnecting';
+
 export type Unsubscribe = () => void;
 
 /** shared_memories 行的客户端形状：模板键 + 安全参数，不含预渲染文本（A 线 W8 契约）。 */
@@ -44,6 +58,8 @@ export interface PlatformClient {
   // 会话
   session(): PlatformSession | null; // null = 未登录（App 必须照常工作）
   onSessionChange(cb: (s: PlatformSession | null) => void): Unsubscribe;
+  connectionState(): PlatformConnectionState;
+  onConnectionStateChange(cb: (state: PlatformConnectionState) => void): Unsubscribe;
 
   // 串门——覆盖 A 线 RPC 清单的全部六个访问动作
   requestVisit(hostUserId: string, idempotencyKey: string): Promise<VisitLease>;
@@ -56,9 +72,16 @@ export interface PlatformClient {
 
   // 邀请码（onboarding 消费）
   redeemInvite(code: string, key: string): Promise<void>;
+  inviteEligibility(): Promise<InviteEligibility>;
 
   // 好友
   friends(): Promise<FriendEntry[]>;
+  findProfileByHandle(handle: string): Promise<PublicProfile | null>;
+  sendFriendRequest(userId: string): Promise<void>;
+  acceptFriendRequest(userId: string): Promise<void>;
+  unfriend(userId: string): Promise<void>;
+  muteUser(userId: string, muted: boolean): Promise<void>;
+  blockUser(userId: string): Promise<void>;
 
   // 共同记忆（P4-C 数据面，W9 增补）——结算幂等：服务端按 visit_id 唯一，
   // 双端重复调用都拿回同一行；requested 系终局（declined/cancelled/expired/blocked）不可结算

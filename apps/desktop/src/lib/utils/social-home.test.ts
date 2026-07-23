@@ -469,7 +469,7 @@ describe('derivePresence', () => {
     const presence = derivePresence(null, 'none', inbound, 'visiting', guestFrame, nameOf);
     expect(presence).toEqual({
       kind: 'home',
-      visitor: { id: 'solu', name: 'Solu' },
+      visitor: { id: 'solu', name: 'Solu', officialPetId: 'solu' },
       visitorOwnerName: 'Momo',
       visitorAgentState: 'working',
       endsAt: '2026-07-11T10:30:00Z',

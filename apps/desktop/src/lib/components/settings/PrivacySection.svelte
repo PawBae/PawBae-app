@@ -48,7 +48,7 @@
       </div>
       <button class="toggle" class:on={settingsStore.inputTrackingEnabled}
         onclick={() => toggle(!settingsStore.inputTrackingEnabled)}
-        role="switch" aria-checked={settingsStore.inputTrackingEnabled}>
+        role="switch" aria-label={$_('settings.inputReactions')} aria-checked={settingsStore.inputTrackingEnabled}>
         <span class="toggle-thumb"></span>
       </button>
     </div>

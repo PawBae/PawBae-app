@@ -84,7 +84,7 @@
       </div>
       <button class="toggle" class:on={enableClaudeCode}
         onclick={() => toggleClaudeCode(!enableClaudeCode)}
-        role="switch" aria-checked={enableClaudeCode}>
+        role="switch" aria-label={$_('settings.enableClaudeCode')} aria-checked={enableClaudeCode}>
         <span class="toggle-thumb"></span>
       </button>
     </div>
@@ -103,7 +103,7 @@
         </div>
         <button class="toggle" class:on={enableCodex}
           onclick={() => toggleCodex(!enableCodex)}
-          role="switch" aria-checked={enableCodex}>
+          role="switch" aria-label={$_('settings.enableCodex')} aria-checked={enableCodex}>
           <span class="toggle-thumb"></span>
         </button>
       </div>
@@ -121,7 +121,7 @@
         </div>
         <button class="toggle" class:on={enableCursor}
           onclick={() => toggleCursor(!enableCursor)}
-          role="switch" aria-checked={enableCursor}>
+          role="switch" aria-label={$_('settings.enableCursor')} aria-checked={enableCursor}>
           <span class="toggle-thumb"></span>
         </button>
       </div>

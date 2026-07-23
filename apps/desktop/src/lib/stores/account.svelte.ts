@@ -3,7 +3,7 @@ import {
   logout as authLogout,
   loginWithGitHub,
   supabaseClient,
-  toPlatformSession,
+  toCanonicalPlatformSession,
 } from '../platform/auth';
 import type { PlatformSession } from '../platform/types';
 
@@ -15,10 +15,11 @@ import type { PlatformSession } from '../platform/types';
  * 'unconfigured' = 构建时没有 Supabase 环境变量（见 platform/auth.ts）。
  * App 的一切功能不依赖登录 —— null 会话必须照常工作（契约红线）。
  */
-export type AccountPhase = 'unconfigured' | 'signedOut' | 'signingIn' | 'signedIn';
+export type AccountPhase = 'initializing' | 'signedOut' | 'signingIn' | 'signedIn' | 'error';
 
 class AccountStore {
-  phase = $state<AccountPhase>(authConfigured ? 'signedOut' : 'unconfigured');
+  phase = $state<AccountPhase>(authConfigured ? 'initializing' : 'signedOut');
+  readonly configured = authConfigured;
   session = $state<PlatformSession | null>(null);
   /** 最近一次登录失败的人类可读原因；进入新一轮登录时清空。 */
   error = $state('');
@@ -27,19 +28,28 @@ class AccountStore {
 
   /** App 启动调用一次：恢复持久化会话 + 订阅后续变化。 */
   async init() {
-    if (this.initialized || !authConfigured) return;
+    if (this.initialized) return;
     this.initialized = true;
+    if (!authConfigured) {
+      this.phase = 'signedOut';
+      return;
+    }
     const sb = supabaseClient();
-    if (!sb) return;
+    if (!sb) {
+      this.phase = 'error';
+      this.error = 'auth not configured';
+      return;
+    }
 
     sb.auth.onAuthStateChange((_event, session) => {
-      this.applySession(toPlatformSession(session));
+      void toCanonicalPlatformSession(sb, session).then((profile) => this.applySession(profile));
     });
     try {
       const { data } = await sb.auth.getSession();
-      this.applySession(toPlatformSession(data.session));
-    } catch {
-      // 离线等读取失败：保持登出态，登录入口仍可用
+      this.applySession(await toCanonicalPlatformSession(sb, data.session));
+    } catch (e) {
+      this.error = e instanceof Error ? e.message : String(e);
+      this.phase = 'error';
     }
   }
 
@@ -50,17 +60,24 @@ class AccountStore {
     }
   }
 
-  async login() {
-    if (this.phase === 'signingIn' || this.phase === 'unconfigured') return;
+  async login(): Promise<PlatformSession> {
+    if (this.phase === 'signingIn') throw new Error('sign-in already in progress');
+    if (!authConfigured) throw new Error('auth not configured');
     this.error = '';
     this.phase = 'signingIn';
     try {
       await loginWithGitHub();
-      // applySession 由 onAuthStateChange 触发；这里兜底防事件竞态
-      if (this.phase === 'signingIn' && this.session) this.phase = 'signedIn';
+      const sb = supabaseClient();
+      if (!sb) throw new Error('auth not configured');
+      const { data } = await sb.auth.getSession();
+      const session = await toCanonicalPlatformSession(sb, data.session);
+      if (!session) throw new Error('GitHub sign-in did not create a session');
+      this.applySession(session);
+      return session;
     } catch (e) {
       this.error = e instanceof Error ? e.message : String(e);
-      this.phase = 'signedOut';
+      this.phase = 'error';
+      throw e;
     }
   }
 

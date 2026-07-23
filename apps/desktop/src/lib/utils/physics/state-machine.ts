@@ -19,7 +19,7 @@ import {
   WALL_DETACH_CHANCE_PER_TICK,
   WALL_GRAB_HOLD_TICKS,
 } from './constants';
-import type { MutablePhysicsState, PhysicsState } from './types';
+import type { MutablePhysicsState } from './types';
 
 export function initialState(): MutablePhysicsState {
   return {

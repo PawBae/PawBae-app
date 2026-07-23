@@ -6,13 +6,15 @@ import {
   nextOnboardingStep,
   OFFICIAL_PETS,
   previousOnboardingStep,
+  SELECTABLE_OFFICIAL_PETS,
 } from './onboarding';
 
 describe('onboarding flow', () => {
   it('clamps next and previous at flow boundaries', () => {
     expect(previousOnboardingStep('welcome')).toBe('welcome');
     expect(nextOnboardingStep('welcome')).toBe('github');
-    expect(nextOnboardingStep('github')).toBe('agents');
+    expect(nextOnboardingStep('github')).toBe('invite');
+    expect(nextOnboardingStep('invite')).toBe('agents');
     expect(nextOnboardingStep('agents')).toBe('adopt');
     expect(nextOnboardingStep('adopt')).toBe('adopt');
   });
@@ -26,6 +28,7 @@ describe('onboarding flow', () => {
   it('defines the four official pets in poster order', () => {
     expect(OFFICIAL_PETS.map((pet) => pet.id)).toEqual(['solu', 'muru', 'riffi', 'luma']);
     expect(OFFICIAL_PETS.map((pet) => pet.posterIndex)).toEqual([0, 1, 2, 3]);
+    expect(SELECTABLE_OFFICIAL_PETS.map((pet) => pet.id)).toEqual(['solu']);
   });
 
   it('maps integrations to the commands exposed by Tauri', () => {

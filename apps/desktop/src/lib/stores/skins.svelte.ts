@@ -78,6 +78,12 @@ class SkinsStore {
     return list.find((p) => p.id === id) ?? list.find((p) => p.id === DEFAULT_PET_ID) ?? list[0];
   }
 
+  /** Exact identity lookup for remote/official pets. Never aliases an unfinished id to Yoonie. */
+  resolveExact(id: string | null | undefined): CodexPet | null {
+    if (!id) return null;
+    return this.all.find((pet) => pet.id === id) ?? null;
+  }
+
   noteImportWarnings(id: string, count: number): void {
     this.importWarnings = { ...this.importWarnings, [id]: count };
   }

@@ -61,6 +61,30 @@ export function toPlatformSession(session: Session | null): PlatformSession | nu
   };
 }
 
+/**
+ * The profile row is the canonical social identity. GitHub metadata is only a
+ * display fallback while the auth-user trigger/profile read is unavailable.
+ */
+export async function toCanonicalPlatformSession(
+  sb: SupabaseClient,
+  session: Session | null,
+): Promise<PlatformSession | null> {
+  const fallback = toPlatformSession(session);
+  if (!fallback) return null;
+  const { data, error } = await sb
+    .from('profiles')
+    .select('handle,display_name,avatar_url')
+    .eq('id', fallback.userId)
+    .maybeSingle();
+  if (error || !data || typeof data.handle !== 'string') return fallback;
+  return {
+    userId: fallback.userId,
+    handle: data.handle,
+    displayName: typeof data.display_name === 'string' ? data.display_name : fallback.displayName,
+    avatarUrl: typeof data.avatar_url === 'string' ? data.avatar_url : fallback.avatarUrl,
+  };
+}
+
 /** 从回调查询串提取授权码；Supabase 报错时抛出人类可读信息。 */
 export function extractAuthCode(query: string): string {
   const params = new URLSearchParams(query);

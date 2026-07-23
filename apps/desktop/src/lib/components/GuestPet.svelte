@@ -46,7 +46,7 @@
   {/if}
   <div class="sprite" class:offline>
     <SpritePet {pet} state={spriteState} {size} loop />
-    {#if offline}<span class="zzz" aria-hidden="true">💤</span>{/if}
+    {#if offline}<span class="zzz" aria-hidden="true">zZ</span>{/if}
   </div>
 </div>
 

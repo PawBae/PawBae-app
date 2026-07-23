@@ -3,6 +3,7 @@
   import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
   import { untrack } from 'svelte';
   import { _, locale } from 'svelte-i18n';
+  import type { PublicPetProjection } from '../platform/types';
   import { agentStore } from '../stores/agents.svelte';
   import { petStore } from '../stores/pet.svelte';
   import { sessionStore } from '../stores/sessions.svelte';
@@ -43,6 +44,7 @@
   import AgentBubble from './AgentBubble.svelte';
   import ApprovalNote from './ApprovalNote.svelte';
   import CelebrationBubble from './CelebrationBubble.svelte';
+  import GuestPet from './GuestPet.svelte';
   import MiniPetMascot from './MiniPetMascot.svelte';
   import MusicBubble from './MusicBubble.svelte';
   import PetReplyBubble from './PetReplyBubble.svelte';
@@ -50,6 +52,9 @@
 
   interface MascotViewProps {
     pet: CodexPet | null;
+    guestPet?: CodexPet | null;
+    guestProjection?: PublicPetProjection | null;
+    platformAway?: boolean;
     voiceRecording?: boolean;
     voiceText?: string;
     voiceError?: string;
@@ -63,6 +68,9 @@
 
   let {
     pet,
+    guestPet = null,
+    guestProjection = null,
+    platformAway = false,
     voiceRecording = false,
     voiceText = '',
     voiceError = '',
@@ -871,7 +879,7 @@
   oncontextmenu={handleContextMenu}
   style="width: {mascotSize}px; height: {mascotSize}px;"
 >
-  {#if pet && tripPhase === 'away'}
+  {#if pet && (platformAway || tripPhase === 'away')}
     <!-- Off adventuring: the pet is gone; the marker keeps the spot (inside the same
          hitbox region, so the native right-click → panel still lands). -->
     <div class="away-marker" style="height: {mascotSize}px;">
@@ -881,6 +889,7 @@
   {:else if pet}
     <div
       class="aura-wrap {auraClass}"
+      class:hosting={Boolean(guestPet && guestProjection)}
       class:overload={overloaded}
       class:trip-departing={tripPhase === 'departing'}
       class:trip-returning={tripPhase === 'returning'}
@@ -895,6 +904,15 @@
         suppressHover={windowStore.moveMode}
         reactionSprite={overlaySprite}
       />
+      {#if guestPet && guestProjection}
+        <GuestPet
+          pet={guestPet}
+          projection={guestProjection}
+          size={Math.max(30, Math.round(mascotSize * 0.58))}
+          showNameTag={false}
+          class="desktop-guest"
+        />
+      {/if}
     </div>
   {/if}
 
@@ -1031,6 +1049,19 @@
      instead of fighting it in the cascade. */
   .aura-wrap.overload {
     animation: overloadShake 0.45s ease-in-out infinite;
+  }
+
+  .aura-wrap.hosting :global([data-physics-anchor]) {
+    transform: translateX(-18%) scale(0.72);
+    transform-origin: bottom center;
+  }
+
+  .aura-wrap :global(.desktop-guest) {
+    position: absolute;
+    right: -3px;
+    bottom: 0;
+    z-index: 2;
+    pointer-events: none;
   }
 
   @keyframes overloadShake {

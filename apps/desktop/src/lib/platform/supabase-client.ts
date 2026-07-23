@@ -23,9 +23,12 @@ import type { Session } from '@supabase/supabase-js';
 import { authConfigured, supabaseClient, toPlatformSession } from './auth';
 import type {
   FriendEntry,
+  InviteEligibility,
   PlatformClient,
+  PlatformConnectionState,
   PlatformSession,
   PublicPetProjection,
+  PublicProfile,
   SharedMemoryEntry,
   Unsubscribe,
   VisitLease,
@@ -56,7 +59,7 @@ type ChannelLike = {
     filter: { event: string },
     cb: (message: { payload: unknown }) => void,
   ): ChannelLike;
-  subscribe(): unknown;
+  subscribe(cb?: (status: string) => void): unknown;
 };
 
 export type SupabaseLike = {
@@ -158,7 +161,10 @@ export function parseProjectionFrame(payload: unknown): PublicPetProjection | nu
 export class SupabasePlatformClient implements PlatformClient {
   private currentSession: PlatformSession | null = null;
   private sessionListeners = new Set<(s: PlatformSession | null) => void>();
+  private connectionListeners = new Set<(state: PlatformConnectionState) => void>();
   private leaseListeners = new Set<(lease: VisitLease) => void>();
+  private currentConnectionState: PlatformConnectionState = 'degraded';
+  private sessionGeneration = 0;
   /** 已发射租约的最后形态：轮询去抖（内容没变不重发）+ visit_ended 合成的底稿。 */
   private lastLeases = new Map<string, VisitLease>();
   private pollTimer: ReturnType<typeof setInterval> | null = null;
@@ -175,9 +181,17 @@ export class SupabasePlatformClient implements PlatformClient {
     const client = this.clientFn();
     if (!client) return;
     const { data } = await client.auth.getSession();
-    this.applySession(toPlatformSession(data.session as Session | null));
+    const initial = toPlatformSession(data.session as Session | null);
+    this.applySession(await this.canonicalSession(client, initial));
     const { data: sub } = client.auth.onAuthStateChange((_event, session) => {
-      this.applySession(toPlatformSession(session as Session | null));
+      const generation = ++this.sessionGeneration;
+      const fallback = toPlatformSession(session as Session | null);
+      this.applySession(fallback);
+      if (fallback) {
+        void this.canonicalSession(client, fallback).then((canonical) => {
+          if (generation === this.sessionGeneration) this.applySession(canonical);
+        });
+      }
     });
     this.authUnsub = () => sub.subscription.unsubscribe();
   }
@@ -199,12 +213,49 @@ export class SupabasePlatformClient implements PlatformClient {
     return () => this.sessionListeners.delete(cb);
   }
 
+  connectionState(): PlatformConnectionState {
+    return this.currentConnectionState;
+  }
+
+  onConnectionStateChange(cb: (state: PlatformConnectionState) => void): Unsubscribe {
+    this.connectionListeners.add(cb);
+    return () => this.connectionListeners.delete(cb);
+  }
+
+  private setConnectionState(next: PlatformConnectionState): void {
+    if (next === this.currentConnectionState) return;
+    this.currentConnectionState = next;
+    for (const cb of this.connectionListeners) cb(next);
+  }
+
+  private async canonicalSession(
+    client: SupabaseLike,
+    fallback: PlatformSession | null,
+  ): Promise<PlatformSession | null> {
+    if (!fallback) return null;
+    const { data, error } = await client
+      .from('profiles')
+      .select('handle,display_name,avatar_url')
+      .eq('id', fallback.userId)
+      .maybeSingle();
+    if (error || typeof data !== 'object' || data === null) return fallback;
+    const row = data as Record<string, unknown>;
+    if (typeof row.handle !== 'string' || row.handle === '') return fallback;
+    return {
+      userId: fallback.userId,
+      handle: row.handle,
+      displayName: asNullableString(row.display_name) ?? fallback.displayName,
+      avatarUrl: asNullableString(row.avatar_url) ?? fallback.avatarUrl,
+    };
+  }
+
   private applySession(next: PlatformSession | null): void {
     if (next?.userId === this.currentSession?.userId) {
       this.currentSession = next; // 同人 token 刷新：更新引用但不广播不重启轮询
       return;
     }
     this.currentSession = next;
+    this.setConnectionState(next ? 'connected' : 'degraded');
     if (next === null) this.lastLeases.clear(); // 换号不吃前任的去抖记忆
     for (const cb of this.sessionListeners) cb(next);
     this.syncPolling();
@@ -264,12 +315,21 @@ export class SupabasePlatformClient implements PlatformClient {
       .on('broadcast', { event: 'visit_ended' }, ({ payload }) => {
         this.ingestVisitEnded(lease, payload);
       });
-    channel.subscribe();
+    this.setConnectionState('reconnecting');
+    channel.subscribe((status) => {
+      if (status === 'SUBSCRIBED') this.setConnectionState('connected');
+      else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+        this.setConnectionState('degraded');
+      } else {
+        this.setConnectionState('reconnecting');
+      }
+    });
     // 订阅立即回放当前投影（与 mock 语义一致）：下一次状态变化前访客不该是空白。
     // RLS 只在活跃租约窗口内放行读取，读不到就静默等广播。
     void this.fetchProjectionOnce(client, lease.visitorUserId, cb);
     return () => {
       client.removeChannel(channel);
+      this.setConnectionState(this.currentSession ? 'connected' : 'degraded');
     };
   }
 
@@ -282,6 +342,25 @@ export class SupabasePlatformClient implements PlatformClient {
       p_idempotency_key: key,
     });
     if (error) throw new Error(errorMessage(error));
+  }
+
+  async inviteEligibility(): Promise<InviteEligibility> {
+    const me = this.currentSession?.userId;
+    const client = this.clientFn();
+    if (!me || !client) return { redeemed: false, redeemedAt: null };
+    const { data, error } = await client
+      .from('invite_redemptions')
+      .select('created_at')
+      .eq('user_id', me)
+      .limit(1);
+    if (error) throw new Error(errorMessage(error as { message?: string }));
+    const first = Array.isArray(data)
+      ? (data[0] as Record<string, unknown> | undefined)
+      : undefined;
+    return {
+      redeemed: Boolean(first),
+      redeemedAt: first ? asNullableString(first.created_at) : null,
+    };
   }
 
   async friends(): Promise<FriendEntry[]> {
@@ -340,6 +419,49 @@ export class SupabasePlatformClient implements PlatformClient {
     return entries.sort((a, b) => a.handle.localeCompare(b.handle));
   }
 
+  async findProfileByHandle(handle: string): Promise<PublicProfile | null> {
+    const normalized = handle.trim().replace(/^@/, '').toLowerCase();
+    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(normalized) || normalized.length > 39) {
+      throw new Error('invalid_github_handle');
+    }
+    const client = this.mustClient();
+    const { data, error } = await client
+      .from('profiles')
+      .select('id,handle,display_name,avatar_url')
+      .eq('handle', normalized)
+      .maybeSingle();
+    if (error) throw new Error(errorMessage(error as { message?: string }));
+    if (typeof data !== 'object' || data === null) return null;
+    const row = data as Record<string, unknown>;
+    if (typeof row.id !== 'string' || typeof row.handle !== 'string') return null;
+    return {
+      userId: row.id,
+      handle: row.handle,
+      displayName: asNullableString(row.display_name),
+      avatarUrl: asNullableString(row.avatar_url),
+    };
+  }
+
+  async sendFriendRequest(userId: string): Promise<void> {
+    await this.socialRpc('send_friend_request', { p_target_user_id: userId });
+  }
+
+  async acceptFriendRequest(userId: string): Promise<void> {
+    await this.socialRpc('accept_friend_request', { p_requester_user_id: userId });
+  }
+
+  async unfriend(userId: string): Promise<void> {
+    await this.socialRpc('unfriend', { p_other_user_id: userId });
+  }
+
+  async muteUser(userId: string, muted: boolean): Promise<void> {
+    await this.socialRpc('mute_user', { p_target_user_id: userId, p_muted: muted });
+  }
+
+  async blockUser(userId: string): Promise<void> {
+    await this.socialRpc('block_user', { p_target_user_id: userId });
+  }
+
   // ---------- 共同记忆（P4-C 数据面） ----------
 
   async settleMemory(visitId: string, key: string): Promise<SharedMemoryEntry> {
@@ -388,6 +510,11 @@ export class SupabasePlatformClient implements PlatformClient {
     const client = this.clientFn();
     if (!client) throw new Error('PLATFORM_NOT_CONFIGURED');
     return client;
+  }
+
+  private async socialRpc(name: string, params: Record<string, unknown>): Promise<void> {
+    const { error } = await this.mustClient().rpc(name, params);
+    if (error) throw new Error(errorMessage(error));
   }
 
   private async visitRpc(name: string, params: Record<string, unknown>): Promise<VisitLease> {
