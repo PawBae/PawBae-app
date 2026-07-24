@@ -65,6 +65,81 @@ describe('Onboarding', () => {
     expect(document.querySelector('[data-action="skip-github"]')).not.toBeNull();
   });
 
+  it('checks invite eligibility after GitHub sign-in and opens the invite step', async () => {
+    const onInviteEligibility = vi.fn().mockResolvedValue(false);
+    mounted = mount(Onboarding, {
+      target: document.body,
+      props: {
+        open: true,
+        isWindows: false,
+        onComplete: vi.fn(),
+        onGithubSignIn: vi.fn().mockResolvedValue({ login: 'solu-friend' }),
+        onInviteEligibility,
+      },
+    });
+
+    await tick();
+    document.querySelector<HTMLButtonElement>('[data-action="continue"]')?.click();
+    await tick();
+    document.querySelector<HTMLButtonElement>('[data-action="github"]')?.click();
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-step="invite"]')).not.toBeNull();
+    });
+    expect(onInviteEligibility).toHaveBeenCalledOnce();
+  });
+
+  it('falls back to the invite step when eligibility lookup fails after sign-in', async () => {
+    mounted = mount(Onboarding, {
+      target: document.body,
+      props: {
+        open: true,
+        isWindows: false,
+        onComplete: vi.fn(),
+        onGithubSignIn: vi.fn().mockResolvedValue({ login: 'solu-friend' }),
+        onInviteEligibility: vi.fn().mockRejectedValue(new Error('network unavailable')),
+      },
+    });
+
+    await tick();
+    document.querySelector<HTMLButtonElement>('[data-action="continue"]')?.click();
+    await tick();
+    document.querySelector<HTMLButtonElement>('[data-action="github"]')?.click();
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-step="invite"]')).not.toBeNull();
+    });
+  });
+
+  it('signs out when a signed-in user chooses Skip and returns from Agents to GitHub', async () => {
+    const onGithubSignOut = vi.fn().mockResolvedValue(undefined);
+    mounted = mount(Onboarding, {
+      target: document.body,
+      props: {
+        open: true,
+        isWindows: false,
+        onComplete: vi.fn(),
+        onGithubSignIn: vi.fn().mockResolvedValue({ login: 'solu-friend' }),
+        onGithubSignOut,
+        onInviteEligibility: () => new Promise<boolean>(() => {}),
+      },
+    });
+
+    await tick();
+    document.querySelector<HTMLButtonElement>('[data-action="continue"]')?.click();
+    await tick();
+    document.querySelector<HTMLButtonElement>('[data-action="github"]')?.click();
+    await vi.waitFor(() => expect(document.querySelector('.github-profile')).not.toBeNull());
+    document.querySelector<HTMLButtonElement>('[data-action="skip-github"]')?.click();
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-step="agents"]')).not.toBeNull();
+    });
+    expect(onGithubSignOut).toHaveBeenCalledOnce();
+
+    document.querySelector<HTMLButtonElement>('.footer-start .secondary')?.click();
+    await tick();
+    expect(document.querySelector('[data-step="github"]')).not.toBeNull();
+    expect(document.querySelector('.github-profile')).toBeNull();
+  });
+
   it('restores and persists an explicit appearance choice', async () => {
     localStorage.setItem('pawbae-onboarding-theme', 'dark');
     mounted = mount(Onboarding, {
