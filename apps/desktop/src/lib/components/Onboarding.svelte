@@ -160,26 +160,29 @@
       const profile = await onGithubSignIn();
       if (flowGeneration !== githubFlowGeneration) return;
       githubProfile = profile;
-      githubLoading = false;
-      inviteLoading = true;
-      try {
-        const eligible = (await onInviteEligibility?.()) ?? false;
-        if (flowGeneration !== githubFlowGeneration) return;
-        agentsPreviousStep = eligible ? 'github' : 'invite';
-        step = eligible ? 'agents' : 'invite';
-      } catch {
-        if (flowGeneration !== githubFlowGeneration) return;
-        // 登录已经成功时，资格查询失败不能把用户困在 GitHub 页。
-        // 邀请码页是安全降级：不会错误授予社交资格，用户也可以重试兑换。
-        agentsPreviousStep = 'invite';
-        step = 'invite';
-      } finally {
-        if (flowGeneration === githubFlowGeneration) inviteLoading = false;
-      }
     } catch (error) {
       if (flowGeneration === githubFlowGeneration) githubError = String(error);
     } finally {
       if (flowGeneration === githubFlowGeneration) githubLoading = false;
+    }
+  }
+
+  async function continueAfterGithubSignIn() {
+    if (!githubProfile || inviteLoading) return;
+    const flowGeneration = ++githubFlowGeneration;
+    inviteLoading = true;
+    githubError = '';
+    try {
+      const eligible = (await onInviteEligibility?.()) ?? false;
+      if (flowGeneration !== githubFlowGeneration) return;
+      agentsPreviousStep = eligible ? 'github' : 'invite';
+      step = eligible ? 'agents' : 'invite';
+    } catch {
+      if (flowGeneration === githubFlowGeneration) {
+        githubError = $_('onboarding.github.eligibilityError');
+      }
+    } finally {
+      if (flowGeneration === githubFlowGeneration) inviteLoading = false;
     }
   }
 
@@ -190,7 +193,7 @@
     inviteLoading = false;
     githubError = '';
     try {
-      if (githubProfile) await onGithubSignOut?.();
+      await onGithubSignOut?.();
       githubProfile = null;
       agentsPreviousStep = 'github';
       step = 'agents';
@@ -389,8 +392,8 @@
                 {githubLoading ? $_('common.loading') : $_('onboarding.github.action')}
               </button>
               {#if !onGithubSignIn}<p class="availability">{$_('onboarding.github.unavailable')}</p>{/if}
-              {#if githubError}<p class="error-message">{githubError}</p>{/if}
             {/if}
+            {#if githubError}<p class="error-message">{githubError}</p>{/if}
             <button
               class="text-action"
               type="button"
@@ -493,6 +496,17 @@
           {#if step === 'welcome'}
             <button class="primary" type="button" data-action="continue" onclick={goNext}>
               {$_('onboarding.common.continue')} <span aria-hidden="true">→</span>
+            </button>
+          {:else if step === 'github' && githubProfile}
+            <button
+              class="primary"
+              type="button"
+              data-action="github-continue"
+              disabled={inviteLoading || githubLoading}
+              onclick={() => void continueAfterGithubSignIn()}
+            >
+              {inviteLoading ? $_('onboarding.invite.checking') : $_('onboarding.common.continue')}
+              <span aria-hidden="true">→</span>
             </button>
           {:else if step === 'agents'}
             <button

@@ -351,6 +351,7 @@
       "body": "用 GitHub 身份添加好友，一起串门和留下共同记忆。",
       "action": "使用 GitHub 登录",
       "unavailable": "GitHub 登录将在好友内测开放。",
+      "eligibilityError": "暂时无法确认邀请码状态，请重试。",
       "skip": "暂不登录"
     },
     "invite": {

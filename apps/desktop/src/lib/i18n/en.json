@@ -351,6 +351,7 @@
       "body": "Use your GitHub identity to add friends, visit, and make shared memories.",
       "action": "Continue with GitHub",
       "unavailable": "GitHub sign-in opens with the Friends beta.",
+      "eligibilityError": "We couldn't check your invite status. Please try again.",
       "skip": "Skip for now"
     },
     "invite": {
