@@ -30,6 +30,7 @@
     isWindows: boolean;
     onComplete: (result: OnboardingResult) => Promise<void> | void;
     onGithubSignIn?: () => Promise<GithubProfile>;
+    onGithubSignOut?: () => Promise<void>;
     onInviteEligibility?: () => Promise<boolean>;
     onRedeemInvite?: (code: string) => Promise<void>;
   }
@@ -39,6 +40,7 @@
     isWindows,
     onComplete,
     onGithubSignIn,
+    onGithubSignOut,
     onInviteEligibility,
     onRedeemInvite,
   }: OnboardingProps = $props();
@@ -60,6 +62,7 @@
   }
 
   let step = $state<OnboardingStep>('welcome');
+  let agentsPreviousStep = $state<'github' | 'invite'>('github');
   let theme = $state<OnboardingTheme>(loadTheme());
   let shareTelemetry = $state(false);
   let selectedAgents = $state<AgentId[]>([]);
@@ -75,6 +78,7 @@
   let headingEl = $state<HTMLHeadingElement | null>(null);
   let wasOpen = false;
   let agentInstallGeneration = 0;
+  let githubFlowGeneration = 0;
   let agentStatuses = $state<Record<AgentId, AgentInstallStatus>>({
     claude: 'idle',
     codex: 'idle',
@@ -100,7 +104,9 @@
   }
 
   function resetDraft() {
+    githubFlowGeneration += 1;
     step = 'welcome';
+    agentsPreviousStep = 'github';
     shareTelemetry = false;
     clearAgentConnections();
     starterPetId = null;
@@ -133,7 +139,7 @@
 
   function goBack() {
     completionError = '';
-    step = previousOnboardingStep(step);
+    step = step === 'agents' ? agentsPreviousStep : previousOnboardingStep(step);
   }
 
   function setTheme(nextTheme: OnboardingTheme) {
@@ -147,18 +153,54 @@
 
   async function handleGithubSignIn() {
     if (!onGithubSignIn || githubLoading) return;
+    const flowGeneration = ++githubFlowGeneration;
     githubLoading = true;
     githubError = '';
     try {
-      githubProfile = await onGithubSignIn();
-      inviteLoading = true;
+      const profile = await onGithubSignIn();
+      if (flowGeneration !== githubFlowGeneration) return;
+      githubProfile = profile;
+    } catch (error) {
+      if (flowGeneration === githubFlowGeneration) githubError = String(error);
+    } finally {
+      if (flowGeneration === githubFlowGeneration) githubLoading = false;
+    }
+  }
+
+  async function continueAfterGithubSignIn() {
+    if (!githubProfile || inviteLoading) return;
+    const flowGeneration = ++githubFlowGeneration;
+    inviteLoading = true;
+    githubError = '';
+    try {
       const eligible = (await onInviteEligibility?.()) ?? false;
+      if (flowGeneration !== githubFlowGeneration) return;
+      agentsPreviousStep = eligible ? 'github' : 'invite';
       step = eligible ? 'agents' : 'invite';
+    } catch {
+      if (flowGeneration === githubFlowGeneration) {
+        githubError = $_('onboarding.github.eligibilityError');
+      }
+    } finally {
+      if (flowGeneration === githubFlowGeneration) inviteLoading = false;
+    }
+  }
+
+  async function skipGithubSignIn() {
+    if (githubLoading && !githubProfile) return;
+    githubFlowGeneration += 1;
+    githubLoading = true;
+    inviteLoading = false;
+    githubError = '';
+    try {
+      await onGithubSignOut?.();
+      githubProfile = null;
+      agentsPreviousStep = 'github';
+      step = 'agents';
     } catch (error) {
       githubError = String(error);
     } finally {
       githubLoading = false;
-      inviteLoading = false;
     }
   }
 
@@ -168,6 +210,7 @@
     inviteError = '';
     try {
       await onRedeemInvite(inviteCode.trim());
+      agentsPreviousStep = 'invite';
       step = 'agents';
     } catch {
       inviteError = $_('onboarding.invite.invalid');
@@ -349,13 +392,14 @@
                 {githubLoading ? $_('common.loading') : $_('onboarding.github.action')}
               </button>
               {#if !onGithubSignIn}<p class="availability">{$_('onboarding.github.unavailable')}</p>{/if}
-              {#if githubError}<p class="error-message">{githubError}</p>{/if}
             {/if}
+            {#if githubError}<p class="error-message">{githubError}</p>{/if}
             <button
               class="text-action"
               type="button"
               data-action="skip-github"
-              onclick={() => (step = 'agents')}
+              disabled={githubLoading}
+              onclick={() => void skipGithubSignIn()}
             >
               {$_('onboarding.github.skip')}
             </button>
@@ -387,7 +431,7 @@
               {inviteLoading ? $_('common.loading') : $_('onboarding.invite.action')}
             </button>
             {#if inviteError}<p class="error-message">{inviteError}</p>{/if}
-            <button class="text-action" type="button" onclick={() => (step = 'agents')}>
+            <button class="text-action" type="button" onclick={() => { agentsPreviousStep = 'invite'; step = 'agents'; }}>
               {$_('onboarding.invite.localOnly')}
             </button>
           </div>
@@ -452,6 +496,17 @@
           {#if step === 'welcome'}
             <button class="primary" type="button" data-action="continue" onclick={goNext}>
               {$_('onboarding.common.continue')} <span aria-hidden="true">→</span>
+            </button>
+          {:else if step === 'github' && githubProfile}
+            <button
+              class="primary"
+              type="button"
+              data-action="github-continue"
+              disabled={inviteLoading || githubLoading}
+              onclick={() => void continueAfterGithubSignIn()}
+            >
+              {inviteLoading ? $_('onboarding.invite.checking') : $_('onboarding.common.continue')}
+              <span aria-hidden="true">→</span>
             </button>
           {:else if step === 'agents'}
             <button

@@ -347,10 +347,11 @@
       "telemetry": "Share anonymous feature counts to help improve PawBae. Never includes prompts, file paths, or personal content."
     },
     "github": {
-      "title": "Connect your identity—not your code",
-      "body": "GitHub will power friends and shared memories without reading your repositories.",
+      "title": "Connect GitHub",
+      "body": "Use your GitHub identity to add friends, visit, and make shared memories.",
       "action": "Continue with GitHub",
       "unavailable": "GitHub sign-in opens with the Friends beta.",
+      "eligibilityError": "We couldn't check your invite status. Please try again.",
       "skip": "Skip for now"
     },
     "invite": {

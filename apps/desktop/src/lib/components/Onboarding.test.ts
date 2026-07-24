@@ -65,6 +65,178 @@ describe('Onboarding', () => {
     expect(document.querySelector('[data-action="skip-github"]')).not.toBeNull();
   });
 
+  it('waits for Continue after GitHub sign-in before checking invite eligibility', async () => {
+    const onInviteEligibility = vi.fn().mockResolvedValue(false);
+    mounted = mount(Onboarding, {
+      target: document.body,
+      props: {
+        open: true,
+        isWindows: false,
+        onComplete: vi.fn(),
+        onGithubSignIn: vi.fn().mockResolvedValue({ login: 'solu-friend' }),
+        onInviteEligibility,
+      },
+    });
+
+    await tick();
+    document.querySelector<HTMLButtonElement>('[data-action="continue"]')?.click();
+    await tick();
+    document.querySelector<HTMLButtonElement>('[data-action="github"]')?.click();
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-action="github-continue"]')).not.toBeNull();
+    });
+    expect(document.querySelector('[data-step="github"]')).not.toBeNull();
+    expect(onInviteEligibility).not.toHaveBeenCalled();
+
+    document.querySelector<HTMLButtonElement>('[data-action="github-continue"]')?.click();
+    await vi.waitFor(() => expect(document.querySelector('[data-step="invite"]')).not.toBeNull());
+    expect(onInviteEligibility).toHaveBeenCalledOnce();
+  });
+
+  it('keeps a signed-in user on GitHub and allows retry when eligibility lookup fails', async () => {
+    const onInviteEligibility = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('network unavailable'))
+      .mockResolvedValueOnce(true);
+    mounted = mount(Onboarding, {
+      target: document.body,
+      props: {
+        open: true,
+        isWindows: false,
+        onComplete: vi.fn(),
+        onGithubSignIn: vi.fn().mockResolvedValue({ login: 'solu-friend' }),
+        onInviteEligibility,
+      },
+    });
+
+    await tick();
+    document.querySelector<HTMLButtonElement>('[data-action="continue"]')?.click();
+    await tick();
+    document.querySelector<HTMLButtonElement>('[data-action="github"]')?.click();
+    await vi.waitFor(() =>
+      expect(document.querySelector('[data-action="github-continue"]')).not.toBeNull(),
+    );
+    document.querySelector<HTMLButtonElement>('[data-action="github-continue"]')?.click();
+    await vi.waitFor(() => {
+      expect(document.querySelector('.error-message')).not.toBeNull();
+    });
+    expect(document.querySelector('[data-step="github"]')).not.toBeNull();
+
+    document.querySelector<HTMLButtonElement>('[data-action="github-continue"]')?.click();
+    await vi.waitFor(() => expect(document.querySelector('[data-step="agents"]')).not.toBeNull());
+    expect(onInviteEligibility).toHaveBeenCalledTimes(2);
+  });
+
+  it('lets an eligible user return to GitHub and continue again without signing in', async () => {
+    const onGithubSignIn = vi.fn().mockResolvedValue({ login: 'eligible-user' });
+    mounted = mount(Onboarding, {
+      target: document.body,
+      props: {
+        open: true,
+        isWindows: false,
+        onComplete: vi.fn(),
+        onGithubSignIn,
+        onInviteEligibility: vi.fn().mockResolvedValue(true),
+      },
+    });
+
+    await tick();
+    document.querySelector<HTMLButtonElement>('[data-action="continue"]')?.click();
+    await tick();
+    document.querySelector<HTMLButtonElement>('[data-action="github"]')?.click();
+    await vi.waitFor(() =>
+      expect(document.querySelector('[data-action="github-continue"]')).not.toBeNull(),
+    );
+    document.querySelector<HTMLButtonElement>('[data-action="github-continue"]')?.click();
+    await vi.waitFor(() => expect(document.querySelector('[data-step="agents"]')).not.toBeNull());
+
+    document.querySelector<HTMLButtonElement>('.footer-start .secondary')?.click();
+    await tick();
+    expect(document.querySelector('[data-step="github"]')).not.toBeNull();
+    expect(document.querySelector('[data-action="github-continue"]')).not.toBeNull();
+    document.querySelector<HTMLButtonElement>('[data-action="github-continue"]')?.click();
+    await vi.waitFor(() => expect(document.querySelector('[data-step="agents"]')).not.toBeNull());
+    expect(onGithubSignIn).toHaveBeenCalledOnce();
+  });
+
+  it('signs out during an eligibility check and ignores its late result', async () => {
+    const onGithubSignOut = vi.fn().mockResolvedValue(undefined);
+    let resolveEligibility!: (eligible: boolean) => void;
+    mounted = mount(Onboarding, {
+      target: document.body,
+      props: {
+        open: true,
+        isWindows: false,
+        onComplete: vi.fn(),
+        onGithubSignIn: vi.fn().mockResolvedValue({ login: 'solu-friend' }),
+        onGithubSignOut,
+        onInviteEligibility: () =>
+          new Promise<boolean>((resolve) => {
+            resolveEligibility = resolve;
+          }),
+      },
+    });
+
+    await tick();
+    document.querySelector<HTMLButtonElement>('[data-action="continue"]')?.click();
+    await tick();
+    document.querySelector<HTMLButtonElement>('[data-action="github"]')?.click();
+    await vi.waitFor(() => expect(document.querySelector('.github-profile')).not.toBeNull());
+    document.querySelector<HTMLButtonElement>('[data-action="github-continue"]')?.click();
+    await vi.waitFor(() => expect(resolveEligibility).toBeTypeOf('function'));
+    document.querySelector<HTMLButtonElement>('[data-action="skip-github"]')?.click();
+    await vi.waitFor(() => expect(document.querySelector('[data-step="agents"]')).not.toBeNull());
+    expect(onGithubSignOut).toHaveBeenCalledOnce();
+    resolveEligibility(true);
+    await tick();
+    await tick();
+    expect(document.querySelector('[data-step="agents"]')).not.toBeNull();
+
+    document.querySelector<HTMLButtonElement>('.footer-start .secondary')?.click();
+    await tick();
+    expect(document.querySelector('[data-step="github"]')).not.toBeNull();
+    expect(document.querySelector('.github-profile')).toBeNull();
+  });
+
+  it('signs out when Skip is chosen without an in-memory GitHub profile', async () => {
+    const onGithubSignOut = vi.fn().mockResolvedValue(undefined);
+    mounted = mount(Onboarding, {
+      target: document.body,
+      props: { open: true, isWindows: false, onComplete: vi.fn(), onGithubSignOut },
+    });
+
+    await tick();
+    document.querySelector<HTMLButtonElement>('[data-action="continue"]')?.click();
+    await tick();
+    document.querySelector<HTMLButtonElement>('[data-action="skip-github"]')?.click();
+    await vi.waitFor(() => expect(document.querySelector('[data-step="agents"]')).not.toBeNull());
+    expect(onGithubSignOut).toHaveBeenCalledOnce();
+  });
+
+  it('shows a GitHub sign-out error even while the profile remains visible', async () => {
+    mounted = mount(Onboarding, {
+      target: document.body,
+      props: {
+        open: true,
+        isWindows: false,
+        onComplete: vi.fn(),
+        onGithubSignIn: vi.fn().mockResolvedValue({ login: 'solu-friend' }),
+        onGithubSignOut: vi.fn().mockRejectedValue(new Error('sign-out failed')),
+      },
+    });
+
+    await tick();
+    document.querySelector<HTMLButtonElement>('[data-action="continue"]')?.click();
+    await tick();
+    document.querySelector<HTMLButtonElement>('[data-action="github"]')?.click();
+    await vi.waitFor(() => expect(document.querySelector('.github-profile')).not.toBeNull());
+    document.querySelector<HTMLButtonElement>('[data-action="skip-github"]')?.click();
+    await vi.waitFor(() =>
+      expect(document.querySelector('.error-message')?.textContent).toContain('sign-out failed'),
+    );
+    expect(document.querySelector('[data-step="github"]')).not.toBeNull();
+  });
+
   it('restores and persists an explicit appearance choice', async () => {
     localStorage.setItem('pawbae-onboarding-theme', 'dark');
     mounted = mount(Onboarding, {

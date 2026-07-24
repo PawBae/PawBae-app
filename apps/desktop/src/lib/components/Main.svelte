@@ -740,6 +740,7 @@
     {isWindows}
     onComplete={handleOnboardingComplete}
     onGithubSignIn={accountStore.configured ? handleOnboardingGithubSignIn : undefined}
+    onGithubSignOut={() => accountStore.logout()}
     onInviteEligibility={checkOnboardingInviteEligibility}
     onRedeemInvite={redeemInvite}
   />
